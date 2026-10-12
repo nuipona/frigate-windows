@@ -298,7 +298,9 @@ jobs:
         env:
           FRIGATE_BASE_DIR: ${{ runner.temp }}\frigate-unit
         run: |
-          python testing-scripts/run_windows_unit_suite.py *> suite.log
+          # -u so the progress and the failure list are in the log even if
+          # the run ends in a native crash rather than a test failure
+          python -u testing-scripts/run_windows_unit_suite.py *> suite.log
           $suiteCode = $LASTEXITCODE
           Select-String -Path suite.log -Pattern '^(ran [0-9]+|\d+ tests fail|Every test|Skipping )' |
             ForEach-Object { Write-Output ("::error title=suite-summary::{0}" -f $_.Line) }
