@@ -141,11 +141,23 @@ jobs:
       - name: Check the Windows requirements can install and cover every import
         run: python testing-scripts/check_windows_requirements.py
       - name: Run process lifecycle tests
+        shell: pwsh
         run: |
           python -m unittest `
             frigate.test.test_ffmpeg_stop `
             frigate.test.test_job_object `
-            frigate.test.test_restart_frigate
+            frigate.test.test_restart_frigate *> lifecycle.log
+          $lifecycleCode = $LASTEXITCODE
+          if ($lifecycleCode -ne 0) {
+            Select-String -Path lifecycle.log -Pattern '^(ERROR|FAIL): |Error: |Ran [0-9]+ tests' |
+              Select-Object -First 8 | ForEach-Object {
+                Write-Output ("::error title=lifecycle::{0}" -f ($_.Line -replace "`r", '' -replace "`n", ' '))
+              }
+            Get-Content lifecycle.log -Tail 8 | ForEach-Object {
+              Write-Output ("::error title=lifecycle-tail::{0}" -f ($_ -replace "`r", '' -replace "`n", ' '))
+            }
+          }
+          exit $lifecycleCode
       - name: Validate first-run native configuration
         run: |
           $env:FRIGATE_BASE_DIR = Join-Path $env:RUNNER_TEMP "frigate-native-smoke"
@@ -208,12 +220,16 @@ jobs:
           python -m unittest frigate.test.test_native_e2e *> e2e.log
           $e2eCode = $LASTEXITCODE
           if ($e2eCode -ne 0) {
-            Select-String -Path e2e.log -Pattern '^(ERROR|FAIL): |Error: |Ran [0-9]+ tests' |
-              Select-Object -First 6 | ForEach-Object {
+            Select-String -Path e2e.log -Pattern '^FAIL: |AssertionError' |
+              Select-Object -First 2 | ForEach-Object {
                 Write-Output ("::error title=e2e::{0}" -f ($_.Line -replace "`r", '' -replace "`n", ' '))
               }
-            Get-Content e2e.log -Tail 20 | ForEach-Object {
-              Write-Output ("::error title=e2e-tail::{0}" -f ($_ -replace "`r", '' -replace "`n", ' '))
+            $runLog = Join-Path $env:FRIGATE_E2E_DIR 'frigate-run.log'
+            if (Test-Path $runLog) {
+              Select-String -Path $runLog -Pattern 'ffmpeg|lavfi|libx264|Invalid|No such|not found' |
+                Select-Object -Last 6 | ForEach-Object {
+                  Write-Output ("::error title=run-log::{0}" -f ($_.Line -replace "`r", '' -replace "`n", ' '))
+                }
             }
           }
           exit $e2eCode
