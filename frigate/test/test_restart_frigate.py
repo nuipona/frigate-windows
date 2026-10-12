@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import psutil
 
+from frigate.util.platform import IS_WINDOWS
 from frigate.util.services import restart_frigate
 
 
@@ -17,6 +18,10 @@ class TestRestartFrigate(unittest.TestCase):
 
     @patch("frigate.util.services.os.kill")
     @patch("frigate.util.services.psutil.Process")
+    @unittest.skipIf(
+        IS_WINDOWS,
+        "Windows exits through raise_signal instead of signalling a supervisor",
+    )
     def test_terminates_s6_when_permitted(self, mock_process, mock_kill):
         proc = self._s6_process()
         mock_process.return_value = proc
@@ -29,6 +34,10 @@ class TestRestartFrigate(unittest.TestCase):
     @patch("frigate.util.services.os.getpid", return_value=99)
     @patch("frigate.util.services.os.kill")
     @patch("frigate.util.services.psutil.Process")
+    @unittest.skipIf(
+        IS_WINDOWS,
+        "Windows exits through raise_signal instead of signalling a supervisor",
+    )
     def test_exits_self_when_s6_signal_is_denied(
         self, mock_process, mock_kill, _mock_getpid
     ):
@@ -44,6 +53,10 @@ class TestRestartFrigate(unittest.TestCase):
     @patch("frigate.util.services.os.getpid", return_value=99)
     @patch("frigate.util.services.os.kill")
     @patch("frigate.util.services.psutil.Process")
+    @unittest.skipIf(
+        IS_WINDOWS,
+        "Windows exits through raise_signal instead of signalling a supervisor",
+    )
     def test_exits_self_without_s6(self, mock_process, mock_kill, _mock_getpid):
         proc = MagicMock()
         proc.name.return_value = "init"

@@ -149,13 +149,14 @@ jobs:
             frigate.test.test_restart_frigate *> lifecycle.log
           $lifecycleCode = $LASTEXITCODE
           if ($lifecycleCode -ne 0) {
-            Select-String -Path lifecycle.log -Pattern '^(ERROR|FAIL): |Error: |Ran [0-9]+ tests' |
-              Select-Object -First 8 | ForEach-Object {
+            Select-String -Path lifecycle.log -Pattern '^(ERROR|FAIL): ' |
+              Select-Object -First 4 | ForEach-Object {
                 Write-Output ("::error title=lifecycle::{0}" -f ($_.Line -replace "`r", '' -replace "`n", ' '))
               }
-            Get-Content lifecycle.log -Tail 8 | ForEach-Object {
-              Write-Output ("::error title=lifecycle-tail::{0}" -f ($_ -replace "`r", '' -replace "`n", ' '))
-            }
+            Select-String -Path lifecycle.log -Pattern '^Ran [0-9]+ tests|^FAILED' |
+              ForEach-Object {
+                Write-Output ("::error title=lifecycle-summary::{0}" -f $_.Line)
+              }
           }
           exit $lifecycleCode
       - name: Validate first-run native configuration
@@ -226,10 +227,13 @@ jobs:
               }
             $runLog = Join-Path $env:FRIGATE_E2E_DIR 'frigate-run.log'
             if (Test-Path $runLog) {
-              Select-String -Path $runLog -Pattern 'ffmpeg|lavfi|libx264|Invalid|No such|not found' |
-                Select-Object -Last 6 | ForEach-Object {
-                  Write-Output ("::error title=run-log::{0}" -f ($_.Line -replace "`r", '' -replace "`n", ' '))
+              Select-String -Path $runLog -Pattern 'libx264|lavfi|Invalid|No such|Conversion failed|Error initializing|Unknown encoder|Stream map|Cannot' |
+                Select-Object -Last 4 | ForEach-Object {
+                  Write-Output ("::error title=ffmpeg-says::{0}" -f ($_.Line -replace "`r", '' -replace "`n", ' '))
                 }
+              Get-Content $runLog -Tail 4 | ForEach-Object {
+                Write-Output ("::error title=run-log-tail::{0}" -f ($_ -replace "`r", '' -replace "`n", ' '))
+              }
             }
           }
           exit $e2eCode
