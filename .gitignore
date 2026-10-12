@@ -3,6 +3,9 @@ __pycache__
 .mypy_cache
 *.swp
 debug
+.venv/
+venv/
+*.egg-info/
 .claude/*
 .mcp.json
 .vscode/*

@@ -113,7 +113,7 @@ def _load_secrets_file() -> dict[str, str]:
         return {}
 
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             raw: Any = YAML(typ="safe").load(f)
     except OSError as err:
         raise ValueError(f"Unable to read {path}: {err.strerror}") from err

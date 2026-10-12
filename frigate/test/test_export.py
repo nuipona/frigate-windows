@@ -401,6 +401,18 @@ class TestStageRunCommand(unittest.TestCase):
                 f"audio codec placed ahead of -i for target={target}",
             )
 
+    def test_command_preserves_executable_and_output_paths_with_spaces(self) -> None:
+        exporter = _make_exporter([], {"h264"})
+        exporter.config.ffmpeg.ffmpeg_path = (
+            r"C:\Program Files\Frigate Tools\ffmpeg.exe"
+        )
+        dest = r"C:\Frigate Exports\stage one.mp4"
+
+        cmd = exporter._stage_run_command(self._run(), dest, None, False)
+
+        self.assertEqual(cmd[0], exporter.config.ffmpeg.ffmpeg_path)
+        self.assertEqual(cmd[-1], dest)
+
     def test_scaling_pass_does_not_use_hwaccel(self) -> None:
         # the vaapi/nvidia presets keep frames in GPU memory, out of reach
         # of the software scale/pad filters this pass relies on
@@ -722,6 +734,19 @@ class TestStagedExportCommand(unittest.TestCase):
         # nothing is left pointing at the merged vod route
         self.assertFalse(any("/vod/front/start/" in token for token in cmd))
         self.assertEqual(cmd[-1], "/exports/out.mp4")
+
+    def test_windows_concat_playlist_uses_pipe_stdin_and_normalized_paths(self) -> None:
+        exporter = _make_exporter([], {"h264"})
+        exporter.staged_runs = [r"C:\Frigate Cache\stage one.mp4"]
+
+        with patch("frigate.util.platform.IS_WINDOWS", True):
+            cmd, playlist_lines = exporter.get_record_export_command(
+                r"C:\Frigate Exports\out.mp4"
+            )
+
+        self.assertEqual(playlist_lines, ["file 'C:/Frigate Cache/stage one.mp4'"])
+        self.assertIn("pipe:0", cmd)
+        self.assertEqual(cmd[-1], r"C:\Frigate Exports\out.mp4")
 
     def test_expected_duration_sums_the_merged_timeline(self) -> None:
         """A mixed range must not be measured by one stream alone."""

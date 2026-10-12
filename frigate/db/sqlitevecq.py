@@ -20,10 +20,9 @@ class SqliteVecQueueDatabase(SqliteQueueDatabase):
         self, *args: Any, load_vec_extension: bool = False, **kwargs: Any
     ) -> None:
         self.load_vec_extension: bool = load_vec_extension
-        # the container builds sqlite-vec into /usr/local/lib; elsewhere the
-        # library is loaded by name so the platform looks it up (vec0.dll on
-        # Windows, libvec0.so on Linux) and a missing library only disables
-        # semantic search instead of failing the database
+        # the container builds sqlite-vec into /usr/local/lib; Windows gets
+        # the extension DLL from the sqlite_vec Python package, while a missing
+        # library only disables semantic search instead of failing the database
         self.sqlite_vec_path = os.environ.get(
             "FRIGATE_SQLITE_VEC_PATH",
             "/usr/local/lib/vec0" if not IS_WINDOWS else "vec0",
@@ -43,9 +42,20 @@ class SqliteVecQueueDatabase(SqliteQueueDatabase):
 
     def _load_vec_extension(self, conn: sqlite3.Connection) -> None:
         conn.enable_load_extension(True)
+        extension_path = self.sqlite_vec_path
+
+        if IS_WINDOWS and extension_path == "vec0":
+            try:
+                from sqlite_vec import loadable_path
+
+                extension_path = loadable_path()
+            except (ImportError, AttributeError):
+                # Preserve the normal DLL search as a fallback for installations
+                # that provide vec0.dll outside the Python package.
+                pass
 
         try:
-            conn.load_extension(self.sqlite_vec_path)
+            conn.load_extension(extension_path)
         except conn.OperationalError:
             logger.error("Unable to load the sqlite-vec extension")
             self.load_vec_extension = False

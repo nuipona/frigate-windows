@@ -19,6 +19,7 @@ from frigate.const import (
     STREAM_TYPE_SUB,
 )
 from frigate.models import Recordings
+from frigate.util.platform import ffmpeg_concat_file_line
 
 logger = logging.getLogger(__name__)
 
@@ -120,9 +121,9 @@ def get_audio_from_recording(
     )
     file_path = os.path.join(CACHE_DIR, file_name)
     try:
-        with open(file_path, "w") as file:
+        with open(file_path, "w", encoding="utf-8") as file:
             for clip in recordings:
-                file.write(f"file '{clip.path}'\n")
+                file.write(f"{ffmpeg_concat_file_line(clip.path)}\n")
                 if clip.start_time < start_ts:
                     file.write(f"inpoint {int(start_ts - clip.start_time)}\n")
                 if clip.end_time > end_ts:

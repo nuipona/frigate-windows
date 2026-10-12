@@ -12,6 +12,7 @@ from pydantic.fields import PrivateAttr
 from frigate.const import DEFAULT_ATTRIBUTE_LABEL_MAP, MODEL_CACHE_DIR
 from frigate.plus import PlusApi, load_plus_model_info
 from frigate.util.builtin import generate_color_palette, load_labels
+from frigate.util.platform import get_default_labelmap_path
 
 logger = logging.getLogger(__name__)
 
@@ -153,8 +154,12 @@ class ModelConfig(BaseModel):
     def __init__(self, **config):
         super().__init__(**config)
 
+        labelmap_path = config.get("labelmap_path")
+        if "labelmap_path" not in config:
+            labelmap_path = get_default_labelmap_path() or "/labelmap.txt"
+
         self._merged_labelmap = {
-            **load_labels(config.get("labelmap_path", "/labelmap.txt")),
+            **load_labels(labelmap_path),
             **config.get("labelmap", {}),
         }
         self._colormap = {}

@@ -24,7 +24,12 @@ from frigate.ffmpeg_presets import (
 from frigate.models import Previews
 from frigate.util.image import copy_yuv_to_position, get_blank_yuv_frame, get_yuv_crop
 from frigate.util.ownership import chown_to_runtime
-from frigate.util.platform import ffmpeg_concat_file_line
+from frigate.util.platform import (
+    ffmpeg_concat_file_line,
+    ffmpeg_stdin_input,
+    quote_ffmpeg_arg,
+    split_ffmpeg_command,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -142,8 +147,17 @@ class FFMpegConverter(threading.Thread):
         self.ffmpeg_cmd = parse_preset_hardware_acceleration_encode(
             config.ffmpeg.ffmpeg_path,
             "default",
-            input="-f concat -y -protocol_whitelist pipe,file -safe 0 -threads 1 -i /dev/stdin",
-            output=f"-threads 1 -g {PREVIEW_KEYFRAME_INTERVAL} -bf 0 -b:v {PREVIEW_QUALITY_BIT_RATES[self.config.record.preview.quality]}{PREVIEW_QMAX_PARAM[self.config.record.preview.quality]} {FPS_VFR_PARAM} -movflags +faststart -pix_fmt yuv420p {self.path}",
+            input=(
+                "-f concat -y -protocol_whitelist pipe,file -safe 0 -threads 1 "
+                f"-i {ffmpeg_stdin_input()}"
+            ),
+            output=(
+                f"-threads 1 -g {PREVIEW_KEYFRAME_INTERVAL} -bf 0 "
+                f"-b:v {PREVIEW_QUALITY_BIT_RATES[self.config.record.preview.quality]}"
+                f"{PREVIEW_QMAX_PARAM[self.config.record.preview.quality]} "
+                f"{FPS_VFR_PARAM} -movflags +faststart -pix_fmt yuv420p "
+                f"{quote_ffmpeg_arg(self.path)}"
+            ),
             type=EncodeTypeEnum.preview,
         )
 
@@ -165,19 +179,24 @@ class FFMpegConverter(threading.Thread):
                 continue
 
             playlist.append(
-                f"file '{get_cache_image_name(self.config.name, self.frame_times[t_idx])}'"  # type: ignore[arg-type]
+                ffmpeg_concat_file_line(
+                    get_cache_image_name(  # type: ignore[arg-type]
+                        self.config.name, self.frame_times[t_idx]
+                    )
+                )
             )
             playlist.append(
                 f"duration {self.frame_times[t_idx + 1] - self.frame_times[t_idx]}"
             )
 
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+        ffmpeg_cmd = split_ffmpeg_command(self.ffmpeg_cmd)
 
         try:
             p = sp.run(
-                self.ffmpeg_cmd.split(" "),
+                ffmpeg_cmd,
                 input="\n".join(playlist),
-                encoding="ascii",
+                encoding="utf-8",
                 capture_output=True,
             )
         except BlockingIOError:
@@ -186,9 +205,9 @@ class FFMpegConverter(threading.Thread):
             )
             time.sleep(2)
             p = sp.run(
-                self.ffmpeg_cmd.split(" "),
+                ffmpeg_cmd,
                 input="\n".join(playlist),
-                encoding="ascii",
+                encoding="utf-8",
                 capture_output=True,
             )
 

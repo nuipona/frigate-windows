@@ -2,7 +2,12 @@ import unittest
 
 from frigate.config import FrigateConfig
 from frigate.config.camera.ffmpeg import FFMPEG_INPUT_ARGS_DEFAULT
-from frigate.ffmpeg_presets import parse_preset_input
+from frigate.ffmpeg_presets import (
+    EncodeTypeEnum,
+    parse_preset_hardware_acceleration_encode,
+    parse_preset_input,
+)
+from frigate.util.platform import quote_ffmpeg_arg, split_ffmpeg_command
 
 
 class TestFfmpegPresets(unittest.TestCase):
@@ -35,6 +40,23 @@ class TestFfmpegPresets(unittest.TestCase):
                 }
             },
         }
+
+    def test_encode_preset_preserves_windows_paths_with_spaces(self):
+        executable = r"C:\Program Files\FFmpeg\bin\ffmpeg.exe"
+        output = r"C:\Frigate Media\birdseye preview.mp4"
+        command = parse_preset_hardware_acceleration_encode(
+            executable,
+            None,
+            "-i pipe:0",
+            f"-f mp4 {quote_ffmpeg_arg(output)}",
+            EncodeTypeEnum.preview,
+        )
+
+        self.assertEqual(
+            split_ffmpeg_command(command)[0],
+            executable,
+        )
+        self.assertEqual(split_ffmpeg_command(command)[-1], output)
 
     def test_default_ffmpeg(self):
         FrigateConfig(**self.default_ffmpeg)

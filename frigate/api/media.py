@@ -570,7 +570,7 @@ async def recording_clip(
         f"playlist_{camera_name}_{start_ts}-{end_ts}_{os.urandom(4).hex()}.txt"
     )
     file_path = os.path.join(CACHE_DIR, file_name)
-    with open(file_path, "w") as file:
+    with open(file_path, "w", encoding="utf-8") as file:
         clip: Recordings
         for clip in recordings:
             file.write(f"{ffmpeg_concat_file_line(clip.path)}\n")

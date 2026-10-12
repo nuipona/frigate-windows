@@ -41,6 +41,12 @@ from frigate.output.preview import is_camera_preview_frame
 from frigate.util.config import default_ffmpeg_binary
 from frigate.util.ffmpeg import run_ffmpeg_with_progress
 from frigate.util.ownership import chown_to_runtime
+from frigate.util.platform import (
+    ffmpeg_concat_file_line,
+    ffmpeg_stdin_input,
+    quote_ffmpeg_arg,
+    split_ffmpeg_command,
+)
 from frigate.util.recording_coverage import (
     build_spans,
     known_video_codecs,
@@ -612,7 +618,7 @@ class RecordingExporter(threading.Thread):
         """
         ffmpeg_input = (
             "-y -protocol_whitelist pipe,file,http,tcp "
-            f"-i {self._vod_url(run.stream_type, run.start_time, run.end_time)}"
+            f"-i {quote_ffmpeg_arg(self._vod_url(run.stream_type, run.start_time, run.end_time))}"
         )
         # audio only survives when both streams agree on it, otherwise the
         # copied track breaks at the same hand-off the video used to. These
@@ -621,11 +627,11 @@ class RecordingExporter(threading.Thread):
         audio_args = "-c:a copy" if keep_audio else "-an"
 
         if target is None:
-            return (
-                f"{self.config.ffmpeg.ffmpeg_path} -hide_banner {ffmpeg_input} "
+            return split_ffmpeg_command(
+                f"{quote_ffmpeg_arg(self.config.ffmpeg.ffmpeg_path)} -hide_banner {ffmpeg_input} "
                 f"{audio_args} -c:v copy "
-                f"-video_track_timescale {EXPORT_TRACK_TIMESCALE} {dest}"
-            ).split(" ")
+                f"-video_track_timescale {EXPORT_TRACK_TIMESCALE} {quote_ffmpeg_arg(dest)}"
+            )
 
         width, height = target
         # pad rather than stretch: the sub stream is often a different
@@ -641,14 +647,15 @@ class RecordingExporter(threading.Thread):
         # GPU means per-preset hwdownload/hwupload chains (see the birdseye
         # vaapi preset). Codec-mixed ranges are rare enough to eat the CPU
         # cost rather than ship an untested filter graph
-        return parse_preset_hardware_acceleration_encode(
+        cmd = parse_preset_hardware_acceleration_encode(
             self.config.ffmpeg.ffmpeg_path,
             None,
             ffmpeg_input,
             f"{audio_args} -vf {scale} "
-            f"-video_track_timescale {EXPORT_TRACK_TIMESCALE} {dest}",
+            f"-video_track_timescale {EXPORT_TRACK_TIMESCALE} {quote_ffmpeg_arg(dest)}",
             EncodeTypeEnum.timelapse,
-        ).split(" ")
+        )
+        return split_ffmpeg_command(cmd)
 
     def _stage_stream_runs(
         self,
@@ -1209,10 +1216,10 @@ class RecordingExporter(threading.Thread):
                 if self.chapters not in (None, ChaptersEnum.none)
                 else []
             )
-            playlist_lines: list[str] = [f"file '{path}'" for path in self.staged_runs]
-            ffmpeg_input = (
-                "-y -protocol_whitelist pipe,file -f concat -safe 0 -i /dev/stdin"
-            )
+            playlist_lines: list[str] = [
+                ffmpeg_concat_file_line(path) for path in self.staged_runs
+            ]
+            ffmpeg_input = f"-y -protocol_whitelist pipe,file -f concat -safe 0 -i {ffmpeg_stdin_input()}"
             return self._finish_record_export_command(
                 video_path, ffmpeg_input, playlist_lines, recordings, use_hwaccel
             )
@@ -1253,9 +1260,12 @@ class RecordingExporter(threading.Thread):
                 chunk_url = self._vod_url(
                     pin, float(chunk[0].start_time), float(chunk[-1].end_time)
                 )
-                playlist_lines.append(f"file '{chunk_url}'")
+                playlist_lines.append(ffmpeg_concat_file_line(chunk_url))
 
-            ffmpeg_input = "-y -protocol_whitelist pipe,file,http,tcp -f concat -safe 0 -i /dev/stdin"
+            ffmpeg_input = (
+                "-y -protocol_whitelist pipe,file,http,tcp -f concat "
+                f"-safe 0 -i {ffmpeg_stdin_input()}"
+            )
 
         return self._finish_record_export_command(
             video_path, ffmpeg_input, playlist_lines, recordings, use_hwaccel
@@ -1276,7 +1286,7 @@ class RecordingExporter(threading.Thread):
                 if use_hwaccel
                 else None
             )
-            ffmpeg_cmd = (
+            ffmpeg_cmd = split_ffmpeg_command(
                 parse_preset_hardware_acceleration_encode(
                     self.config.ffmpeg.ffmpeg_path,
                     hwaccel_args,
@@ -1284,7 +1294,7 @@ class RecordingExporter(threading.Thread):
                     f"{self.ffmpeg_output_args} -movflags +faststart".strip(),
                     EncodeTypeEnum.timelapse,
                 )
-            ).split(" ")
+            )
         else:
             # Realtime/stream-copy export. Embed chapter metadata according to
             # the camera's configured chapter mode: per-recording-segment
@@ -1299,13 +1309,14 @@ class RecordingExporter(threading.Thread):
                 chapters_path = None
 
             chapter_args = (
-                f" -i {chapters_path} -map 0 -dn -map_metadata 1"
+                f" -i {quote_ffmpeg_arg(chapters_path)} -map 0 -dn -map_metadata 1"
                 if chapters_path
                 else ""
             )
-            ffmpeg_cmd = (
-                f"{self.config.ffmpeg.ffmpeg_path} -hide_banner {ffmpeg_input}{chapter_args} -c copy -movflags +faststart"
-            ).split(" ")
+            ffmpeg_cmd = split_ffmpeg_command(
+                f"{quote_ffmpeg_arg(self.config.ffmpeg.ffmpeg_path)} "
+                f"-hide_banner {ffmpeg_input}{chapter_args} -c copy -movflags +faststart"
+            )
 
         # add metadata
         title = f"Frigate Recording for {self.camera}, {self.get_datetime_from_timestamp(self.start_time)} - {self.get_datetime_from_timestamp(self.end_time)}"
@@ -1350,7 +1361,9 @@ class RecordingExporter(threading.Thread):
                 if file > end_file:
                     break
 
-                playlist_lines.append(f"file '{os.path.join(preview_dir, file)}'")
+                playlist_lines.append(
+                    ffmpeg_concat_file_line(os.path.join(preview_dir, file))
+                )
                 playlist_lines.append("duration 0.12")
 
             if playlist_lines:
@@ -1380,7 +1393,7 @@ class RecordingExporter(threading.Thread):
         )
 
         for preview in export_previews:
-            playlist_lines.append(f"file '{preview.path}'")
+            playlist_lines.append(ffmpeg_concat_file_line(preview.path))
 
             if preview.start_time < self.start_time:
                 playlist_lines.append(
@@ -1392,9 +1405,7 @@ class RecordingExporter(threading.Thread):
                     f"outpoint {int(self.end_time - preview.start_time)}"
                 )
 
-        ffmpeg_input = (
-            "-y -protocol_whitelist pipe,file,tcp -f concat -safe 0 -i /dev/stdin"
-        )
+        ffmpeg_input = f"-y -protocol_whitelist pipe,file,tcp -f concat -safe 0 -i {ffmpeg_stdin_input()}"
 
         if self.ffmpeg_input_args is not None and self.ffmpeg_output_args is not None:
             hwaccel_args = (
@@ -1402,7 +1413,7 @@ class RecordingExporter(threading.Thread):
                 if use_hwaccel
                 else None
             )
-            ffmpeg_cmd = (
+            ffmpeg_cmd = split_ffmpeg_command(
                 parse_preset_hardware_acceleration_encode(
                     self.config.ffmpeg.ffmpeg_path,
                     hwaccel_args,
@@ -1410,11 +1421,12 @@ class RecordingExporter(threading.Thread):
                     f"{self.ffmpeg_output_args} -movflags +faststart".strip(),
                     EncodeTypeEnum.timelapse,
                 )
-            ).split(" ")
+            )
         else:
-            ffmpeg_cmd = (
-                f"{self.config.ffmpeg.ffmpeg_path} -hide_banner {ffmpeg_input} {codec} -movflags +faststart"
-            ).split(" ")
+            ffmpeg_cmd = split_ffmpeg_command(
+                f"{quote_ffmpeg_arg(self.config.ffmpeg.ffmpeg_path)} "
+                f"-hide_banner {ffmpeg_input} {codec} -movflags +faststart"
+            )
 
         # add metadata
         title = f"Frigate Preview for {self.camera}, {self.get_datetime_from_timestamp(self.start_time)} - {self.get_datetime_from_timestamp(self.end_time)}"

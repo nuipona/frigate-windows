@@ -1,8 +1,8 @@
 """Discovery of object detection hardware attached to the system.
 
-Every probe here is a filesystem read. Nothing shells out, initializes a
-runtime, or opens a device, so this is cheap enough to run from the API process
-while detector children hold the hardware.
+Probes avoid shelling out or opening devices. Most are filesystem reads; on
+Windows, OpenVINO is queried for its available Intel GPU/NPU devices because
+those devices are not represented by Linux DRM/sysfs paths.
 
 Hardware is reported whether or not this image ships a detector that can drive
 it. Matching hardware to an image is a separate concern.
@@ -151,8 +151,34 @@ def _drm_devices(drivers: tuple[str, ...]) -> list[str]:
     )
 
 
+def _openvino_available_devices() -> list[str]:
+    """Read device names from OpenVINO on platforms without Linux sysfs."""
+    try:
+        from openvino import Core
+
+        return list(Core().available_devices)
+    except Exception:
+        logger.debug("Could not enumerate OpenVINO devices", exc_info=True)
+        return []
+
+
 def detect_intel_gpu() -> DetectionHardware | None:
-    """Find Intel GPUs through their DRM driver."""
+    """Find Intel GPUs through DRM on Linux or OpenVINO on Windows."""
+    if IS_WINDOWS:
+        devices = [
+            device
+            for device in _openvino_available_devices()
+            if device == "GPU" or device.startswith("GPU.")
+        ]
+        if not devices:
+            return None
+
+        units = [
+            HardwareUnit(device=f"openvino:{device}", label=device)
+            for device in devices
+        ]
+        return _hardware("openvino:GPU", "openvino", "Intel GPU", units)
+
     pdevs = _drm_devices(INTEL_DRM_DRIVERS)
 
     if not pdevs:
@@ -172,7 +198,22 @@ def detect_intel_gpu() -> DetectionHardware | None:
 
 
 def detect_intel_npu() -> DetectionHardware | None:
-    """Find Intel NPUs, which register as accel devices bound to intel_vpu."""
+    """Find Intel NPUs through OpenVINO on Windows or sysfs on Linux."""
+    if IS_WINDOWS:
+        devices = [
+            device
+            for device in _openvino_available_devices()
+            if device == "NPU" or device.startswith("NPU.")
+        ]
+        if not devices:
+            return None
+
+        units = [
+            HardwareUnit(device=f"openvino:{device}", label=device)
+            for device in devices
+        ]
+        return _hardware("openvino:NPU", "openvino", "Intel NPU", units)
+
     units = []
 
     for accel_path in sorted(glob(f"{SYS_ROOT}/class/accel/accel*")):
