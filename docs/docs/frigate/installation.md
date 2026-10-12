@@ -619,12 +619,13 @@ Frigate can run natively on Windows without Docker or WSL. The API, media endpoi
 Run these commands from PowerShell in the directory where you want the Frigate checkout. The frontend build is required for the native server to serve the UI.
 
 ```powershell
-git clone https://github.com/blakeblackshear/frigate.git
-cd frigate
+# native Windows support lives in the frigate-windows fork
+git clone https://github.com/nuipona/frigate-windows.git
+cd frigate-windows
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -r docker/main/requirements-windows.txt
-.\.venv\Scripts\python.exe -m pip install --editable --no-deps .
+.\.venv\Scripts\python.exe -m pip install --editable . --no-deps
 Push-Location web
 npm ci
 npm run build:native
