@@ -721,10 +721,15 @@ class RecordingMaintainer(threading.Thread):
 
         # ensure delayed segment info does not lead to lost segments, every
         # retention decision below depends on complete stats for the segment
+        #
+        # the timezone is passed rather than converted afterwards: the naive
+        # form renders the timestamp in local time first, which on Windows is
+        # an OSError [Errno 22] for a timestamp near the epoch, and 0 is
+        # exactly what "no frame has been processed yet" looks like
         if (
             datetime.datetime.fromtimestamp(
-                most_recently_processed_frame_time
-            ).astimezone(datetime.UTC)
+                most_recently_processed_frame_time, datetime.UTC
+            )
             < end_time
         ):
             return None
@@ -840,8 +845,9 @@ class RecordingMaintainer(threading.Thread):
         # discard), so waiting longer just fills the cache.
         else:
             retain_cutoff = datetime.datetime.fromtimestamp(
-                most_recently_processed_frame_time - record_config.event_pre_capture
-            ).astimezone(datetime.UTC)
+                most_recently_processed_frame_time - record_config.event_pre_capture,
+                datetime.UTC,
+            )
 
             if end_time < retain_cutoff:
                 self.drop_segment(cache_path)

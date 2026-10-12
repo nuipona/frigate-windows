@@ -198,6 +198,56 @@ class TestMaintainer(unittest.IsolatedAsyncioTestCase):
         maintainer.drop_segment.assert_not_called()
         maintainer.move_segment.assert_awaited_once()
 
+    async def test_waits_for_detection_when_no_frame_has_been_processed(self):
+        # Regression: a segment can be written before the first detection
+        # frame, so the frame the retention decision is based on is the epoch.
+        # That has to mean "not ready yet" and leave the segment in the cache:
+        # reading the timestamp through local time raises OSError [Errno 22]
+        # on Windows, and the segment was then dropped from the cycle.
+        config = MagicMock(spec=FrigateConfig)
+
+        camera_config = MagicMock()
+        camera_config.record.enabled = True
+        config.cameras = {"test_cam": camera_config}
+
+        stop_event = MagicMock()
+        maintainer = RecordingMaintainer(config, stop_event)
+
+        now = datetime.datetime.now(datetime.UTC)
+        cache_path = "/tmp/cache/test_cam@20260417150000+0000.mp4"
+
+        maintainer.end_time_cache = {
+            cache_path: (
+                now - datetime.timedelta(seconds=10),
+                10.0,
+                False,
+                None,
+                None,
+                None,
+                [],
+            )
+        }
+        maintainer.object_recordings_info["test_cam"] = []
+        maintainer.audio_recordings_info["test_cam"] = []
+
+        maintainer.drop_segment = MagicMock()
+        maintainer.move_segment = AsyncMock(return_value=None)
+        maintainer.recordings_publisher = MagicMock()
+
+        result = await maintainer.validate_and_move_segment(
+            "test_cam",
+            reviews=[],
+            recording={
+                "start_time": now - datetime.timedelta(seconds=20),
+                "cache_path": cache_path,
+                "stream_type": "main",
+            },
+        )
+
+        self.assertIsNone(result)
+        maintainer.drop_segment.assert_not_called()
+        maintainer.move_segment.assert_not_awaited()
+
     async def test_expire_stale_recordings_info_drops_only_absent_cameras(self):
         config = MagicMock(spec=FrigateConfig)
         config.cameras = {}

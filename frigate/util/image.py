@@ -18,6 +18,8 @@ try:  # POSIX only: Windows has no resource tracker for shared memory
 except ImportError:  # pragma: no cover - Windows
     _mprt = None  # type: ignore[assignment]
 
+from frigate.util.platform import IS_WINDOWS
+
 logger = logging.getLogger(__name__)
 
 
@@ -1060,6 +1062,25 @@ class SharedMemoryFrameManager(FrameManager):
     def __init__(self):
         self.shm_store: dict[str, UntrackedSharedMemory] = {}
 
+    @staticmethod
+    def _segment_holds(segment: Any, required: int) -> bool:
+        """Whether an open segment can back a frame of this many bytes.
+
+        The size has to be exact on POSIX, where it is the size the segment
+        was created with, because that is what tells a stale reference from a
+        same-name recreate apart.
+
+        Windows has no fixed size to compare with: opening a segment another
+        process created reports the size of the mapped region, which is the
+        requested size rounded up to a page. An exact comparison there
+        refuses every frame that is not already page aligned, so only a
+        segment that is too small is refused.
+        """
+        if IS_WINDOWS:
+            return segment.size >= required
+
+        return segment.size == required
+
     def create(self, name: str, size) -> AnyStr:
         try:
             shm = UntrackedSharedMemory(
@@ -1089,7 +1110,7 @@ class SharedMemoryFrameManager(FrameManager):
         try:
             required = int(np.prod(shape))
             shm = self.shm_store.get(name)
-            if shm is not None and shm.size != required:
+            if shm is not None and not self._segment_holds(shm, required):
                 # stale cached ref from a same-name recreate — drop and reopen
                 try:
                     shm.close()
@@ -1099,7 +1120,7 @@ class SharedMemoryFrameManager(FrameManager):
                 shm = None
             if shm is None:
                 shm = UntrackedSharedMemory(name=name)
-                if shm.size != required:
+                if not self._segment_holds(shm, required):
                     # mid-recreate: OS segment doesn't match shape yet; skip
                     try:
                         shm.close()
