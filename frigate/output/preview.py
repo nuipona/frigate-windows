@@ -163,6 +163,10 @@ class FFMpegConverter(threading.Thread):
         )
 
     def run(self) -> None:
+        # the name is filled in from the camera's key when the config loads,
+        # so it is set for every camera that reaches this point
+        assert self.config.name is not None
+
         # generate input list
         item_count = len(self.frame_times)
         playlist = []
@@ -172,18 +176,14 @@ class FFMpegConverter(threading.Thread):
                 # last frame does not get a duration
                 playlist.append(
                     ffmpeg_concat_file_line(
-                        get_cache_image_name(  # type: ignore[arg-type]
-                            self.config.name, self.frame_times[t_idx]
-                        )
+                        get_cache_image_name(self.config.name, self.frame_times[t_idx])
                     )
                 )
                 continue
 
             playlist.append(
                 ffmpeg_concat_file_line(
-                    get_cache_image_name(  # type: ignore[arg-type]
-                        self.config.name, self.frame_times[t_idx]
-                    )
+                    get_cache_image_name(self.config.name, self.frame_times[t_idx])
                 )
             )
             playlist.append(
@@ -235,7 +235,7 @@ class FFMpegConverter(threading.Thread):
         # unlink files from cache
         # don't delete last frame as it will be used as first frame in next segment
         for t in self.frame_times[0:-1]:
-            Path(get_cache_image_name(self.config.name, t)).unlink(missing_ok=True)  # type: ignore[arg-type]
+            Path(get_cache_image_name(self.config.name, t)).unlink(missing_ok=True)
 
 
 class PreviewRecorder:
