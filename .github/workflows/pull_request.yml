@@ -118,10 +118,79 @@ jobs:
             frigate.test.test_config.TestConfig.test_windows_cpu_default_uses_a_native_model_path `
             frigate.test.test_config.TestConfig.test_windows_default_cpu_model_download_is_atomic `
             frigate.test.test_detector_hardware.TestWindowsOpenVINODevices
+      - name: Run process lifecycle tests
+        run: |
+          python -m unittest `
+            frigate.test.test_ffmpeg_stop `
+            frigate.test.test_job_object `
+            frigate.test.test_restart_frigate
       - name: Validate first-run native configuration
         run: |
           $env:FRIGATE_BASE_DIR = Join-Path $env:RUNNER_TEMP "frigate-native-smoke"
           python -m frigate --validate-config
+
+  windows_native_e2e:
+    name: Windows Native End To End
+    runs-on: windows-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: docker/main/requirements-windows.txt
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install native Windows Python requirements
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r docker/main/requirements-windows.txt
+          python -m pip install --editable --no-deps .
+      - name: Build the native Windows web interface
+        run: |
+          npm ci
+          npm run build:native
+        working-directory: ./web
+      - name: Ensure ffmpeg with libx264 is available
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+            choco install ffmpeg -y --no-progress
+          }
+          # chocolatey's shims land in the machine PATH, which this session
+          # was started before, so reload it
+          $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
+                      [Environment]::GetEnvironmentVariable('Path', 'User')
+          ffmpeg -version
+          ffprobe -version
+          # the end to end config encodes the synthetic source with libx264
+          ffmpeg -hide_banner -encoders 2>&1 | Select-String -Quiet libx264
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "This ffmpeg build has no libx264 encoder"
+            exit 1
+          }
+      - name: Run the native end to end test
+        env:
+          FRIGATE_E2E: "1"
+          FRIGATE_E2E_DIR: ${{ runner.temp }}\frigate-e2e
+        run: |
+          python -m unittest frigate.test.test_native_e2e
+      - name: Upload Frigate's log and media
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frigate-native-e2e
+          path: ${{ runner.temp }}\frigate-e2e
+          retention-days: 7
+          if-no-files-found: warn
 
   python_checks:
     runs-on: ubuntu-latest

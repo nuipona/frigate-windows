@@ -53,3 +53,23 @@ class TestRestartFrigate(unittest.TestCase):
 
         proc.terminate.assert_not_called()
         mock_kill.assert_called_once_with(99, signal.SIGINT)
+
+    @patch("frigate.util.services.IS_WINDOWS", True)
+    @patch("frigate.util.services.os.getpid", return_value=99)
+    @patch("frigate.util.services.os.kill")
+    @patch("frigate.util.services.signal.raise_signal")
+    @patch("frigate.util.services.psutil.Process")
+    def test_windows_raises_the_signal_instead_of_killing(
+        self, mock_process, mock_raise, mock_kill, _mock_getpid
+    ):
+        """Windows os.kill is TerminateProcess for anything but a console event.
+
+        os.kill(pid, SIGINT) there does not run the SIGINT handler, it kills
+        the process outright, which skips every shutdown path Frigate has and
+        orphans all of its children.
+        """
+        restart_frigate()
+
+        mock_raise.assert_called_once_with(signal.SIGINT)
+        mock_kill.assert_not_called()
+        mock_process.assert_not_called()
