@@ -17,6 +17,7 @@ from peewee_migrate import Router
 
 from frigate.api.auth import hash_password
 from frigate.api.fastapi_app import create_fastapi_app
+from frigate.api.web import run_native_web_server
 from frigate.camera import CameraMetrics, PTZMetrics
 from frigate.camera.maintainer import CameraMaintainer
 from frigate.comms.base_communicator import Communicator
@@ -41,6 +42,7 @@ from frigate.const import (
     MODEL_CACHE_DIR,
     RECORD_DIR,
     THUMB_DIR,
+    TMP_DIR,
     TRIGGER_DIR,
 )
 from frigate.data_processing.types import DataProcessorMetrics
@@ -89,8 +91,16 @@ from frigate.storage import StorageMaintainer
 from frigate.timeline import TimelineProcessor
 from frigate.track.object_processing import TrackedObjectProcessor
 from frigate.util.builtin import empty_and_close_queue
+from frigate.util.go2rtc_config import (
+    build_go2rtc_config,
+    go2rtc_config_path,
+    load_raw_config,
+    write_go2rtc_config,
+)
+from frigate.util.go2rtc_process import Go2rtcProcess
 from frigate.util.image import UntrackedSharedMemory
 from frigate.util.ownership import chown_to_runtime
+from frigate.util.platform import INTERNAL_API_PORT, serves_web_app
 from frigate.util.process import FrigateProcess
 from frigate.util.runtime_deps import RuntimeDependencyError
 from frigate.util.services import set_file_limit
@@ -106,6 +116,7 @@ class FrigateApp:
     ) -> None:
         self.metrics_manager = manager
         self.audio_process: mp.Process | None = None
+        self.go2rtc_process: Go2rtcProcess | None = None
         self.stop_event = stop_event
         self.detection_queues: dict[str, Queue] = {
             model.scene: mp.Queue() for model in config.models
@@ -244,10 +255,42 @@ class FrigateApp:
                 chown_to_runtime(db_file)
 
     def init_go2rtc(self) -> None:
+        if serves_web_app():
+            self.start_native_go2rtc()
+            return
+
         for proc in psutil.process_iter(["pid", "name"]):
             if proc.info["name"] == "go2rtc":
                 logger.info(f"go2rtc process pid: {proc.info['pid']}")
                 self.processes["go2rtc"] = proc.info["pid"]
+
+    def start_native_go2rtc(self) -> None:
+        """Stage go2rtc's config and start it.
+
+        The container has an s6 service doing this before Frigate starts. A
+        native install has no supervisor, so the config is generated and the
+        binary started here, which keeps ``python -m frigate`` the only command
+        a user needs to run.
+        """
+        path = go2rtc_config_path()
+
+        # go2rtc reads the config once at startup, so a stale file from a
+        # previous run has to go before a new one is dumped
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except OSError as err:
+            logger.warning("Unable to remove the stale go2rtc config: %s", err)
+
+        try:
+            write_go2rtc_config(build_go2rtc_config(load_raw_config()), path)
+        except Exception as err:
+            logger.error("Unable to generate the go2rtc config: %s", err)
+
+        go2rtc = Go2rtcProcess(path)
+
+        if go2rtc.start():
+            self.go2rtc_process = go2rtc
 
     def init_recording_manager(self) -> None:
         recording_process = RecordProcess(self.config, self.stop_event)
@@ -688,36 +731,52 @@ class FrigateApp:
 
         self.init_auth()
 
+        app = create_fastapi_app(
+            self.config,
+            self.db,
+            self.embeddings,
+            self.detected_frames_processor,
+            self.storage_maintainer,
+            self.onvif_controller,
+            self.stats_emitter,
+            self.event_metadata_updater,
+            self.inter_config_updater,
+            self.replay_manager,
+            self.dispatcher,
+            self.profile_manager,
+            config_holder=self.config_holder,
+            notice_registry=self.notice_registry,
+        )
+
         try:
-            uvicorn.run(
-                create_fastapi_app(
-                    self.config,
-                    self.db,
-                    self.embeddings,
-                    self.detected_frames_processor,
-                    self.storage_maintainer,
-                    self.onvif_controller,
-                    self.stats_emitter,
-                    self.event_metadata_updater,
-                    self.inter_config_updater,
-                    self.replay_manager,
-                    self.dispatcher,
-                    self.profile_manager,
-                    config_holder=self.config_holder,
-                    notice_registry=self.notice_registry,
-                ),
-                host="127.0.0.1",
-                port=5001,
-                log_level="error",
-            )
+            if serves_web_app():
+                # no reverse proxy in front of us, so the API, the web app, the
+                # media directories and recorded video are all served here
+                run_native_web_server(app, self.config.networking.listen.internal_port)
+            else:
+                # nginx is the only client, and it reaches the API directly
+                uvicorn.run(
+                    app,
+                    host="127.0.0.1",
+                    port=INTERNAL_API_PORT,
+                    log_level="error",
+                )
         finally:
             self.stop()
 
     def stop(self) -> None:
         logger.info("Stopping...")
 
-        # used by the docker healthcheck
-        Path("/dev/shm/.frigate-is-stopping").touch()
+        # used by the docker healthcheck. On other platforms this is a marker
+        # in the runtime directory so a launcher can tell a clean stop from a
+        # crash.
+        stopping_flag = Path(TMP_DIR) / ".frigate-is-stopping"
+
+        try:
+            stopping_flag.parent.mkdir(parents=True, exist_ok=True)
+            stopping_flag.touch()
+        except OSError as err:
+            logger.debug("Unable to write the stopping flag: %s", err)
 
         # Cancel any running motion search jobs before setting stop_event
         stop_all_motion_search_jobs()
@@ -736,6 +795,10 @@ class FrigateApp:
         if self.audio_process:
             self.audio_process.terminate()
             self.audio_process.join()
+
+        # stop go2rtc, which a native install runs as a child process
+        if self.go2rtc_process:
+            self.go2rtc_process.stop()
 
         # stop the onvif controller
         if self.onvif_controller:

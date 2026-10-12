@@ -7,7 +7,9 @@ from typing import Any
 
 import zmq
 
-SOCKET_PUB_SUB = "ipc:///tmp/cache/config"
+from frigate.util.platform import ipc_endpoint
+
+SOCKET_PUB_SUB = ipc_endpoint("config")
 
 
 class ConfigPublisher:

@@ -14,7 +14,6 @@ from peewee import DatabaseError, chunked
 
 from frigate.const import (
     CLIPS_DIR,
-    DEFAULT_FFMPEG_VERSION,
     EXPORT_DIR,
     RECORD_DIR,
     THUMB_DIR,
@@ -27,6 +26,7 @@ from frigate.models import (
     RecordingsToDelete,
     ReviewSegment,
 )
+from frigate.util.config import default_ffmpeg_binary
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +34,7 @@ logger = logging.getLogger(__name__)
 # Safety threshold - abort if more than 50% of files would be deleted
 SAFETY_THRESHOLD = 0.5
 
-FFPROBE_PATH = (
-    f"/usr/lib/ffmpeg/{DEFAULT_FFMPEG_VERSION}/bin/ffprobe"
-    if DEFAULT_FFMPEG_VERSION
-    else "ffprobe"
-)
+FFPROBE_PATH = default_ffmpeg_binary("ffprobe")
 
 
 def _file_size(path: str) -> int:

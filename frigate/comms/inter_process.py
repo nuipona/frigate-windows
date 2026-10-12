@@ -10,10 +10,11 @@ from typing import Any
 import zmq
 
 from frigate.comms.base_communicator import Communicator
+from frigate.util.platform import ipc_endpoint
 
 logger = logging.getLogger(__name__)
 
-SOCKET_REP_REQ = "ipc:///tmp/cache/comms"
+SOCKET_REP_REQ = ipc_endpoint("comms")
 
 
 class InterProcessCommunicator(Communicator):

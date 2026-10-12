@@ -3,7 +3,13 @@
 import functools
 import logging
 import os
-import pwd
+
+from frigate.util.platform import IS_WINDOWS
+
+try:  # POSIX
+    import pwd
+except ImportError:  # pragma: no cover - Windows
+    pwd = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -16,10 +22,15 @@ def get_runtime_ids() -> tuple[int, int] | None:
 
     None when: not root (docker --user, so the host already mapped us),
     FRIGATE_RUN_AS_ROOT=true (escape hatch must not mutate ownership),
-    or outside the Frigate container image (no frigate user).
-    The result is cached for the process lifetime because the runtime user
-    cannot change after boot.
+    the platform has no uid/gid concept (Windows), or outside the Frigate
+    container image (no frigate user). The result is cached for the process
+    lifetime because the runtime user cannot change after boot.
     """
+    if IS_WINDOWS or pwd is None:
+        # Windows has no uid/gid and no chown; the user running the process
+        # already owns every file it creates.
+        return None
+
     if os.geteuid() != 0:
         return None
 

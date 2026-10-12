@@ -10,11 +10,19 @@ from collections.abc import Callable
 from logging.handlers import QueueHandler
 from multiprocessing.synchronize import Event as MpEvent
 
-from setproctitle import setproctitle
+try:
+    from setproctitle import setproctitle
+except ImportError:  # pragma: no cover - setproctitle is optional on Windows
+
+    def setproctitle(title: str) -> None:  # type: ignore[misc]
+        """Fall back to the process name when setproctitle is unavailable."""
+        return
+
 
 import frigate.log
 from frigate.config.logger import LoggerConfig
 from frigate.const import CONFIG_DIR
+from frigate.util.platform import IS_WINDOWS, set_process_priority
 
 
 class BaseProcess(mp.Process):
@@ -37,7 +45,19 @@ class BaseProcess(mp.Process):
 
     def start(self, *args, **kwargs):
         self.before_start()
-        super().start(*args, **kwargs)
+
+        try:
+            super().start(*args, **kwargs)
+        except AssertionError:
+            # Windows has no fork, so a daemonic process may not create another
+            # process. Camera processes are started from a worker thread, and
+            # the maintainer itself is started from a process on some code
+            # paths, so the daemon flag has to give way rather than lose the
+            # worker. Shutdown is still driven by the stop event and the
+            # watchdog, which is what actually reaps workers.
+            self.daemon = False
+            super().start(*args, **kwargs)
+
         self.after_start()
 
     def before_start(self) -> None:
@@ -55,8 +75,13 @@ class FrigateProcess(BaseProcess):
         self.__memray_tracker = None
 
     def pre_run_setup(self, logConfig: LoggerConfig | None = None) -> None:
-        os.nice(self.priority)
-        setproctitle(self.name)
+        set_process_priority(self.priority)
+
+        if not IS_WINDOWS:
+            # setproctitle has no Windows implementation that affects how the
+            # process shows up, and the process name is already set on the
+            # multiprocessing.Process object
+            setproctitle(self.name)
         threading.current_thread().name = f"process:{self.name}"
         faulthandler.enable()
 

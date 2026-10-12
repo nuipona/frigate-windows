@@ -1,7 +1,6 @@
 """Path and file utilities."""
 
 import base64
-import fcntl
 import logging
 import os
 import time
@@ -11,6 +10,16 @@ from typing import Any
 
 import cv2
 from numpy import ndarray
+
+try:  # POSIX
+    import fcntl
+except ImportError:  # pragma: no cover - Windows
+    fcntl = None  # type: ignore[assignment]
+
+try:  # Windows
+    import msvcrt
+except ImportError:  # pragma: no cover - POSIX
+    msvcrt = None  # type: ignore[assignment]
 
 from frigate.const import CLIPS_DIR, THUMB_DIR
 from frigate.models import Event
@@ -307,12 +316,42 @@ def trim_oldest_files(folder: str, max_files: int) -> None:
 ### File Locking
 
 
+def _try_lock(fd: int) -> bool:
+    """Take an exclusive, non blocking lock on an open file descriptor.
+
+    ``fcntl.flock`` is used on POSIX. Windows has no flock; the closest
+    equivalent that works across processes is ``msvcrt.locking`` on a one byte
+    region, which is why the file is locked at offset zero.
+    """
+    if fcntl is not None:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+
+    if msvcrt is not None:
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        return True
+
+    return True
+
+
+def _unlock(fd: int) -> None:
+    """Release a lock taken by :func:`_try_lock`."""
+    if fcntl is not None:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return
+
+    if msvcrt is not None:
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+
+
 class FileLock:
     """
     A file-based lock for coordinating access to resources across processes.
 
-    Uses fcntl.flock() for proper POSIX file locking on Linux. Supports timeouts,
-    stale lock detection, and can be used as a context manager.
+    Uses fcntl.flock() on Linux and msvcrt.locking() on Windows. Supports
+    timeouts, stale lock detection, and can be used as a context manager.
 
     Example:
         ```python
@@ -405,7 +444,7 @@ class FileLock:
 
     def acquire(self, timeout: int | None = None) -> bool:
         """
-        Acquire the file lock using fcntl.flock().
+        Acquire the exclusive file lock.
 
         Args:
             timeout: Maximum time to wait for lock in seconds (uses instance timeout if None)
@@ -432,7 +471,7 @@ class FileLock:
             start_time = time.time()
             while time.time() - start_time < timeout:
                 try:
-                    fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    _try_lock(self._fd)
                     self._acquired = True
                     logger.debug(f"Acquired lock: {self.lock_path}")
                     return True
@@ -472,10 +511,10 @@ class FileLock:
             return
 
         try:
-            # Close file descriptor and release fcntl lock
+            # Close file descriptor and release the lock
             if self._fd is not None:
                 try:
-                    fcntl.flock(self._fd, fcntl.LOCK_UN)
+                    _unlock(self._fd)
                     os.close(self._fd)
                 except Exception as e:
                     logger.warning(f"Error closing lock file descriptor: {e}")

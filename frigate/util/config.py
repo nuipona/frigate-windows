@@ -15,10 +15,18 @@ from frigate.const import (
     CONFIG_DIR,
     DEFAULT_FFMPEG_VERSION,
     EXPORT_DIR,
+    FFMPEG_DIR,
     INCLUDED_FFMPEG_VERSIONS,
     REDACTED_CREDENTIAL_SENTINEL,
 )
 from frigate.util.builtin import deep_merge
+from frigate.util.platform import (
+    EXECUTABLE_SUFFIX,
+    IS_MACOS,
+    IS_WINDOWS,
+    find_executable,
+    get_tmp_dir,
+)
 from frigate.util.services import get_video_properties
 
 logger = logging.getLogger(__name__)
@@ -47,7 +55,13 @@ DROPPED_DETECTOR_OPTIONS = {
 # Trees the unprivileged runtime user can write. A root frigate service must
 # not execute a binary from any of them; a compromised uid-1000 process could
 # plant one and be root after the next restart.
-RUNTIME_USER_WRITABLE_DIRS = (CONFIG_DIR, BASE_DIR, CACHE_DIR, "/dev/shm", "/tmp")
+RUNTIME_USER_WRITABLE_DIRS = (
+    CONFIG_DIR,
+    BASE_DIR,
+    CACHE_DIR,
+    get_tmp_dir(),
+    "/tmp",
+)
 
 
 def frigate_service_is_granular_root() -> bool:
@@ -57,6 +71,11 @@ def frigate_service_is_granular_root() -> bool:
     unprivileged service running, so custom binaries stay as safe as they
     were before the privilege drop.
     """
+    if IS_WINDOWS or not hasattr(os, "geteuid"):
+        # no root, no privilege drop: every file belongs to the user running
+        # Frigate, so there is no ownership boundary to defend
+        return False
+
     if os.geteuid() != 0:
         return False
 
@@ -85,30 +104,86 @@ def _warn_ignored_ffmpeg_path(path: str) -> None:
     )
 
 
+def _is_absolute_path(path: str) -> bool:
+    """Whether a config value is a path rather than a version alias."""
+    # Windows paths are absolute when they start with a drive or a separator,
+    # which os.path.isabs knows and a leading slash test does not
+    return os.path.isabs(path) or path.startswith("/")
+
+
 def resolve_ffmpeg_path(path: str, binary: str = "ffmpeg") -> str:
     """Resolve an ffmpeg version alias or custom path to a binary path.
 
     A bare version alias that is no longer bundled (for example one that was
     dropped when the default version changed) falls back to the default
     bundled version so existing configs keep working across an upgrade or a
-    revert. Custom install paths (anything absolute) are used as-is, except
-    one in a runtime-user-writable tree while FRIGATE_ROOT_SERVICES makes
-    frigate root; see RUNTIME_USER_WRITABLE_DIRS.
+    revert. Custom install paths are used as-is, except one in a
+    runtime-user-writable tree while FRIGATE_ROOT_SERVICES makes frigate root;
+    see RUNTIME_USER_WRITABLE_DIRS.
+
+    On a native install there is no bundled ffmpeg, so a path that does not
+    point at an existing binary falls back to the first ffmpeg found on PATH
+    and the user is told about it.
     """
     if path == "default" or (
-        not path.startswith("/") and path not in INCLUDED_FFMPEG_VERSIONS
+        not _is_absolute_path(path) and path not in INCLUDED_FFMPEG_VERSIONS
     ):
         version = DEFAULT_FFMPEG_VERSION
     elif path in INCLUDED_FFMPEG_VERSIONS:
         version = path
     else:
         if not (frigate_service_is_granular_root() and is_runtime_user_writable(path)):
-            return f"{path}/bin/{binary}"
+            resolved = os.path.join(path, "bin", f"{binary}{EXECUTABLE_SUFFIX}")
+
+            return _fall_back_to_path(path, resolved, binary)
 
         _warn_ignored_ffmpeg_path(path)
         version = DEFAULT_FFMPEG_VERSION
 
-    return f"/usr/lib/ffmpeg/{version}/bin/{binary}"
+    # built with a format string rather than os.path.join so the bundled path
+    # stays byte for byte what the image ships, including when DEFAULT_FFMPEG_VERSION
+    # is unset
+    bundled = f"{FFMPEG_DIR}/{version}/bin/{binary}{EXECUTABLE_SUFFIX}"
+
+    return _fall_back_to_path(f"bundled ffmpeg {version}", bundled, binary)
+
+
+def default_ffmpeg_binary(binary: str = "ffmpeg") -> str:
+    """Path of the ffmpeg build Frigate uses when no config value applies.
+
+    Inside the image this is the bundled build. A native install has no bundled
+    builds, so it resolves through ``PATH`` instead. Used where a build with a
+    known feature set is required, such as the webp encoder exports need.
+    """
+    return resolve_ffmpeg_path("default", binary)
+
+
+def _fall_back_to_path(source: str, candidate: str, binary: str) -> str:
+    """Use a candidate binary when it exists, else the one found on PATH.
+
+    Linux resolves to the bundled build Frigate ships, where the caller gets a
+    clear error if it is missing. A native Windows or macOS install has no
+    bundled ffmpeg, so the default config value has to resolve to whatever the
+    user installed, and only warns when nothing is found at all.
+    """
+    if not IS_WINDOWS and not IS_MACOS:
+        return candidate
+
+    if os.path.isfile(candidate):
+        return candidate
+
+    found = find_executable(binary)
+
+    if found:
+        logger.debug("ffmpeg path %s resolved to %s from PATH", source, found)
+        return found
+
+    logger.warning(
+        "No %s binary found. Install ffmpeg, or set ffmpeg.path in the config "
+        "to the directory containing it.",
+        binary,
+    )
+    return candidate
 
 
 def redact_credential(obj: dict[str, Any], key: str) -> None:

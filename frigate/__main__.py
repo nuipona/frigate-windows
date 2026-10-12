@@ -1,7 +1,7 @@
 import argparse
 import faulthandler
+import logging
 import multiprocessing as mp
-import signal
 import sys
 import threading
 
@@ -12,9 +12,17 @@ from frigate.app import FrigateApp
 from frigate.config import FrigateConfig
 from frigate.log import setup_logging
 from frigate.util.config import find_config_file
+from frigate.util.platform import (
+    describe,
+    ensure_runtime_dirs,
+    get_mp_start_method,
+    install_signal_handlers,
+    supports_forkserver,
+)
 
 
 def main() -> None:
+    logger = logging.getLogger("frigate")
     manager = mp.Manager()
     faulthandler.enable()
 
@@ -24,11 +32,12 @@ def main() -> None:
     threading.current_thread().name = "frigate"
     stop_event = mp.Event()
 
-    # send stop event on SIGINT
-    signal.signal(signal.SIGINT, lambda sig, frame: stop_event.set())
+    # Ctrl+C and, where the platform has them, SIGTERM and SIGBREAK stop the app
+    install_signal_handlers(stop_event, sys.exit)
 
-    # Make sure we exit cleanly on SIGTERM.
-    signal.signal(signal.SIGTERM, lambda sig, frame: sys.exit())
+    # Create the config, media, cache and log directories a native install needs
+    ensure_runtime_dirs()
+    logger.info("Starting Frigate on %s", describe())
 
     # Parse the cli arguments.
     parser = argparse.ArgumentParser(
@@ -121,19 +130,23 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    mp.set_forkserver_preload(
-        [
-            # Standard library and core dependencies
-            "sqlite3",
-            # Third-party libraries commonly used in Frigate
-            "numpy",
-            "cv2",
-            "peewee",
-            "zmq",
-            "ruamel.yaml",
-            # Frigate core modules
-            "frigate.camera.maintainer",
-        ]
-    )
-    mp.set_start_method("forkserver", force=True)
+    # Windows has no fork, so the start method has to be spawn; the preload
+    # list below only applies to forkserver and is skipped there.
+    if supports_forkserver():
+        mp.set_forkserver_preload(
+            [
+                # Standard library and core dependencies
+                "sqlite3",
+                # Third-party libraries commonly used in Frigate
+                "numpy",
+                "cv2",
+                "peewee",
+                "zmq",
+                "ruamel.yaml",
+                # Frigate core modules
+                "frigate.camera.maintainer",
+            ]
+        )
+
+    mp.set_start_method(get_mp_start_method(), force=True)
     main()

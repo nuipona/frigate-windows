@@ -24,6 +24,7 @@ from frigate.ffmpeg_presets import (
 from frigate.models import Previews
 from frigate.util.image import copy_yuv_to_position, get_blank_yuv_frame, get_yuv_crop
 from frigate.util.ownership import chown_to_runtime
+from frigate.util.platform import ffmpeg_concat_file_line
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +156,11 @@ class FFMpegConverter(threading.Thread):
             if t_idx == item_count - 1:
                 # last frame does not get a duration
                 playlist.append(
-                    f"file '{get_cache_image_name(self.config.name, self.frame_times[t_idx])}'"  # type: ignore[arg-type]
+                    ffmpeg_concat_file_line(
+                        get_cache_image_name(  # type: ignore[arg-type]
+                            self.config.name, self.frame_times[t_idx]
+                        )
+                    )
                 )
                 continue
 

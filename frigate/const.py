@@ -1,24 +1,56 @@
 import os
 import re
 
-INSTALL_DIR = "/opt/frigate"
-CONFIG_DIR = "/config"
-DEFAULT_DB_PATH = f"{CONFIG_DIR}/frigate.db"
-MODEL_CACHE_DIR = f"{CONFIG_DIR}/model_cache"
-BASE_DIR = "/media/frigate"
-CLIPS_DIR = f"{BASE_DIR}/clips"
-EXPORT_DIR = f"{BASE_DIR}/exports"
-EXPORT_STAGING_DIR = f"{EXPORT_DIR}/staging"
-FACE_DIR = f"{CLIPS_DIR}/faces"
-THUMB_DIR = f"{CLIPS_DIR}/thumbs"
-RECORD_DIR = f"{BASE_DIR}/recordings"
-TRIGGER_DIR = f"{CLIPS_DIR}/triggers"
-BIRDSEYE_PIPE = "/tmp/cache/birdseye"
-CACHE_DIR = "/tmp/cache"
+from frigate.util.platform import (
+    birdseye_pipe_path,
+    get_cache_dir,
+    get_config_dir,
+    get_ffmpeg_dir,
+    get_install_dir,
+    get_log_dir,
+    get_media_dir,
+    get_model_cache_dir,
+    get_tmp_dir,
+)
+
+# Paths resolve per platform. Inside the container image these are the
+# documented locations (/config, /media/frigate, /tmp/cache, /dev/shm); a
+# native Windows or macOS install keeps the same layout under one base
+# directory. See frigate/util/platform.py.
+INSTALL_DIR = get_install_dir()
+FFMPEG_DIR = get_ffmpeg_dir()
+CONFIG_DIR = get_config_dir()
+TMP_DIR = get_tmp_dir()
+DEFAULT_DB_PATH = os.path.join(CONFIG_DIR, "frigate.db")
+MODEL_CACHE_DIR = get_model_cache_dir()
+BASE_DIR = get_media_dir()
+CLIPS_DIR = os.path.join(BASE_DIR, "clips")
+EXPORT_DIR = os.path.join(BASE_DIR, "exports")
+EXPORT_STAGING_DIR = os.path.join(EXPORT_DIR, "staging")
+FACE_DIR = os.path.join(CLIPS_DIR, "faces")
+THUMB_DIR = os.path.join(CLIPS_DIR, "thumbs")
+RECORD_DIR = os.path.join(BASE_DIR, "recordings")
+TRIGGER_DIR = os.path.join(CLIPS_DIR, "triggers")
+LOG_DIR = get_log_dir()
+CACHE_DIR = get_cache_dir()
+BIRDSEYE_PIPE = birdseye_pipe_path()
 REPLAY_CAMERA_PREFIX = "_replay_"
 REPLAY_DIR = os.path.join(CLIPS_DIR, "replay")
 PLUS_ENV_VAR = "PLUS_API_KEY"
 PLUS_API_HOST = "https://api.frigate.video"
+
+FULL_SYSTEM_CPU_KEY = "frigate.full_system"
+
+# Key the storage stats for the shared memory equivalent. The container uses
+# /dev/shm; a native install reports the page file backed shared memory under
+# the same key so the web UI does not need to know which one it is talking to.
+SHM_STATS_KEY = "/dev/shm"
+
+# File paths inside the container image that only exist on Linux. They are
+# resolved lazily through frigate.util.platform so importing this module never
+# touches a path that does not exist.
+CONTAINER_MEDIA_DIR = "/media/frigate"
+
 
 SHM_FRAMES_VAR = "SHM_MAX_FRAMES"
 

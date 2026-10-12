@@ -17,6 +17,7 @@ from frigate.jobs.debug_replay import (
     RecordingDebugReplaySource,
     start_debug_replay_job,
 )
+from frigate.jobs.motion_search import resolve_internal_port
 from frigate.models import Export
 from frigate.util.services import get_video_properties
 
@@ -88,9 +89,7 @@ class DebugReplayStopResponse(BaseModel):
 async def start_debug_replay(request: Request, body: DebugReplayStartBody):
     """Start a debug replay session asynchronously."""
     replay_manager = request.app.replay_manager
-    internal_port = request.app.frigate_config.networking.listen.internal
-    if type(internal_port) is str:
-        internal_port = int(internal_port.split(":")[-1])
+    internal_port = resolve_internal_port(request.app.frigate_config)
 
     source = RecordingDebugReplaySource(
         source_camera=body.camera,

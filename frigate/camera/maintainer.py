@@ -91,7 +91,7 @@ class CameraMaintainer(threading.Thread):
         shm_stats = calculate_shm_requirements(self.config)
 
         if not shm_stats:
-            # /dev/shm not available
+            # the shared memory backing store could not be measured
             return 0
 
         logger.debug(
@@ -101,10 +101,19 @@ class CameraMaintainer(threading.Thread):
         )
 
         if shm_stats["shm_frame_count"] < 20:
-            logger.warning(
-                f"The current SHM size of {shm_stats['total']}MB is too small, "
-                f"recommend increasing it to at least {shm_stats['min_shm']}MB."
-            )
+            if shm_stats.get("page_file_backed"):
+                # platform without a dedicated shared memory filesystem, where
+                # the limit is the size of the page file rather than a mount
+                logger.warning(
+                    f"Shared memory is backed by the page file, which only "
+                    f"leaves room for {shm_stats['shm_frame_count']} frames per "
+                    f"camera. Increase the size of the page file."
+                )
+            else:
+                logger.warning(
+                    f"The current SHM size of {shm_stats['total']}MB is too small, "
+                    f"recommend increasing it to at least {shm_stats['min_shm']}MB."
+                )
 
         return int(shm_stats["shm_frame_count"])
 

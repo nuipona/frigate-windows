@@ -18,6 +18,7 @@ from frigate.config.camera.updater import (
 from frigate.config.classification import SemanticSearchModelEnum
 from frigate.const import FFMPEG_HWACCEL_AMF, FFMPEG_HWACCEL_VULKAN
 from frigate.detectors.hardware import DEV_ROOT, hardware_prober
+from frigate.util.platform import IS_WINDOWS
 from frigate.util.services import (
     get_amd_gpu_stats,
     get_axcl_npu_stats,
@@ -73,6 +74,11 @@ def _gpu_device_nodes_exist(name: str) -> bool:
     even when a device was not passed into the container, so a GPU is only
     usable when its device nodes exist too.
     """
+    if IS_WINDOWS:
+        # the prober reads the driver's own APIs on Windows, which only report
+        # hardware the driver is actually driving, so the nodes are implied
+        return True
+
     if name == "nvidia":
         return bool(glob(f"{DEV_ROOT}/nvidia*"))
     elif name in ("amd_gpu", "intel_gpu"):

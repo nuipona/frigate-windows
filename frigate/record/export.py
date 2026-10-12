@@ -38,6 +38,7 @@ from frigate.ffmpeg_presets import (
 )
 from frigate.models import Export, Previews, Recordings, ReviewSegment
 from frigate.output.preview import is_camera_preview_frame
+from frigate.util.config import default_ffmpeg_binary
 from frigate.util.ffmpeg import run_ffmpeg_with_progress
 from frigate.util.ownership import chown_to_runtime
 from frigate.util.recording_coverage import (
@@ -1134,7 +1135,8 @@ class RecordingExporter(threading.Thread):
                 0.0, float(self.start_time) - float(cast(Any, preview.start_time))
             )
             ffmpeg_cmd = [
-                "/usr/lib/ffmpeg/8.0/bin/ffmpeg",  # hardcode path for exports thumbnail due to missing libwebp support
+                # a build with libwebp is required for export thumbnails
+                default_ffmpeg_binary("ffmpeg"),
                 "-hide_banner",
                 "-loglevel",
                 "warning",

@@ -7,7 +7,6 @@ import json
 import logging
 import os
 import re
-import resource
 import shutil
 import signal
 import subprocess as sp
@@ -29,11 +28,29 @@ from frigate.const import (
     SHM_FRAMES_VAR,
 )
 from frigate.util.builtin import clean_camera_user_pass, escape_special_characters
+from frigate.util.platform import (
+    IS_WINDOWS,
+    get_fs_type,
+    get_shared_memory_total_mb,
+    get_tmp_dir,
+    resolve_ffmpeg_binary,  # noqa: F401 - re-exported for backwards compatibility
+)
+
+try:  # POSIX only
+    import resource
+except ImportError:  # pragma: no cover - Windows
+    resource = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
 
 def restart_frigate():
+    if IS_WINDOWS or not hasattr(signal, "SIGINT"):
+        # no supervisor outside of the container: exiting is the closest
+        # equivalent, and a launcher restarts the application if asked to
+        os.kill(os.getpid(), signal.SIGINT)
+        return
+
     proc = psutil.Process(1)
 
     # if this is running via s6, sigterm pid 1
@@ -55,11 +72,19 @@ def print_stack(sig, frame):
 
 
 def listen():
-    signal.signal(signal.SIGUSR1, print_stack)
+    # there is no way to send a signal to a process on Windows, so the stack
+    # dump helper only exists where SIGUSR1 does
+    sigusr1 = getattr(signal, "SIGUSR1", None)
+
+    if sigusr1 is not None:
+        signal.signal(sigusr1, print_stack)
 
 
 def get_cgroups_version() -> str:
     """Determine what version of cgroups is enabled."""
+
+    if IS_WINDOWS:
+        return "unknown"
 
     cgroup_path = "/sys/fs/cgroup"
 
@@ -111,11 +136,15 @@ def get_docker_memlimit_bytes() -> int:
     return -1
 
 
+#: process names that identify a Frigate related process
+PROCESS_KEYWORDS = ("ffmpeg", "go2rtc", "frigate.", "python3", "python.exe")
+
+
 def get_cpu_stats() -> dict[str, dict]:
     """Get cpu usages for each process id"""
     usages = {}
     docker_memlimit = get_docker_memlimit_bytes() / 1024
-    total_mem = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 1024
+    total_mem = psutil.virtual_memory().total / 1024
 
     system_cpu = psutil.cpu_percent(
         interval=None
@@ -126,38 +155,20 @@ def get_cpu_stats() -> dict[str, dict]:
         "mem": str(system_mem.percent),
     }
 
-    keywords = ["ffmpeg", "go2rtc", "frigate.", "python3"]
-    for process in psutil.process_iter(["pid", "name", "cpu_percent", "cmdline"]):
+    for process in psutil.process_iter(
+        ["pid", "name", "cpu_percent", "cmdline", "memory_percent", "create_time"]
+    ):
         pid = str(process.info["pid"])
         try:
             cpu_percent = process.info["cpu_percent"]
-            cmdline = " ".join(process.info["cmdline"]).rstrip()
+            cmdline = " ".join(process.info["cmdline"] or []).rstrip()
 
-            if not any(keyword in cmdline for keyword in keywords):
+            if not any(keyword in cmdline for keyword in PROCESS_KEYWORDS):
                 continue
 
-            with open(f"/proc/{pid}/stat") as f:
-                stats = f.readline().split()
-            utime = int(stats[13])
-            stime = int(stats[14])
-            start_time = int(stats[21])
-
-            with open("/proc/uptime") as f:
-                system_uptime_sec = int(float(f.read().split()[0]))
-
-            clk_tck = os.sysconf(os.sysconf_names["SC_CLK_TCK"])
-
-            process_utime_sec = utime // clk_tck
-            process_stime_sec = stime // clk_tck
-            process_start_time_sec = start_time // clk_tck
-
-            process_elapsed_sec = system_uptime_sec - process_start_time_sec
-            process_usage_sec = process_utime_sec + process_stime_sec
-            cpu_average_usage = process_usage_sec * 100 // process_elapsed_sec
-
-            with open(f"/proc/{pid}/statm") as f:
-                mem_stats = f.readline().split()
-            mem_res = int(mem_stats[1]) * os.sysconf("SC_PAGE_SIZE") / 1024
+            user, system, start_time = _process_cpu_times(process)
+            cpu_average_usage = _process_cpu_average(user, system, start_time)
+            mem_res = _process_resident_memory(process)
 
             if docker_memlimit > 0:
                 mem_pct = round((mem_res / docker_memlimit) * 100, 1)
@@ -176,9 +187,68 @@ def get_cpu_stats() -> dict[str, dict]:
     return usages
 
 
+def _process_cpu_times(process: psutil.Process) -> tuple[float, float, float]:
+    """CPU time in seconds and process start time.
+
+    Reads /proc on Linux, where the tick counts give the same numbers psutil
+    reports, and falls back to psutil itself everywhere else.
+    """
+    if not IS_WINDOWS:
+        with open(f"/proc/{process.pid}/stat") as f:
+            stats = f.readline().split()
+
+        clk_tck = os.sysconf(os.sysconf_names["SC_CLK_TCK"])
+        return (
+            int(stats[13]) / clk_tck,
+            int(stats[14]) / clk_tck,
+            int(stats[21]) / clk_tck,
+        )
+
+    times = process.cpu_times()
+    created = process.create_time()
+
+    return float(times.user), float(times.system), float(created)
+
+
+def _process_cpu_average(user: float, system: float, start_time: float) -> float:
+    """Average cpu percentage of a process over its lifetime.
+
+    The process start time is an uptime value on Linux and a unix timestamp on
+    Windows, so the elapsed time is computed against the matching clock.
+    """
+    if IS_WINDOWS:
+        elapsed = max(time.time() - start_time, 1.0)
+    else:
+        with open("/proc/uptime") as f:
+            system_uptime_sec = int(float(f.read().split()[0]))
+
+        elapsed = max(system_uptime_sec - start_time, 1.0)
+
+    return (user + system) * 100 / elapsed
+
+
+def _process_resident_memory(process: psutil.Process) -> float:
+    """Resident memory of a process in KB."""
+    if IS_WINDOWS:
+        return process.memory_info().rss / 1024
+
+    with open(f"/proc/{process.pid}/statm") as f:
+        mem_stats = f.readline().split()
+
+    return int(mem_stats[1]) * os.sysconf("SC_PAGE_SIZE") / 1024
+
+
 def get_physical_interfaces(interfaces) -> list:
     if not interfaces:
         return []
+
+    if IS_WINDOWS:
+        # psutil reports the same interface list without /proc/net/dev
+        physical_interfaces = list(psutil.net_if_addrs().keys())
+
+        return [
+            name for name in physical_interfaces if name.startswith(tuple(interfaces))
+        ]
 
     with open("/proc/net/dev") as file:
         lines = file.readlines()
@@ -200,6 +270,10 @@ _bandwidth_warning_logged = False
 def get_bandwidth_stats(config) -> dict[str, dict]:
     """Get bandwidth usages for each ffmpeg process id"""
     global _bandwidth_warning_logged
+
+    if not hasattr(os, "geteuid"):
+        # nethogs is Linux only, and Windows has no capability model to grant
+        return {}
 
     if os.geteuid() != 0:
         if not _bandwidth_warning_logged:
@@ -244,6 +318,9 @@ def get_bandwidth_stats(config) -> dict[str, dict]:
 
 
 def is_vaapi_amd_driver() -> bool:
+    if IS_WINDOWS:
+        return False
+
     # Use the explicitly configured driver, if available
     driver = os.environ.get(DRIVER_ENV_VAR)
     if driver:
@@ -264,6 +341,9 @@ def is_vaapi_amd_driver() -> bool:
 
 def get_amd_gpu_stats() -> dict[str, str] | None:
     """Get stats using radeontop."""
+    if IS_WINDOWS:
+        return None
+
     radeontop_command = ["radeontop", "-d", "-", "-l", "1"]
 
     p = sp.run(
@@ -345,6 +425,9 @@ def enumerate_drm_devices() -> dict[str, str]:
     verified without /dev access. Returns {pdev: driver}, e.g.
     {"0000:00:02.0": "i915"}.
     """
+    if IS_WINDOWS:
+        return {}
+
     devices: dict[str, str] = {}
 
     try:
@@ -694,6 +777,9 @@ def get_intel_gpu_stats(
 
 def get_openvino_npu_stats() -> dict[str, str] | None:
     """Get NPU stats using openvino."""
+    if IS_WINDOWS:
+        return None
+
     for accel_path in sorted(glob.glob("/sys/class/accel/accel*")):
         try:
             driver = os.path.basename(os.readlink(f"{accel_path}/device/driver"))
@@ -741,6 +827,9 @@ def get_openvino_npu_stats() -> dict[str, str] | None:
 
 def get_rockchip_gpu_stats() -> dict[str, str | float] | None:
     """Get GPU stats using rk."""
+    if IS_WINDOWS:
+        return None
+
     try:
         with open("/sys/kernel/debug/rkrga/load") as f:
             content = f.read()
@@ -771,6 +860,9 @@ def get_rockchip_gpu_stats() -> dict[str, str | float] | None:
 
 def get_rockchip_npu_stats() -> dict[str, float | str] | None:
     """Get NPU stats using rk."""
+    if IS_WINDOWS:
+        return None
+
     try:
         with open("/sys/kernel/debug/rknpu/load") as f:
             npu_output = f.read()
@@ -803,6 +895,9 @@ def get_rockchip_npu_stats() -> dict[str, float | str] | None:
 
 def get_axcl_npu_stats() -> dict[str, str | float] | None:
     """Get NPU stats using axcl."""
+    if IS_WINDOWS:
+        return None
+
     # Check if axcl-smi exists
     axcl_smi_path = "/usr/bin/axcl/axcl-smi"
     if not os.path.exists(axcl_smi_path):
@@ -919,6 +1014,9 @@ def get_nvidia_gpu_stats() -> dict[int, dict]:
 
 
 def get_jetson_stats() -> dict[str, str] | None:
+    if IS_WINDOWS:
+        return None
+
     results: dict[str, str] = {}
 
     try:
@@ -942,6 +1040,9 @@ def get_jetson_stats() -> dict[str, str] | None:
 
 def get_hailo_temps() -> dict[str, float]:
     """Get temperatures for Hailo devices."""
+    if IS_WINDOWS:
+        return {}
+
     try:
         from hailo_platform import Device
     except ModuleNotFoundError:
@@ -1619,6 +1720,10 @@ def process_logs(
 
 
 def set_file_limit() -> None:
+    # Windows has no file descriptor limit to raise, and no resource module
+    if resource is None:
+        return
+
     # Newer versions of containerd 2.X+ impose a very low soft file limit of 1024
     # This applies to OSs like HA OS (see https://github.com/home-assistant/operating-system/issues/4110)
     # Attempt to increase this limit
@@ -1634,27 +1739,36 @@ def set_file_limit() -> None:
     )
 
 
-def get_fs_type(path: str) -> str:
-    bestMatch = ""
-    fsType = ""
-    for part in psutil.disk_partitions(all=True):
-        if path.startswith(part.mountpoint) and len(bestMatch) < len(part.mountpoint):
-            fsType = part.fstype
-            bestMatch = part.mountpoint
-    return fsType
-
-
 def calculate_shm_requirements(config) -> dict:
-    try:
-        storage_stats = shutil.disk_usage("/dev/shm")
-    except (FileNotFoundError, OSError):
-        return {}
+    """Shared memory available for decoded frames.
 
-    total_mb = round(storage_stats.total / pow(2, 20), 1)
-    used_mb = round(storage_stats.used / pow(2, 20), 1)
-    free_mb = round(storage_stats.free / pow(2, 20), 1)
+    Inside the container frames live in /dev/shm, which has a fixed size and
+    therefore has to be checked against what the cameras need. On Windows and
+    macOS shared memory is backed by the page file, so there is no separate
+    limit to warn about and every camera gets the configured frame count. The
+    same numbers are still reported so the storage panel has something to show.
+    """
+    shm_total = get_shared_memory_total_mb()
 
-    # required for log files + nginx cache
+    if shm_total is None:
+        total_mb = round(psutil.virtual_memory().total / pow(2, 20), 1)
+        used_mb = 0.0
+        free_mb = round(psutil.virtual_memory().available / pow(2, 20), 1)
+        mount_type = get_fs_type(get_tmp_dir())
+        page_file_backed = True
+    else:
+        try:
+            storage_stats = shutil.disk_usage(get_tmp_dir())
+        except (FileNotFoundError, OSError):
+            return {}
+
+        total_mb = round(storage_stats.total / pow(2, 20), 1)
+        used_mb = round(storage_stats.used / pow(2, 20), 1)
+        free_mb = round(storage_stats.free / pow(2, 20), 1)
+        mount_type = get_fs_type(get_tmp_dir())
+        page_file_backed = False
+
+    # required for log files + the web server cache
     min_req_shm = 40 + 10
 
     if config.birdseye.restream:
@@ -1676,10 +1790,15 @@ def calculate_shm_requirements(config) -> dict:
         1,
     )
 
-    shm_frame_count = min(
-        int(os.environ.get(SHM_FRAMES_VAR, "50")),
-        int(available_shm / cam_total_frame_size),
-    )
+    configured_frames = int(os.environ.get(SHM_FRAMES_VAR, "50"))
+
+    if page_file_backed:
+        shm_frame_count = configured_frames
+    else:
+        shm_frame_count = min(
+            configured_frames,
+            int(available_shm / cam_total_frame_size),
+        )
 
     # minimum required shm recommendation
     min_shm = round(min_req_shm + cam_total_frame_size * 20)
@@ -1688,7 +1807,8 @@ def calculate_shm_requirements(config) -> dict:
         "total": total_mb,
         "used": used_mb,
         "free": free_mb,
-        "mount_type": get_fs_type("/dev/shm"),
+        "mount_type": mount_type,
+        "page_file_backed": page_file_backed,
         "available": round(available_shm, 1),
         "camera_frame_size": cam_total_frame_size,
         "shm_frame_count": shm_frame_count,

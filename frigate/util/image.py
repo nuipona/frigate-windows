@@ -5,7 +5,6 @@ import logging
 import subprocess as sp
 import threading
 from abc import ABC, abstractmethod
-from multiprocessing import resource_tracker as _mprt
 from multiprocessing import shared_memory as _mpshm
 from string import printable
 from typing import Any, AnyStr
@@ -13,6 +12,11 @@ from typing import Any, AnyStr
 import cv2
 import numpy as np
 from unidecode import unidecode
+
+try:  # POSIX only: Windows has no resource tracker for shared memory
+    from multiprocessing import resource_tracker as _mprt
+except ImportError:  # pragma: no cover - Windows
+    _mprt = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -1021,8 +1025,10 @@ class UntrackedSharedMemory(_mpshm.SharedMemory):
     ) -> None:
         self._track = track
 
-        # if tracking, normal init will suffice
-        if track:
+        # if tracking, normal init will suffice. So does an untracked segment
+        # on a platform without a resource tracker, since nothing registers it
+        # in the first place.
+        if track or _mprt is None:
             return super().__init__(name=name, create=create, size=size)
 
         # lock so that other threads don't attempt to use the
@@ -1046,7 +1052,7 @@ class UntrackedSharedMemory(_mpshm.SharedMemory):
     def unlink(self) -> None:
         if _mpshm._USE_POSIX and self._name:
             _mpshm._posixshmem.shm_unlink(self._name)
-            if self._track:
+            if self._track and _mprt is not None:
                 _mprt.unregister(self._name, "shared_memory")
 
 

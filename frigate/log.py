@@ -10,12 +10,13 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from enum import Enum
 from functools import wraps
-from logging.handlers import QueueHandler, QueueListener
+from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
 from multiprocessing.managers import SyncManager
 from queue import Empty, Queue
 from typing import Any, TypeVar, cast
 
 from frigate.util.builtin import clean_camera_user_pass
+from frigate.util.platform import get_service_log_path, serves_web_app
 
 # lets a decorator keep the signature of the function it wraps
 _F = TypeVar("_F", bound=Callable[..., Any])
@@ -55,10 +56,43 @@ log_listener: QueueListener | None = None
 log_queue: Queue | None = None
 
 
+def service_log_handler() -> logging.Handler | None:
+    """Handler writing the log to the file the web UI reads.
+
+    Only used when Frigate is not supervised by s6, because inside the
+    container s6-log already collects stdout into that file and a second
+    writer would interleave with it.
+    """
+    if not serves_web_app():
+        return None
+
+    path = get_service_log_path("frigate")
+
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+
+        # bound the file: a long running install must not fill the disk
+        handler = RotatingFileHandler(path, maxBytes=5 * 1024 * 1024, backupCount=2)
+        handler.setFormatter(LOG_HANDLER.formatter)
+        return handler
+    except OSError as err:
+        logging.getLogger(__name__).warning(
+            "Unable to write the log file for the web UI: %s", err
+        )
+        return None
+
+
 def setup_logging(manager: SyncManager) -> None:
     global log_listener, log_queue
     log_queue = manager.Queue()
-    log_listener = QueueListener(log_queue, LOG_HANDLER, respect_handler_level=True)
+
+    handlers: list[logging.Handler] = [LOG_HANDLER]
+    file_handler = service_log_handler()
+
+    if file_handler is not None:
+        handlers.append(file_handler)
+
+    log_listener = QueueListener(log_queue, *handlers, respect_handler_level=True)
 
     atexit.register(_stop_logging)
     log_listener.start()
@@ -113,7 +147,10 @@ def reopen_std_streams() -> None:
     sys.stderr = os.fdopen(2, "w")
 
 
-os.register_at_fork(after_in_child=reopen_std_streams)
+if hasattr(os, "register_at_fork"):
+    # Windows has no fork, so there is nothing to reopen: children start
+    # through spawn with their own streams.
+    os.register_at_fork(after_in_child=reopen_std_streams)
 
 
 # based on https://codereview.stackexchange.com/a/17959

@@ -20,13 +20,19 @@ If you already have Frigate installed as a Home Assistant App, check out the [ge
 
 **MQTT broker (optional)** - An MQTT broker is optional with Frigate, but is required for the Home Assistant integration. If using Home Assistant, Frigate and Home Assistant must be connected to the same MQTT broker.
 
+**ffmpeg** - A native Windows install needs an ffmpeg build on `PATH` (or [`ffmpeg.path`](/configuration/ffmpeg) pointing at one). `winget install Gyan.FFmpeg` is the easiest way to get one.
+
+**go2rtc** - Live view (MSE and WebRTC) is served by [go2rtc](https://github.com/AlexxIT/go2rtc). Put `go2rtc.exe` next to `config.yml`, in `bin\` beside the Frigate install, or anywhere on `PATH`. Frigate starts and stops it for you.
+
 ## Preparing your hardware
 
 ### Operating System
 
 Frigate runs best with Docker installed on bare metal Debian-based distributions. For ideal performance, Frigate needs low overhead access to underlying hardware for the Coral and GPU devices. Running Frigate in a VM on top of Proxmox, ESXi, Virtualbox, etc. is not recommended though [some users have had success with Proxmox](#proxmox).
 
-Windows is not officially supported, but some users have had success getting it to run under WSL or Virtualbox. Getting the GPU and/or Coral devices properly passed to Frigate may be difficult or impossible. Search previous discussions or issues for help.
+### Windows
+
+Windows is supported as a native install, without Docker or WSL. See [Windows](#windows) below for how to run it and where its files go.
 
 ### Storage
 
@@ -595,6 +601,102 @@ If you are using `docker run`, add this option to your command `--device /dev/ax
 #### Configuration
 
 Finally, configure [hardware object detection](/configuration/object_detectors#axera) to complete the setup.
+
+## Windows
+
+Frigate runs natively on Windows from a Python environment, without Docker or WSL. It serves the web interface, the API, recorded video and the media directories itself, so nothing else has to be installed or configured.
+
+### Requirements
+
+- Windows 10 or 11, 64-bit
+- [Python](https://www.python.org/downloads/) 3.13 or newer, with "Add python.exe to PATH" checked
+- [ffmpeg](https://ffmpeg.org/download.html), for example `winget install Gyan.FFmpeg`
+- [go2rtc](https://github.com/AlexxIT/go2rtc/releases) for live view, see below
+
+### Installing
+
+```powershell
+git clone https://github.com/blakeblackshear/frigate.git
+cd frigate
+py -3.13 -m venv venv
+venv\Scripts\activate
+pip install -r docker/main/requirements-wheels.txt
+pip install -e .
+```
+
+Detector runtimes are installed per detector the first time you configure one, so no accelerator libraries have to be installed up front.
+
+### Running
+
+```powershell
+python -m frigate
+```
+
+Frigate stops on Ctrl+C. Closing the console window also stops it, and the log file in `tmp\logs\frigate\current` is where the same output is written.
+
+### Where files go
+
+Everything lives under one base directory, `%LOCALAPPDATA%\Frigate` by default:
+
+| Path | Contents |
+| ------------------------------------ | -------------------------------------------- |
+| `<base>\config` | `config.yml`, `frigate.db` and the model cache |
+| `<base>\media\recordings` | Internal recording segments |
+| `<base>\media\clips` | Snapshots and thumbnails |
+| `<base>\media\exports` | Clips and timelapses exported from the UI |
+| `<base>\cache` | Recording segment cache and preview frames |
+| `<base>\tmp\logs` | Log files for the web UI's log viewer |
+
+Recordings are large, so if Windows is installed on a small SSD it is worth putting them on another drive:
+
+```powershell
+setx FRIGATE_BASE_DIR "D:\Frigate"
+```
+
+`FRIGATE_BASE_DIR` moves everything above to that drive. `FRIGATE_CONFIG_DIR`, `FRIGATE_MEDIA_DIR`, `FRIGATE_CACHE_DIR` and `FRIGATE_TMP_DIR` move one directory each, for example to keep the config on `C:` and recordings on `D:`.
+
+### go2rtc
+
+Live view uses go2rtc, which Frigate starts and stops itself. Download the [Windows build](https://github.com/AlexxIT/go2rtc/releases) and put `go2rtc.exe` in the config directory cache dir, in `bin\` beside the Frigate install, or anywhere on `PATH`. Without it everything except live view still works.
+
+### Ports
+
+| Port | Description |
+| ------- | ------------------------------------------------------------------------------ |
+| `5000` | Web interface and API. This is the internal port, so it is not authenticated. |
+| `8554` | RTSP restreaming |
+| `8555` | WebRTC connections for cameras with two-way talk support |
+
+Binding the web interface to another port requires authentication for it, and is what a reverse proxy should point at:
+
+```powershell
+setx FRIGATE_WEB_PORT "8971"
+setx FRIGATE_WEB_HOST "0.0.0.0"
+```
+
+Without `FRIGATE_WEB_PORT` the interface is served on the internal port, which anyone who can reach it has admin access to. Restrict it to this machine with `setx FRIGATE_WEB_HOST "127.0.0.1"` or put it behind a reverse proxy.
+
+### Hardware acceleration
+
+ffmpeg hardware acceleration is available through Direct3D 11 (`preset-windows-d3d11va`), DirectX Video Acceleration (`preset-windows-dxva2`), Intel Quick Sync (`preset-windows-qsv-h264`, `preset-windows-qsv-h265`) and Nvidia NVENC (`preset-windows-nvenc`):
+
+```yaml
+ffmpeg:
+  hwaccel_args: preset-windows-d3d11va
+```
+
+Detectors run on the CPU, on an Nvidia GPU through onnxruntime's CUDA or TensorRT providers, on an Intel GPU or NPU through OpenVINO, or on a Coral, depending on what is installed. Each model picks its own hardware:
+
+```yaml
+models:
+  - devices:
+      - onnx:0
+```
+
+### Notes
+
+- The recordings cache and shared memory are backed by the page file. If many cameras are configured, increase the page file size, which is what the storage panel measures against.
+- Birdseye restreaming is not available because Windows cannot give go2rtc a pipe to read frames from. The birdseye view in the web UI is unaffected.
 
 ## Docker
 
