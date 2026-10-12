@@ -7,22 +7,29 @@ with no Docker and no WSL. Line references are against the current tree.
 
 ## TL;DR
 
-The hard architectural work is **done and done well**. This is not a codebase
-that needs porting; it needs a correctness pass on process lifecycle, a proper
-packaging story, and a much wider Windows test net.
+The hard architectural work was **already done and done well**. This is not a
+codebase that needs porting; it needed a correctness pass on process lifecycle,
+a proper packaging story, and a much wider Windows test net.
 
-The three things that cost the most and matter the most:
+**Update:** the four P0 process-lifecycle bugs below are now fixed, with unit
+tests for each branch and a new end-to-end CI job
+(`windows_native_e2e`) that boots Frigate against a synthetic camera on
+`windows-latest`, records, stops it through the same restart path the UI uses,
+and asserts that it shut down cleanly, left no orphaned processes and left no
+truncated recordings. Neither the fixes nor the end-to-end test has been run on
+real Windows yet — see [Part 5](#part-5--what-is-still-unverified).
 
-1. **`restart_frigate()` hard-kills Frigate instead of shutting it down** on
-   Windows. `os.kill(pid, SIGINT)` is `TerminateProcess` there
-   ([P0-1](#p0-1-restart_frigate-hard-kills-instead-of-shutting-down)).
-2. **Every ffmpeg process is hard-killed**, so recordings are never finalized
-   and orphaned children pile up
-   ([P0-2](#p0-2-ffmpeg-processes-are-hard-killed),
-   [P0-3](#p0-3-child-processes-are-orphaned-on-exit)).
-3. **There is no installer, no service, and no bundled ffmpeg/go2rtc** — the
+What remains, in rough order of cost to the user:
+
+1. **There is no installer, no service, and no bundled ffmpeg/go2rtc** — the
    documented install is a 7-step manual PowerShell recipe
    ([P3-1](#p3-1-no-windows-packaging-or-service-story)).
+2. **`hwaccel_args: auto` can never detect Windows hardware**, so the default
+   config means software decode even on a machine with a capable GPU
+   ([P1-1](#p1-1-hwaccel_args-auto-can-never-detect-windows-hardware)).
+3. **Windows CI is still a thin allowlist** of six tests against 121 test
+   files, so new tests are Linux-only by default and regressions go unseen
+   ([P3-2](#p3-2-windows-ci-is-a-thin-allowlist)).
 
 ---
 
@@ -102,6 +109,8 @@ the code do once it runs."**
 
 ### P0-1. `restart_frigate()` hard-kills instead of shutting down
 
+**Status: fixed.** `restart_frigate()` now calls `signal.raise_signal(SIGINT)` on Windows (`frigate/util/services.py`). Covered by `test_restart_frigate.test_windows_raises_the_signal_instead_of_killing`.
+
 `frigate/util/services.py:47-52`
 
 ```python
@@ -135,6 +144,8 @@ assert `raise_signal` is called, so the branch is actually covered.
 ---
 
 ### P0-2. ffmpeg processes are hard-killed
+
+**Status: fixed.** The new `request_ffmpeg_stop()` (`frigate/util/ffmpeg.py`) asks ffmpeg to stop before anything kills it: the `q` command on stdin, then a `CTRL_BREAK_EVENT` into the process group, then `terminate()` as the backstop. Every branch is covered in `frigate/test/test_ffmpeg_stop.py`.
 
 `frigate/util/ffmpeg.py:13` (`stop_ffmpeg`), `:30` (`terminate_ffmpeg_stream`),
 `frigate/output/camera.py:80` and `frigate/output/birdseye.py:227`
@@ -186,6 +197,8 @@ messages match reality.
 
 ### P0-3. Child processes are orphaned on exit
 
+**Status: fixed.** The new `frigate/util/job_object.py` puts Frigate into a Windows job object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, installed before anything is spawned. Layout and opt-out are covered in `frigate/test/test_job_object.py`; the orphan check itself is in the end-to-end test.
+
 On Linux, s6 (or a process-group kill) reaps everything Frigate spawned. On
 Windows there is no such mechanism, and `start_new_session=True` maps to
 `CREATE_NEW_PROCESS_GROUP`, which creates a group but does not tie its lifetime
@@ -220,6 +233,8 @@ and detector processes keep running. The damage compounds:
 ---
 
 ### P0-4. Child processes do not handle `SIGBREAK`
+
+**Status: fixed.** `frigate/service_manager/multiprocessing.py` now registers the same handler for `SIGBREAK` where it exists, alongside `SIGTERM` and `SIGINT`.
 
 `frigate/service_manager/multiprocessing.py:155-156`
 
@@ -583,10 +598,10 @@ Two cheap wins:
 
 | # | Item | Why here |
 | --- | --- | --- |
-| 1 | [P0-1](#p0-1-restart_frigate-hard-kills-instead-of-shutting-down) `raise_signal` | One-line fix, removes a guaranteed data-loss path |
-| 2 | [P0-2](#p0-2-ffmpeg-processes-are-hard-killed) graceful ffmpeg stop | Fixes recording loss on every restart; unblocks everything downstream |
-| 3 | [P0-3](#p0-3-child-processes-are-orphaned-on-exit) Job Object | Makes Frigate restartable on Windows at all |
-| 4 | [P0-4](#p0-4-child-processes-do-not-handle-sigbreak) `SIGBREAK` in children | Closes the main orphan source |
+| ~~1~~ | ~~[P0-1](#p0-1-restart_frigate-hard-kills-instead-of-shutting-down) `raise_signal`~~ | **done** |
+| ~~2~~ | ~~[P0-2](#p0-2-ffmpeg-processes-are-hard-killed) graceful ffmpeg stop~~ | **done** |
+| ~~3~~ | ~~[P0-3](#p0-3-child-processes-are-orphaned-on-exit) Job Object~~ | **done** |
+| ~~4~~ | ~~[P0-4](#p0-4-child-processes-do-not-handle-sigbreak) `SIGBREAK` in children~~ | **done** |
 | 5 | [P3-2](#p3-2-windows-ci-is-a-thin-allowlist)(1) run the full suite on Windows | You cannot fix what CI never exercises; expect to find more |
 | 6 | [P1-2](#p1-2-the-docs-recommend-a-preset-that-does-not-exist-for-decode) preset validator + real Windows decode presets | Removes a documented path that cannot work |
 | 7 | [P1-1](#p1-1-hwaccel_args-auto-can-never-detect-windows-hardware) fix `auto` on Windows | The default config currently always means "software decode" |
@@ -596,8 +611,6 @@ Two cheap wins:
 | 11 | [P2-4](#p2-4-antivirus-and-indexing-hold-files-open) / [P2-5](#p2-5-filelock-on-windows-needs-a-real-cross-process-test) / [P2-6](#p2-6-shlexsplitposixtrue-mangles-unquoted-windows-paths) robustness | Field-hardening |
 | 12 | [P3-1](#p3-1-no-windows-packaging-or-service-story)(3) Windows service | Do after the signal work in P0-4, or it will be built on a broken base |
 | 13 | [P3-3](#p3-3-detector-coverage-on-windows-is-narrow) DirectML | Broadens hardware support |
-
----
 
 ## Part 4 — What is already right, and worth protecting
 
@@ -616,3 +629,50 @@ Worth saying explicitly so it does not get refactored away:
   work (no service, no Coral/Hailo, no `/dev/shm` accounting, page-file-backed
   shared memory). That is more useful than optimistic docs, and it is the main
   reason the gaps above are enumerable at all.
+
+---
+
+## Part 5 — What is still unverified
+
+Everything above was written and checked from Linux. That bounds what the
+changes below actually guarantee, and it is worth being precise about it.
+
+**Verified here** (20 unit tests, `ruff` clean):
+
+- every branch of `request_ffmpeg_stop()` — POSIX terminate, Windows `q` on
+  stdin, the break-event fallback, and each fallback to `terminate()`
+- `restart_frigate()` on the Windows path now calls `signal.raise_signal`
+  rather than `os.kill`
+- the ctypes layout of the job object structures, byte for byte
+  (this caught a real bug: `wintypes.DWORD` is `c_ulong`, which is 4 bytes on
+  Windows and 8 on Linux, so the struct was 8 bytes too large and every field
+  after `LimitFlags` was misaligned. It works on Windows by accident; pinning
+  `c_uint32` makes it correct and checkable everywhere)
+- the opt-out path and the no-op path for the job object
+
+**Not verified — needs one run on real Windows:**
+
+- that the job object installs at all, and that it does not kill children
+  early. `FRIGATE_NO_JOB_OBJECT=1` disables it if it misbehaves.
+- that ffmpeg actually honours `q` on a piped stdin on Windows. If it does
+  not, the break event or `terminate()` takes over and the behaviour is
+  exactly what it is today, so this fails safe.
+- that Frigate exits 0 after `/api/restart`. This is the assertion most likely
+  to need loosening on a first run, and the failure message carries Frigate's
+  own log tail so it should say why.
+- the end-to-end config itself: `testsrc` through `-c:v libx264` into
+  `-f segment`, whether the CPU TFLite model downloads and loads on the
+  runner, and whether the first segment lands in `media/recordings` inside the
+  180s budget.
+
+The `windows_native_e2e` job uploads Frigate's log and media on failure, so
+the first red run should be enough to fix any of these.
+
+**One thing the end-to-end test deliberately does not cover:** the
+service-mode shutdown path. A Windows service runs in session 0 with no
+console, so `CTRL_BREAK_EVENT` and `SIGBREAK` do not exist there at all, and
+neither does the console-close behaviour the docs describe. When
+[P3-1](#p3-1-no-windows-packaging-or-service-story)(3) is built,
+`install_signal_handlers()` needs a service-aware branch and the graceful
+ffmpeg stop has to keep working without console events — which is why `q` on
+stdin is the primary mechanism rather than the break event.

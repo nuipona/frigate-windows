@@ -12,6 +12,7 @@ from frigate.app import FrigateApp
 from frigate.config import FrigateConfig
 from frigate.log import setup_logging
 from frigate.util.config import find_config_file
+from frigate.util.job_object import install as install_job_object
 from frigate.util.platform import (
     describe,
     ensure_runtime_dirs,
@@ -28,6 +29,11 @@ def main() -> None:
 
     # Setup the logging thread
     setup_logging(manager)
+
+    # Join a Windows job object before anything is spawned, so every process
+    # Frigate starts is a member and is terminated with it. Nothing happens on
+    # other platforms, where the supervisor or a process group does this.
+    install_job_object()
 
     threading.current_thread().name = "frigate"
     stop_event = mp.Event()

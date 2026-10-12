@@ -152,8 +152,21 @@ class ServiceProcess(BaseServiceProcess):
                 # Nobody is monitoring stop_event. We should raise SystemExit.
                 sys.exit()
 
-        signal.signal(signal.SIGTERM, receiveSignal)
-        signal.signal(signal.SIGINT, receiveSignal)
+        # SIGTERM can be registered on Windows but is never delivered, and
+        # closing the console window raises SIGBREAK there rather than SIGINT.
+        # A child that does not handle SIGBREAK is killed by the default
+        # action, so it never runs after_run() and never stops the ffmpeg
+        # processes it started.
+        handled = (signal.SIGTERM, signal.SIGINT)
+
+        if getattr(signal, "SIGBREAK", None) is not None:
+            handled += (signal.SIGBREAK,)
+
+        for signum in handled:
+            try:
+                signal.signal(signum, receiveSignal)
+            except (ValueError, OSError):  # pragma: no cover - not the main thread
+                pass
 
         self.logger = logging.getLogger(self.name)
 

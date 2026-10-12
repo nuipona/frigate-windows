@@ -44,11 +44,29 @@ except ImportError:  # pragma: no cover - Windows
 logger = logging.getLogger(__name__)
 
 
+def _stop_self() -> None:
+    """Ask this process to shut down the way Ctrl+C would.
+
+    ``os.kill`` cannot be used for this on Windows. Every signal other than
+    ``CTRL_C_EVENT`` and ``CTRL_BREAK_EVENT`` is handed to ``TerminateProcess``
+    there, so ``os.kill(pid, SIGINT)`` does not run the SIGINT handler, it
+    kills the process outright: no ``finally`` block runs, the database is not
+    closed cleanly, recording segments are not finalized and every child
+    process is orphaned.
+
+    ``signal.raise_signal`` invokes whatever Python handler is installed for
+    the signal, on every platform. uvicorn installs its own SIGINT handler
+    while it is serving and only sets a flag from it, so the HTTP request
+    that asked for the restart still completes before the shutdown begins.
+    """
+    signal.raise_signal(signal.SIGINT)
+
+
 def restart_frigate():
     if IS_WINDOWS or not hasattr(signal, "SIGINT"):
         # no supervisor outside of the container: exiting is the closest
         # equivalent, and a launcher restarts the application if asked to
-        os.kill(os.getpid(), signal.SIGINT)
+        _stop_self()
         return
 
     proc = psutil.Process(1)

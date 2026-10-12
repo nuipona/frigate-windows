@@ -9,6 +9,7 @@ from typing import Any
 
 from frigate.config import CameraConfig, FfmpegConfig, FrigateConfig
 from frigate.output.ws_auth import ws_has_camera_access
+from frigate.util.ffmpeg import stop_ffmpeg
 
 logger = logging.getLogger(__name__)
 
@@ -77,13 +78,9 @@ class FFMpegConverter(threading.Thread):
             return False
 
     def exit(self) -> None:
-        self.process.terminate()
-
-        try:
-            self.process.communicate(timeout=30)
-        except sp.TimeoutExpired:
-            self.process.kill()
-            self.process.communicate()
+        # stop_ffmpeg asks ffmpeg to stop rather than killing it outright,
+        # which matters on Windows where terminate() is TerminateProcess
+        stop_ffmpeg(self.process, logger)
 
     def run(self) -> None:
         while not self.stop_event.is_set():

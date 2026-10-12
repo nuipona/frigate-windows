@@ -1,6 +1,8 @@
 """FFmpeg utility functions for managing ffmpeg processes."""
 
 import logging
+import os
+import signal
 import subprocess as sp
 from collections.abc import Callable
 from typing import Any
@@ -9,13 +11,72 @@ from frigate.const import PROCESS_PRIORITY_LOW
 from frigate.log import LogPipe
 from frigate.util.platform import IS_WINDOWS, get_process_priority_class
 
+#: how long to wait for ffmpeg after asking it to stop before killing it
+FFMPEG_STOP_TIMEOUT = 30
 
-def stop_ffmpeg(ffmpeg_process: sp.Popen[Any], logger: logging.Logger):
-    logger.info("Terminating the existing ffmpeg process...")
+#: how long ffmpeg gets to close the file it is writing after a quit command
+FFMPEG_QUIT_GRACE = 10.0
+
+
+def request_ffmpeg_stop(ffmpeg_process: sp.Popen[Any], logger: logging.Logger) -> None:
+    """Ask an ffmpeg process to exit, letting it finish the file it is writing.
+
+    On POSIX this is ``terminate()``: SIGTERM, which ffmpeg handles by closing
+    and finalizing whatever it has open.
+
+    On Windows ``terminate()`` is ``TerminateProcess``, so an MP4 segment that
+    has not been closed yet is left without a moov atom and cannot be played.
+    Windows therefore gets the two mechanisms that let ffmpeg exit by itself:
+
+    1. the ``q`` command on stdin, which ffmpeg reads even when stdin is a
+       pipe rather than a terminal
+    2. a ``CTRL_BREAK_EVENT`` into the process group ``start_new_session``
+       created, which ffmpeg's console handler responds to by shutting down
+       cleanly
+
+    Both are best effort. Anything that goes wrong leaves ``terminate()`` as
+    the fallback, so the worst case is what already happens today.
+    """
+    if not IS_WINDOWS:
+        ffmpeg_process.terminate()
+        return
+
+    # 1. quit command on stdin
+    if ffmpeg_process.stdin is not None:
+        try:
+            ffmpeg_process.stdin.write(b"q")
+            ffmpeg_process.stdin.flush()
+        except (BrokenPipeError, OSError, ValueError) as err:
+            logger.debug("Could not send ffmpeg the quit command: %s", err)
+        else:
+            try:
+                ffmpeg_process.wait(timeout=FFMPEG_QUIT_GRACE)
+                return
+            except sp.TimeoutExpired:
+                logger.debug("ffmpeg is still running after the quit command")
+
+    # 2. break event into the process group. CTRL_BREAK_EVENT can be directed
+    #    at a single process group, unlike CTRL_C_EVENT, which is silently
+    #    dropped when one is named. It does need a console, so a Frigate
+    #    running as a Windows service falls through to terminate().
+    ctrl_break = getattr(signal, "CTRL_BREAK_EVENT", None)
+
+    if ctrl_break is not None:
+        try:
+            os.kill(ffmpeg_process.pid, ctrl_break)
+            return
+        except (OSError, ValueError) as err:
+            logger.debug("Could not send ffmpeg a break event: %s", err)
+
     ffmpeg_process.terminate()
+
+
+def stop_ffmpeg(ffmpeg_process: sp.Popen[Any], logger: logging.Logger) -> None:
+    logger.info("Terminating the existing ffmpeg process...")
+    request_ffmpeg_stop(ffmpeg_process, logger)
     try:
         logger.info("Waiting for ffmpeg to exit gracefully...")
-        ffmpeg_process.communicate(timeout=30)
+        ffmpeg_process.communicate(timeout=FFMPEG_STOP_TIMEOUT)
         logger.info("FFmpeg has exited")
     except sp.TimeoutExpired:
         logger.info("FFmpeg didn't exit. Force killing...")
@@ -36,7 +97,7 @@ def terminate_ffmpeg_stream(proc: sp.Popen[Any]) -> None:
         except OSError:
             pass
     if proc.poll() is None:
-        proc.terminate()
+        request_ffmpeg_stop(proc, logger)
         try:
             proc.wait(timeout=5)
         except sp.TimeoutExpired:
@@ -53,12 +114,15 @@ def start_or_restart_ffmpeg(
         # flush after the stop so the logs cover ffmpeg's output up to exit
         logpipe.dump()
 
+    # stdin is a pipe rather than /dev/null so that request_ffmpeg_stop can
+    # write ffmpeg's quit command to it. ffmpeg never reads stdin for an input
+    # unless "-" is the source, so an unwritten pipe costs nothing.
     if frame_size is None:
         process = sp.Popen(
             ffmpeg_cmd,
             stdout=sp.DEVNULL,
             stderr=logpipe,
-            stdin=sp.DEVNULL,
+            stdin=sp.PIPE,
             start_new_session=True,
         )
     else:
@@ -66,7 +130,7 @@ def start_or_restart_ffmpeg(
             ffmpeg_cmd,
             stdout=sp.PIPE,
             stderr=logpipe,
-            stdin=sp.DEVNULL,
+            stdin=sp.PIPE,
             bufsize=frame_size * 10,
             start_new_session=True,
         )
