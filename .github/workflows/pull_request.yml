@@ -115,6 +115,7 @@ jobs:
             frigate.test.test_platform_windows `
             frigate.test.test_native_web_app `
             frigate.test.test_shared_memory_frame_manager `
+            frigate.test.test_capture_frames `
             frigate.test.test_maintainer `
             frigate.test.test_ffmpeg_progress `
             frigate.test.test_sqlitevecq_windows `
