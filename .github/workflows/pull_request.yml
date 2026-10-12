@@ -163,41 +163,9 @@ jobs:
         if: failure()
         shell: pwsh
         run: |
-          function Write-LogAnnotations {
-            param([string]$Path, [string]$Prefix, [int]$MaxChunks = 40)
-            # GitHub truncates a long annotation, so the log is reduced first:
-            # repeated lines collapse into a single "x N repeated" marker and
-            # the rest is emitted in small chunks, one annotation per chunk.
-            if (-not (Test-Path $Path)) { return }
-            $deduped = New-Object System.Collections.Generic.List[string]
-            $previous = $null
-            $repeat = 0
-            foreach ($line in (Get-Content -Path $Path)) {
-              $clean = $line -replace "`r", ''
-              if ($clean -eq $previous) { $repeat++; continue }
-              if ($repeat -gt 0) { $deduped.Add(("  (x{0} like the line above)" -f $repeat)); $repeat = 0 }
-              $deduped.Add($clean)
-              $previous = $clean
-            }
-            if ($repeat -gt 0) { $deduped.Add(("  (x{0} like the line above)" -f $repeat)) }
+          . .\testing-scripts\publish-log-annotations.ps1
+          Publish-Log -Path 'lifecycle.log' -Prefix 'lifecycle-log' -Keep '^(ERROR|FAIL): |^Traceback|^AssertionError|^Ran |^FAILED|^OK'
 
-            $chunk = New-Object System.Collections.Generic.List[string]
-            $number = 0
-            foreach ($line in $deduped) {
-              $chunk.Add($line)
-              if ($chunk.Count -ge 4) {
-                $number++
-                if ($number -gt $MaxChunks) { return }
-                Write-Output ("::error title={0}-{1}::{2}" -f $Prefix, $number, ($chunk -join ' // '))
-                $chunk.Clear()
-              }
-            }
-            if ($chunk.Count -gt 0 -and $number -lt $MaxChunks) {
-              $number++
-              Write-Output ("::error title={0}-{1}::{2}" -f $Prefix, $number, ($chunk -join ' // '))
-            }
-          }
-          Write-LogAnnotations -Path 'lifecycle.log' -Prefix 'lifecycle-log' -MaxChunks 20
       - name: Validate first-run native configuration
         run: |
           $env:FRIGATE_BASE_DIR = Join-Path $env:RUNNER_TEMP "frigate-native-smoke"
@@ -272,60 +240,17 @@ jobs:
         env:
           FRIGATE_E2E_DIR: ${{ runner.temp }}\frigate-e2e
         run: |
-          function Publish-Log {
-            param(
-              [string]$Path,
-              [string]$Prefix,
-              [string[]]$Drop = @(),
-              [string]$Keep = '',
-              [int]$Head = 0,
-              [int]$Tail = 0,
-              [int]$Budget = 30000
-            )
-            # GitHub keeps only a handful of annotations per job, and a long
-            # message is truncated in the UI but complete through the API, so
-            # each view of a log is published as a single annotation.
-            if (-not (Test-Path $Path)) {
-              Write-Output ("::error title={0}::there is no log at {1}" -f $Prefix, $Path)
-              return
-            }
-
-            $kept = New-Object System.Collections.Generic.List[string]
-            foreach ($line in (Get-Content -Path $Path)) {
-              if ($Keep -ne '' -and $line -notmatch $Keep) { continue }
-              $skip = $false
-              foreach ($pattern in $Drop) {
-                if ($line -match $pattern) { $skip = $true; break }
-              }
-              if (-not $skip) { $kept.Add($line) }
-            }
-
-            if ($Head -gt 0 -and $Tail -gt 0 -and $kept.Count -gt ($Head + $Tail)) {
-              $omitted = $kept.Count - $Head - $Tail
-              $trimmed = New-Object System.Collections.Generic.List[string]
-              foreach ($line in $kept[0..($Head - 1)]) { $trimmed.Add($line) }
-              $trimmed.Add("... $omitted lines omitted ...")
-              foreach ($line in $kept[($kept.Count - $Tail)..($kept.Count - 1)]) {
-                $trimmed.Add($line)
-              }
-              $kept = $trimmed
-            }
-
-            $text = ($kept -join ' // ') -replace "`r", ''
-            if ($text.Length -gt $Budget) { $text = $text.Substring(0, $Budget) + ' ...(truncated)' }
-            Write-Output ("::error title={0}::{1}" -f $Prefix, $text)
-          }
+          . .\testing-scripts\publish-log-annotations.ps1
           Publish-Log -Path 'e2e.log' -Prefix 'e2e-log'
           # the start of Frigate's own log: the config it started with, the
-          # ffmpeg command lines, and what ffmpeg itself said on the way in
+          # ffmpeg command lines, and what ffmpeg said on the way in
           Publish-Log -Path (Join-Path $env:FRIGATE_E2E_DIR 'frigate-run.log') `
             -Prefix 'frigate-head' -Drop @('Unable to read frames') -Head 40 -Tail 20
           # everything ffmpeg or the recording maintainer complains about,
           # without the frame reader's retry storm drowning it out
           Publish-Log -Path (Join-Path $env:FRIGATE_E2E_DIR 'frigate-run.log') `
             -Prefix 'frigate-said' -Drop @('Unable to read frames') `
-            -Keep 'ffmpeg|lavfi|Invalid|No such|Conversion|Unknown|libx264|Error|error|Unable|discard|recording'
-
+            -Keep 'ffmpeg|lavfi|Invalid|No such|Conversion|Error|error|Unable|discard|recording'
 
       - name: Upload Frigate's log and media
         if: failure()
@@ -374,6 +299,15 @@ jobs:
               Write-Output ("::error title=suite-fail::{0}" -f ($_.Line -replace ' .*$', ''))
             }
           exit $suiteCode
+      - name: Report the unit suite failures
+        if: failure()
+        shell: pwsh
+        run: |
+          . .\testing-scripts\publish-log-annotations.ps1
+          Publish-Log -Path 'suite.log' -Prefix 'suite-summary' `
+            -Keep '^(ran |Ran |Running |Skipping |[0-9]+ tests fail|Every test|FAILED|OK)'
+          Publish-Log -Path 'suite.log' -Prefix 'suite-failures' `
+            -Keep '^(FAIL|ERROR): |^frigate\.test\.|^Traceback|^AssertionError|^[A-Za-z]+Error|^Ran '
       - name: Upload the test report
         if: failure()
         uses: actions/upload-artifact@v7

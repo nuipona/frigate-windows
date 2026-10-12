@@ -40,6 +40,11 @@ REPO_ROOT = str(Path(__file__).resolve().parents[2])
 #: a single camera on a synthetic source, recording only. Detection is off so
 #: the test does not depend on a real model, and hardware acceleration is off
 #: so it does not depend on a GPU or on go2rtc being reachable.
+#:
+#: `-re` is what makes the synthetic source behave like a camera. lavfi has no
+#: clock: without it ffmpeg decodes as fast as it can, which is hundreds of
+#: frames a second written into the detect pipe that Frigate reads at the
+#: camera's frame rate, and the frames that do get through are torn.
 CONFIG_TEMPLATE = """\
 mqtt:
   enabled: false
@@ -56,7 +61,7 @@ cameras:
     ffmpeg:
       inputs:
         - path: "testsrc=size=320x240:rate=10"
-          input_args: "-f lavfi"
+          input_args: "-f lavfi -re"
           roles:
             - record
       output_args:
