@@ -33,6 +33,7 @@ from frigate.output.birdseye import Birdseye
 from frigate.output.camera import JsmpegCamera
 from frigate.output.preview import PreviewRecorder
 from frigate.output.ws_auth import ws_has_camera_access
+from frigate.util.file import robust_move
 from frigate.util.image import SharedMemoryFrameManager, get_blank_yuv_frame
 from frigate.util.process import FrigateProcess
 
@@ -358,11 +359,13 @@ def move_preview_frames(loc: str) -> None:
     else:
         return
 
-    try:
-        if not os.path.exists(src):
-            return
+    if not os.path.exists(src):
+        return
 
-        shutil.move(src, dst)
+    try:
+        # a scanner or the indexer can hold a frame file open for a moment
+        # after it is written, which used to fail the whole move
+        robust_move(src, dst)
 
     except PermissionError:
         logger.error(

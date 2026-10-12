@@ -2,6 +2,12 @@ from enum import Enum
 
 from pydantic import Field, field_validator
 
+from frigate.ffmpeg_presets import (
+    PRESETS_HW_ACCEL_DECODE,
+    PRESETS_INPUT,
+    PRESETS_RECORD_OUTPUT,
+    validate_ffmpeg_args,
+)
 from frigate.util.config import resolve_ffmpeg_path
 
 from ..base import FrigateBaseModel
@@ -47,6 +53,12 @@ class FfmpegOutputArgsConfig(FrigateBaseModel):
         title="Sub stream record output arguments",
         description="Output arguments for record_sub role streams. The record output arguments are used when this is not set.",
     )
+
+    @field_validator("record", "record_sub")
+    @classmethod
+    def validate_record_args(cls, v):
+        validate_ffmpeg_args(v, "ffmpeg.output_args.record", PRESETS_RECORD_OUTPUT)
+        return v
 
     @property
     def effective_record_sub(self) -> str | list[str]:
@@ -101,6 +113,18 @@ class FfmpegConfig(FrigateBaseModel):
         description="Default GPU index used for hardware acceleration if available.",
     )
 
+    @field_validator("hwaccel_args")
+    @classmethod
+    def validate_hwaccel_args(cls, v):
+        validate_ffmpeg_args(v, "ffmpeg.hwaccel_args", PRESETS_HW_ACCEL_DECODE)
+        return v
+
+    @field_validator("input_args")
+    @classmethod
+    def validate_input_args(cls, v):
+        validate_ffmpeg_args(v, "ffmpeg.input_args", PRESETS_INPUT)
+        return v
+
     @property
     def ffmpeg_path(self) -> str:
         return resolve_ffmpeg_path(self.path, "ffmpeg")
@@ -141,6 +165,18 @@ class CameraInput(FrigateBaseModel):
         title="Input arguments",
         description="Input arguments specific to this stream.",
     )
+
+    @field_validator("hwaccel_args")
+    @classmethod
+    def validate_hwaccel_args(cls, v):
+        validate_ffmpeg_args(v, "ffmpeg.hwaccel_args", PRESETS_HW_ACCEL_DECODE)
+        return v
+
+    @field_validator("input_args")
+    @classmethod
+    def validate_input_args(cls, v):
+        validate_ffmpeg_args(v, "ffmpeg.input_args", PRESETS_INPUT)
+        return v
 
 
 class CameraFfmpegConfig(FfmpegConfig):

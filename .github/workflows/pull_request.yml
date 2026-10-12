@@ -114,10 +114,18 @@ jobs:
             frigate.test.test_platform_windows `
             frigate.test.test_ffmpeg_progress `
             frigate.test.test_sqlitevecq_windows `
-            frigate.test.test_ffmpeg_presets.TestFfmpegPresets.test_encode_preset_preserves_windows_paths_with_spaces `
+            frigate.test.test_windows_hwaccel `
+            frigate.test.test_ffmpeg_presets `
+            frigate.test.test_file `
+            frigate.test.test_builtin `
             frigate.test.test_config.TestConfig.test_windows_cpu_default_uses_a_native_model_path `
             frigate.test.test_config.TestConfig.test_windows_default_cpu_model_download_is_atomic `
+            frigate.test.test_config.TestConfig.test_windows_hwaccel_preset_is_accepted `
+            frigate.test.test_config.TestConfig.test_reserved_camera_name_is_rejected_on_windows `
+            frigate.test.test_config.TestConfig.test_camera_names_that_differ_only_by_case_are_rejected_on_windows `
             frigate.test.test_detector_hardware.TestWindowsOpenVINODevices
+      - name: Check the Windows requirements can install and cover every import
+        run: python testing-scripts/check_windows_requirements.py
       - name: Run process lifecycle tests
         run: |
           python -m unittest `
@@ -189,6 +197,43 @@ jobs:
         with:
           name: frigate-native-e2e
           path: ${{ runner.temp }}\frigate-e2e
+          retention-days: 7
+          if-no-files-found: warn
+
+  windows_native_unit_suite:
+    # The whole suite, not a hand picked subset: every test is a Windows test
+    # unless it is listed in frigate/test/windows_suite_denylist.txt. Reported
+    # rather than blocking until that list covers the tests that cannot work
+    # without Linux, at which point continue-on-error should be dropped.
+    name: Windows Native Unit Suite (reporting)
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: docker/main/requirements-windows.txt
+      - name: Install native Windows Python requirements
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r docker/main/requirements-windows.txt
+          python -m pip install --editable --no-deps .
+      - name: Run the unit suite
+        env:
+          FRIGATE_BASE_DIR: ${{ runner.temp }}\frigate-unit
+        run: python testing-scripts/run_windows_unit_suite.py
+      - name: Upload the test report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-unit-suite
+          path: ${{ runner.temp }}\frigate-unit
           retention-days: 7
           if-no-files-found: warn
 

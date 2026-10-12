@@ -104,7 +104,7 @@ from frigate.util.platform import INTERNAL_API_PORT, serves_web_app
 from frigate.util.process import FrigateProcess
 from frigate.util.runtime_deps import RuntimeDependencyError
 from frigate.util.services import set_file_limit
-from frigate.version import VERSION
+from frigate.util.version import VERSION
 from frigate.watchdog import FrigateWatchdog
 
 logger = logging.getLogger(__name__)

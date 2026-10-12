@@ -42,6 +42,7 @@ from frigate.const import (
 )
 from frigate.models import Recordings, ReviewSegment
 from frigate.review.types import SeverityEnum
+from frigate.util.file import async_robust_remove, robust_remove
 from frigate.util.media import get_keyframe_offsets
 from frigate.util.ownership import chown_to_runtime
 from frigate.util.services import get_video_properties
@@ -126,6 +127,18 @@ def segment_path_time(cache_path: str) -> datetime.datetime | None:
         )
     except ValueError:
         return None
+
+
+async def discard_cache_file(cache_path: str) -> None:
+    """Delete a cache segment, tolerating one another process still holds.
+
+    A discarded segment is one Frigate no longer tracks, so a scanner holding
+    it open is the only thing that can stop the delete on Windows.
+    """
+    try:
+        await async_robust_remove(cache_path)
+    except FileNotFoundError:
+        pass
 
 
 class SegmentInfo:
@@ -420,7 +433,7 @@ class RecordingMaintainer(threading.Thread):
                 to_remove = grouped_recordings[key][:-keep_count]
                 for rec in to_remove:
                     cache_path = rec["cache_path"]
-                    Path(cache_path).unlink(missing_ok=True)
+                    await discard_cache_file(cache_path)
                     self.end_time_cache.pop(cache_path, None)
                 grouped_recordings[key] = grouped_recordings[key][-keep_count:]
 
@@ -435,7 +448,7 @@ class RecordingMaintainer(threading.Thread):
                 to_remove = grouped_recordings[key][:-keep_count]
                 for rec in to_remove:
                     cache_path = rec["cache_path"]
-                    Path(cache_path).unlink(missing_ok=True)
+                    await discard_cache_file(cache_path)
                     self.end_time_cache.pop(cache_path, None)
                 grouped_recordings[key] = grouped_recordings[key][-keep_count:]
 
@@ -575,7 +588,16 @@ class RecordingMaintainer(threading.Thread):
             start_resolved.set()
 
     def drop_segment(self, cache_path: str) -> None:
-        Path(cache_path).unlink(missing_ok=True)
+        """Discard a segment Frigate will not keep or index.
+
+        A scanner holding the file open is the only thing that can stop the
+        delete on Windows, so it is retried in place.
+        """
+        try:
+            robust_remove(cache_path)
+        except FileNotFoundError:
+            pass
+
         self.end_time_cache.pop(cache_path, None)
 
     async def validate_and_move_segment(
@@ -1017,7 +1039,9 @@ class RecordingMaintainer(threading.Thread):
                 except OSError:
                     segment_size = 0
 
-                os.remove(cache_path)
+                # the converted file has replaced the cache file, and an
+                # antivirus scanner may still hold the original open
+                await async_robust_remove(cache_path)
 
                 rand_id = "".join(
                     random.choices(string.ascii_lowercase + string.digits, k=6)
@@ -1046,7 +1070,7 @@ class RecordingMaintainer(threading.Thread):
                 }
         except Exception:
             logger.exception(f"Unable to store recording segment {cache_path}")
-            Path(cache_path).unlink(missing_ok=True)
+            await discard_cache_file(cache_path)
 
         # clear end_time cache
         self.end_time_cache.pop(cache_path, None)

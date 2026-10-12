@@ -1,6 +1,9 @@
 # Native Windows runtime dependencies for 64-bit CPython 3.12.
 # Keep these aligned with requirements-wheels.txt, excluding Linux-only wheels
 # and packages that do not publish Windows wheels.
+#
+# Every package listed here publishes a Windows wheel for CPython 3.12, except
+# titlecase, which is pure Python and installs from its source distribution.
 aiofiles == 25.1.*
 click == 8.5.*
 aiohttp == 3.14.*
@@ -14,6 +17,15 @@ cryptography == 50.0.*
 pathvalidate == 3.3.*
 markupsafe == 3.0.*
 python-multipart == 0.0.32
+
+# Imported directly by Frigate at module scope. The framework pulls them in
+# transitively, and pinning them here means an upstream extra that stops
+# depending on one of them cannot break the import instead.
+filelock == 4.1.*
+httpx == 0.28.*
+Pillow == 12.3.*
+regex == 2026.9.*
+rich == 14.3.*
 
 # Classification model training
 # tensorflow-cpu provides the Windows x86_64 wheel; the ARM-only tensorflow
@@ -72,7 +84,8 @@ prometheus-client == 0.26.*
 # TFLite (the Linux-only tflite_runtime wheel is replaced on Windows)
 ai-edge-litert == 2.3.*
 
-# SQLite vector search; the package supplies vec0.dll on Windows
+# SQLite vector search; the package ships sqlite_vec-0.1.9-py3-none-win_amd64.whl,
+# which loads vec0.dll
 sqlite-vec == 0.1.9
 
 # Audio transcription

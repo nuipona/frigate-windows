@@ -33,12 +33,14 @@ or one of ``FRIGATE_CONFIG_DIR``, ``FRIGATE_MEDIA_DIR``, ``FRIGATE_CACHE_DIR``
 and ``FRIGATE_TMP_DIR`` to override a single directory.
 """
 
+import datetime
 import logging
 import os
 import shlex
 import shutil
 import sys
 import zlib
+from collections.abc import Iterable
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -403,13 +405,114 @@ def ffmpeg_concat_file_line(path: str) -> str:
     return f"file '{normalized}'"
 
 
+def _split_windows_command(command: str) -> list[str]:
+    """Split a command line the way the C runtime parses one.
+
+    Windows has no ``shlex``: a process is handed a single string and
+    ``CommandLineToArgvW`` splits it, with ``\\`` and ``"`` combining the way
+    a Windows path needs them to. Doing the same thing here is what makes a
+    value that went through :func:`quote_ffmpeg_arg` come back unchanged, and
+    keeps the separators in an unquoted Windows path, which POSIX escape
+    handling removes.
+
+    Args:
+        command: The command line to split
+
+    Returns:
+        The arguments ffmpeg would receive
+    """
+    args: list[str] = []
+    current: list[str] = []
+    has_argument = False
+    quoted = False
+    index = 0
+    length = len(command)
+
+    while index < length:
+        char = command[index]
+
+        if char in " \t" and not quoted:
+            if has_argument:
+                args.append("".join(current))
+                current = []
+                has_argument = False
+
+            index += 1
+            continue
+
+        if char == "\\":
+            start = index
+
+            while index < length and command[index] == "\\":
+                index += 1
+
+            backslashes = index - start
+
+            # a backslash only escapes in front of a quote: 2n backslashes and
+            # a quote are n backslashes and a quote delimiter, 2n+1 are n
+            # backslashes and a literal quote
+            if index < length and command[index] == '"':
+                current.append("\\" * (backslashes // 2))
+
+                if backslashes % 2:
+                    current.append('"')
+                else:
+                    quoted = not quoted
+
+                index += 1
+            else:
+                current.append("\\" * backslashes)
+
+            has_argument = True
+            continue
+
+        if char == '"':
+            # "" inside a quoted argument is a literal quote
+            if quoted and command[index : index + 2] == '""':
+                current.append('"')
+                index += 2
+            else:
+                quoted = not quoted
+                index += 1
+
+            has_argument = True
+            continue
+
+        current.append(char)
+        has_argument = True
+        index += 1
+
+    if has_argument:
+        args.append("".join(current))
+
+    return args
+
+
 def quote_ffmpeg_arg(value: str) -> str:
-    """Quote one argument embedded in a command string later parsed by shlex."""
+    """Quote one argument embedded in a command string later split again.
+
+    POSIX quoting uses ``shlex``. Windows uses the quote and backslash rules
+    the C runtime applies to a process command line, so the value survives
+    :func:`split_ffmpeg_command` and reaches ffmpeg as one argument.
+    """
+    if IS_WINDOWS:
+        import subprocess
+
+        return subprocess.list2cmdline([str(value)])
+
     return shlex.quote(str(value))
 
 
 def split_ffmpeg_command(command: str) -> list[str]:
-    """Split an FFmpeg command string while preserving quoted arguments."""
+    """Split an FFmpeg command string while preserving quoted arguments.
+
+    POSIX rules are used everywhere but Windows, where ``shlex`` would treat a
+    backslash as an escape character and ``-i D:\\videos\\cam.mp4`` would lose
+    its separators and become ``D:videoscam.mp4``.
+    """
+    if IS_WINDOWS:
+        return _split_windows_command(command)
+
     return shlex.split(command, posix=True)
 
 
@@ -575,6 +678,126 @@ def resolve_ffmpeg_binary(name: str = "ffmpeg") -> str:
     entirely.
     """
     return find_executable(name) or executable_name(name)
+
+
+# ---------------------------------------------------------------------------
+# hardware
+# ---------------------------------------------------------------------------
+
+
+#: display adapter names Windows reports, cached for the process lifetime
+_display_adapters: list[str] | None = None
+
+
+def get_display_adapters(refresh: bool = False) -> list[str]:
+    """Names of the GPUs Windows has a driver loaded for.
+
+    ``/proc`` and ``/sys`` do not exist on Windows and the driver directories
+    that replace them are not readable without a native API, so this asks the
+    window manager, which every Windows install has. Every adapter with the
+    active flag set is a separate GPU: a laptop with a discrete card reports
+    both it and its integrated GPU.
+    """
+    global _display_adapters
+
+    if _display_adapters is not None and not refresh:
+        return _display_adapters
+
+    if not IS_WINDOWS:
+        _display_adapters = []
+        return _display_adapters
+
+    import ctypes
+    from ctypes import wintypes
+
+    class DISPLAY_DEVICEW(ctypes.Structure):
+        _fields_ = [
+            ("cb", wintypes.DWORD),
+            ("DeviceName", wintypes.WCHAR * 32),
+            ("DeviceString", wintypes.WCHAR * 128),
+            ("StateFlags", wintypes.DWORD),
+            ("DeviceID", wintypes.WCHAR * 128),
+            ("DeviceKey", wintypes.WCHAR * 128),
+        ]
+
+    #: DISPLAY_DEVICE_ACTIVE: the adapter is in use, not a mirror driver
+    DISPLAY_DEVICE_ACTIVE = 0x1
+
+    adapters: list[str] = []
+
+    try:
+        user32 = ctypes.windll.user32
+        user32.EnumDisplayDevicesW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            ctypes.POINTER(DISPLAY_DEVICEW),
+            wintypes.DWORD,
+        ]
+        user32.EnumDisplayDevicesW.restype = wintypes.BOOL
+
+        index = 0
+
+        while True:
+            device = DISPLAY_DEVICEW()
+            device.cb = ctypes.sizeof(DISPLAY_DEVICEW)
+
+            if not user32.EnumDisplayDevicesW(None, index, ctypes.byref(device), 0):
+                break
+
+            index += 1
+
+            if device.StateFlags & DISPLAY_DEVICE_ACTIVE and device.DeviceString:
+                adapters.append(device.DeviceString)
+    except (AttributeError, OSError) as err:  # pragma: no cover - needs Windows
+        logger.debug("Unable to enumerate display adapters: %s", err)
+
+    _display_adapters = adapters
+    return adapters
+
+
+def classify_adapter_vendors(adapters: list[str]) -> set[str]:
+    """Map display adapter names onto the vendors they come from."""
+    vendors: set[str] = set()
+
+    for adapter in adapters:
+        lowered = adapter.lower()
+
+        if "nvidia" in lowered:
+            vendors.add("nvidia")
+        elif "amd" in lowered or "radeon" in lowered or "advanced micro" in lowered:
+            vendors.add("amd")
+        elif "intel" in lowered:
+            vendors.add("intel")
+
+    return vendors
+
+
+def get_display_adapter_vendors(refresh: bool = False) -> set[str]:
+    """Vendors of the GPUs Windows reports: nvidia, amd and intel."""
+    return classify_adapter_vendors(get_display_adapters(refresh))
+
+
+def get_cpu_brand() -> str:
+    """The processor name as the operating system reports it.
+
+    Linux exposes ``/proc/cpuinfo``, which has no Windows equivalent. The
+    registry holds the same marketing name, which is what the Intel generation
+    parsing needs.
+    """
+    if not IS_WINDOWS:
+        return ""
+
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"HARDWARE\DESCRIPTION\System\CentralProcessor\0",
+        ) as key:
+            name, _ = winreg.QueryValueEx(key, "ProcessorNameString")
+            return str(name).strip()
+    except (ImportError, OSError):
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -854,4 +1077,82 @@ def describe() -> str:
         f"{sys.platform} | python {sys.version.split()[0]} | "
         f"install={get_install_dir()} config={get_config_dir()} "
         f"media={get_media_dir()} cache={get_cache_dir()} tmp={get_tmp_dir()}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# long paths
+# ---------------------------------------------------------------------------
+
+#: Legacy Win32 limit, still enforced for paths that are not long path aware.
+MAX_PATH_LIMIT = 260
+
+_LONG_PATHS_KEY = r"SYSTEM\CurrentControlSet\Control\FileSystem"
+
+
+def long_paths_enabled() -> bool:
+    """Report whether this machine allows paths longer than ``MAX_PATH``.
+
+    Windows 10 1607 and later lift the limit when the machine wide
+    ``LongPathsEnabled`` value is set, so this is what decides whether a long
+    recording path is a real failure or just a cosmetically long string.
+    """
+    if not IS_WINDOWS:
+        return True
+
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, _LONG_PATHS_KEY) as key:
+            value, _ = winreg.QueryValueEx(key, "LongPathsEnabled")
+    except OSError:
+        return False
+
+    return bool(value)
+
+
+def longest_recording_path(camera_names: Iterable[str]) -> str:
+    """The longest recording path Frigate can build for these cameras.
+
+    Recordings are written to
+    ``recordings/<date>/<hour>/<camera>/<minute>.<second>.mp4``, so everything
+    after the media directory is a fixed width except the camera name. That
+    makes this path the deepest one a native install creates and the one worth
+    measuring against ``MAX_PATH``.
+    """
+    camera = max(camera_names, key=len, default="camera")
+    now = datetime.datetime.now()
+
+    return os.path.join(
+        get_media_dir(),
+        "recordings",
+        now.strftime("%Y-%m-%d"),
+        now.strftime("%H"),
+        camera,
+        now.strftime("%M.%S.mp4"),
+    )
+
+
+def long_path_warning(camera_names: Iterable[str]) -> str | None:
+    """Warn when recording paths can overrun the Win32 path limit.
+
+    Returns ``None`` off Windows, when long paths are enabled, or when the
+    longest path Frigate builds still fits. Nothing is truncated or rewritten:
+    a path that is too long fails inside ``ffmpeg`` while the camera is already
+    running, so the only useful moment to say so is at startup.
+    """
+    if not IS_WINDOWS:
+        return None
+
+    longest = longest_recording_path(camera_names)
+
+    if len(longest) < MAX_PATH_LIMIT or long_paths_enabled():
+        return None
+
+    return (
+        f"Recording paths can reach {len(longest)} characters, which is past the "
+        f"{MAX_PATH_LIMIT} character Win32 limit, so writing a segment can fail "
+        f"with a path error once a camera is running. Shorten FRIGATE_BASE_DIR "
+        f"(currently {get_base_dir()}) or the camera names, or allow long paths "
+        f"by setting the LongPathsEnabled registry value to 1."
     )

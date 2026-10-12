@@ -136,3 +136,122 @@ class TestTrimOldestFiles(TestCase):
                 file_util.trim_oldest_files(folder, 4)
 
             assert len(os.listdir(folder)) == 4
+
+
+class TestRetryingFileOperations(TestCase):
+    """File operations retry while another process holds the file.
+
+    Windows Defender and the search indexer open every file Frigate writes,
+    which turns a move or a delete into a permission error that succeeds on the
+    next attempt.
+    """
+
+    def test_sharing_violation_is_retried(self):
+        calls = {"count": 0}
+        real_remove = os.remove
+
+        def flaky_remove(path):
+            calls["count"] += 1
+
+            if calls["count"] < 3:
+                error = PermissionError(13, "in use", path)
+                error.winerror = 32
+                raise error
+
+            real_remove(path)
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "segment.mp4")
+            open(path, "w").close()
+
+            with (
+                patch.object(file_util.os, "remove", side_effect=flaky_remove),
+                patch.object(file_util.time, "sleep"),
+            ):
+                file_util.robust_remove(path)
+
+            assert calls["count"] == 3
+            assert not os.path.exists(path)
+
+    def test_a_permanent_error_is_raised_immediately(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "missing.mp4")
+
+            with patch.object(file_util.time, "sleep") as sleep:
+                self.assertRaises(FileNotFoundError, file_util.robust_remove, path)
+
+            sleep.assert_not_called()
+
+    def test_transient_errors_are_identified_per_platform(self):
+        sharing_violation = PermissionError(13, "in use", "f.mp4")
+        sharing_violation.winerror = 32
+        self.assertTrue(file_util.is_held_by_another_process(sharing_violation))
+
+        lock_violation = PermissionError(13, "locked", "f.mp4")
+        lock_violation.winerror = 33
+        self.assertTrue(file_util.is_held_by_another_process(lock_violation))
+
+        self.assertFalse(
+            file_util.is_held_by_another_process(FileNotFoundError(2, "gone", "f.mp4"))
+        )
+
+    def test_move_retries_and_completes(self):
+        calls = {"count": 0}
+        real_move = file_util.shutil.move
+
+        def flaky_move(src, dst):
+            calls["count"] += 1
+
+            if calls["count"] < 2:
+                error = PermissionError(13, "in use", src)
+                error.winerror = 32
+                raise error
+
+            real_move(src, dst)
+
+        with tempfile.TemporaryDirectory() as folder:
+            src = os.path.join(folder, "src")
+            dst = os.path.join(folder, "dst")
+            os.makedirs(src)
+            open(os.path.join(src, "frame.webp"), "w").close()
+
+            with (
+                patch.object(file_util.shutil, "move", side_effect=flaky_move),
+                patch.object(file_util.time, "sleep"),
+            ):
+                file_util.robust_move(src, dst)
+
+            assert os.path.isdir(dst)
+            assert not os.path.exists(src)
+
+    def test_async_remove_retries_without_blocking(self):
+        import asyncio
+
+        calls = {"count": 0}
+        real_remove = os.remove
+
+        def flaky_remove(path):
+            calls["count"] += 1
+
+            if calls["count"] < 2:
+                error = PermissionError(13, "in use", path)
+                error.winerror = 32
+                raise error
+
+            real_remove(path)
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "segment.mp4")
+            open(path, "w").close()
+
+            with (
+                patch.object(file_util.os, "remove", side_effect=flaky_remove),
+                patch.object(file_util.asyncio, "sleep", new=_noop_sleep),
+            ):
+                asyncio.run(file_util.async_robust_remove(path))
+
+            assert not os.path.exists(path)
+
+
+async def _noop_sleep(*_args, **_kwargs) -> None:
+    return

@@ -1,0 +1,13 @@
+# Tests that cannot pass on Windows, for testing-scripts/run_windows_unit_suite.py.
+#
+# Format, one per line, with the reason after a #:
+#
+#     frigate.test.test_module.TestClass.test_name  # why it needs Linux
+#
+# A module or a class name denies everything below it, so a whole module can be
+# listed while its individual tests are being fixed.
+#
+# This list is meant to shrink. Anything that fails on Windows without an entry
+# here is reported by the CI job, which runs the whole suite rather than a hand
+# picked subset, so a new Linux-only test or a new Windows regression is visible
+# instead of silently passing on Linux.

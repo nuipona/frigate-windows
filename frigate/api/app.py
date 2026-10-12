@@ -46,7 +46,11 @@ from frigate.config.camera.updater import (
     CameraConfigUpdateTopic,
 )
 from frigate.const import REDACTED_CREDENTIAL_SENTINEL
-from frigate.ffmpeg_presets import FFMPEG_HWACCEL_VAAPI, _gpu_selector
+from frigate.ffmpeg_presets import (
+    FFMPEG_HWACCEL_VAAPI,
+    _gpu_selector,
+    windows_decode_presets,
+)
 from frigate.genai import PROVIDERS, load_providers
 from frigate.jobs.media_sync import (
     get_current_media_sync_job,
@@ -76,7 +80,7 @@ from frigate.util.live_streams import (
     sync_transcode_streams,
 )
 from frigate.util.object_names import get_categorized_object_names
-from frigate.util.platform import get_service_log_path
+from frigate.util.platform import IS_WINDOWS, get_service_log_path
 from frigate.util.schema import get_config_schema
 from frigate.util.services import (
     get_nvidia_driver_info,
@@ -85,7 +89,7 @@ from frigate.util.services import (
     vainfo_hwaccel,
 )
 from frigate.util.time import get_tz_modifiers
-from frigate.version import VERSION
+from frigate.util.version import VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -447,7 +451,12 @@ def ffmpeg_presets():
     machine = platform.machine().lower()
     is_arm64 = machine in ("aarch64", "arm64", "armv8", "armv7l")
 
-    if is_arm64:
+    if IS_WINDOWS:
+        # the presets in the other branches go through libva, v4l2 or a DRM
+        # device and cannot decode video on Windows, so the config UI must not
+        # offer them there
+        hwaccel_presets = windows_decode_presets()
+    elif is_arm64:
         hwaccel_presets = [
             "preset-rpi-64-h264",
             "preset-rpi-64-h265",
@@ -1060,6 +1069,20 @@ def config_set(request: Request, body: AppConfigSetBody):
 
 @router.get("/vainfo", dependencies=[Depends(allow_any_authenticated())])
 def vainfo():
+    if IS_WINDOWS:
+        # libva does not exist on Windows and neither does the vainfo tool:
+        # accelerated decoding uses d3d11va, dxva2, qsv, amf or cuda there
+        return JSONResponse(
+            content={
+                "return_code": 1,
+                "stderr": (
+                    "vainfo is a libva tool and is not available on Windows. "
+                    "Set ffmpeg.hwaccel_args to a preset-windows-* value instead."
+                ),
+                "stdout": "",
+            }
+        )
+
     # Use LibvaGpuSelector to pick an appropriate libva device (if available)
     selected_gpu = ""
     try:

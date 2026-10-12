@@ -3,8 +3,6 @@
 import logging
 import os
 from enum import Enum
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version as package_version
 from typing import Any
 
 from frigate.const import (
@@ -18,16 +16,7 @@ from frigate.const import (
 )
 from frigate.util.platform import IS_WINDOWS, quote_ffmpeg_arg
 from frigate.util.services import vainfo_hwaccel
-
-try:
-    from frigate.version import VERSION
-except ModuleNotFoundError:
-    # ``make version`` generates this module for the container image. Native
-    # editable installs use the distribution metadata instead.
-    try:
-        VERSION = package_version("frigate-nvr")
-    except PackageNotFoundError:
-        VERSION = "dev"
+from frigate.util.version import VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -118,12 +107,19 @@ PRESETS_HW_ACCEL_DECODE = {
 # Windows uses the platform decode APIs rather than libva. Frames are left in
 # system memory so the existing CPU scale presets keep working, which costs one
 # copy per frame but avoids a per GPU scale preset for every driver.
+#
+# ``preset-windows-qsv`` is codec agnostic: bare ``-hwaccel qsv`` lets ffmpeg
+# pick the matching qsv decoder for the input codec, which is what
+# ``hwaccel_args: auto`` needs. ``preset-windows-nvenc`` matches the name the
+# encoder maps use, so one NVIDIA preset works for decode and encode alike.
 PRESETS_HW_ACCEL_DECODE.update(
     {
         "preset-windows-d3d11va": "-hwaccel d3d11va",
         "preset-windows-dxva2": "-hwaccel dxva2",
+        "preset-windows-qsv": "-hwaccel qsv",
         "preset-windows-qsv-h264": "-hwaccel qsv -c:v h264_qsv",
         "preset-windows-qsv-h265": "-load_plugin hevc_hw -hwaccel qsv -c:v hevc_qsv",
+        "preset-windows-nvenc": "-hwaccel cuda -hwaccel_output_format cuda",
     }
 )
 
@@ -603,3 +599,120 @@ def parse_preset_output_record(arg: Any, force_record_hvc1: bool) -> list[str] |
         return preset + FFMPEG_HVC1_ARGS
 
     return preset
+
+
+# ---------------------------------------------------------------------------
+# preset validation
+# ---------------------------------------------------------------------------
+
+#: presets that decode through a Linux or macOS only API. They are valid
+#: elsewhere and cannot work on Windows, so the config validator names the
+#: Windows preset to use instead rather than letting ffmpeg fail at startup.
+LINUX_ONLY_DECODE_PRESETS = {
+    FFMPEG_HWACCEL_VAAPI: "preset-windows-d3d11va",
+    "preset-intel-qsv-h264": "preset-windows-qsv-h264",
+    "preset-intel-qsv-h265": "preset-windows-qsv-h265",
+}
+
+#: decode presets that only exist for another platform's hardware
+OTHER_PLATFORM_DECODE_PRESETS = (
+    "preset-rpi-64-h264",
+    "preset-rpi-64-h265",
+    "preset-apple-silicon-h264",
+    "preset-apple-silicon-h265",
+    "preset-jetson-h264",
+    "preset-jetson-h265",
+)
+
+
+def windows_decode_presets() -> list[str]:
+    """Every decode preset that works on Windows, in recommendation order."""
+    return [
+        "preset-windows-d3d11va",
+        "preset-windows-nvenc",
+        "preset-windows-qsv",
+        "preset-windows-qsv-h264",
+        "preset-windows-qsv-h265",
+        "preset-windows-dxva2",
+        "preset-amd-amf",
+        "preset-vulkan",
+    ]
+
+
+#: decode presets that carry -hwaccel_device and therefore a Linux DRM device
+NVIDIA_DRM_DECODE_PRESETS = (
+    FFMPEG_HWACCEL_NVIDIA,
+    "preset-nvidia-h264",
+    "preset-nvidia-h265",
+    "preset-nvidia-mjpeg",
+)
+
+
+def _valid_presets(setting: str, presets: dict[str, Any] | list[str]) -> list[str]:
+    """Preset names to offer in an error message for a setting."""
+    if IS_WINDOWS and setting == "ffmpeg.hwaccel_args":
+        return windows_decode_presets()
+
+    return sorted(presets)
+
+
+def _preset_error(
+    value: str, setting: str, presets: dict[str, Any] | list[str]
+) -> str | None:
+    """Return why a preset value cannot be used, or None when it is fine."""
+    if not value.startswith("preset-"):
+        return None
+
+    if value not in presets:
+        return (
+            f"{value} is not a known preset for {setting}, "
+            f"valid presets are {', '.join(_valid_presets(setting, presets))}"
+        )
+
+    if not IS_WINDOWS or setting != "ffmpeg.hwaccel_args":
+        return None
+
+    if value in LINUX_ONLY_DECODE_PRESETS:
+        return (
+            f"{value} is a Linux only preset and cannot decode video on Windows, "
+            f"use {LINUX_ONLY_DECODE_PRESETS[value]}"
+        )
+
+    if value in OTHER_PLATFORM_DECODE_PRESETS:
+        return (
+            f"{value} is a preset for hardware that does not exist on Windows, "
+            f"use one of {', '.join(windows_decode_presets())}"
+        )
+
+    if value in NVIDIA_DRM_DECODE_PRESETS:
+        return (
+            f"{value} needs a Linux DRM device and does not work on Windows, "
+            "use preset-windows-nvenc"
+        )
+
+    return None
+
+
+def validate_ffmpeg_args(
+    value: str | list[str] | None, setting: str, presets: dict[str, Any] | list[str]
+) -> None:
+    """Raise when a value contains a preset that cannot be used here.
+
+    Args:
+        value: The configured value, either the raw arguments or a preset name
+        setting: Config path the value came from, used in the error message
+        presets: The preset map valid for this setting
+
+    Raises:
+        ValueError: When a preset name is unknown, or cannot work on this platform
+    """
+    if value is None:
+        return
+
+    args = [value] if isinstance(value, str) else value
+
+    for arg in args:
+        error = _preset_error(arg, setting, presets)
+
+        if error:
+            raise ValueError(error)

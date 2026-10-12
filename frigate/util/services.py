@@ -1349,7 +1349,14 @@ def vainfo_hwaccel(device_name: str | None = None) -> sp.CompletedProcess:
 
         cmd = ["vainfo", "--display", "drm", "--device", device_path]
 
-    return sp.run(cmd, capture_output=True)
+    try:
+        return sp.run(cmd, capture_output=True)
+    except FileNotFoundError:
+        # vainfo belongs to libva, which Windows has no equivalent of, and a
+        # minimal Linux install may not have it either
+        return sp.CompletedProcess(
+            cmd, 127, b"", b"vainfo was not found on this system"
+        )
 
 
 def get_nvidia_driver_info() -> dict[str, Any]:
@@ -1377,23 +1384,55 @@ def get_nvidia_driver_info() -> dict[str, Any]:
         return results
 
 
-def auto_detect_hwaccel() -> str:
-    """Detect hwaccel args by default."""
+def get_go2rtc_hardware_sources() -> list[dict[str, str]]:
+    """Ask go2rtc which ffmpeg accelerators it can open.
+
+    Returns an empty list when go2rtc is not running, which is the normal case
+    while the config is being loaded.
+    """
     try:
-        cuda = False
-        vaapi = False
         resp = requests.get("http://127.0.0.1:1984/api/ffmpeg/hardware", timeout=3)
 
         if resp.status_code == 200:
             data: dict[str, list[dict[str, str]]] = resp.json()
-            for source in data.get("sources", []):
-                if "cuda" in source.get("url", "") and source.get("name") == "OK":
-                    cuda = True
-
-                if "vaapi" in source.get("url", "") and source.get("name") == "OK":
-                    vaapi = True
+            return data.get("sources", [])
     except requests.RequestException:
         pass
+
+    return []
+
+
+def auto_detect_hwaccel() -> str:
+    """Detect hwaccel args by default."""
+    sources = get_go2rtc_hardware_sources()
+
+    if IS_WINDOWS:
+        # Windows has no libva and no dummy device to probe: the presets come
+        # from the accelerators go2rtc reports, or from the GPUs Windows
+        # reports when go2rtc is not up yet
+        from frigate.util.hwaccel import windows_hwaccel_preset
+
+        preset = windows_hwaccel_preset(sources)
+
+        if preset:
+            logger.info("Automatically detected %s for video decoding", preset)
+            return preset
+
+        logger.warning(
+            "Did not detect a hardware decoder, set ffmpeg.hwaccel_args to a "
+            "preset-windows-* value if this machine has a GPU"
+        )
+        return ""
+
+    cuda = False
+    vaapi = False
+
+    for source in sources:
+        if "cuda" in source.get("url", "") and source.get("name") == "OK":
+            cuda = True
+
+        if "vaapi" in source.get("url", "") and source.get("name") == "OK":
+            vaapi = True
 
     if cuda:
         logger.info("Automatically detected nvidia hwaccel for video decoding")

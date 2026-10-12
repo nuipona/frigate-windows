@@ -261,17 +261,27 @@ export type HwaccelFamilyKey =
   | "rkmpp"
   | "jetson"
   | "rpi"
-  | "apple-silicon";
+  | "apple-silicon"
+  | "windows-nvenc"
+  | "windows-qsv"
+  | "windows-d3d11va";
 
 export type HwaccelClass =
   | { kind: "none" }
   | { kind: "custom" }
   | { kind: "preset"; family: HwaccelFamilyKey };
 
+// Windows presets are checked first: preset-windows-qsv-h264 starts with
+// preset-windows-qsv, and preset-windows-nvenc is Nvidia, not Intel
 const PRESET_FAMILIES: [string, HwaccelFamilyKey][] = [
+  ["preset-windows-nvenc", "windows-nvenc"],
+  ["preset-windows-qsv", "windows-qsv"],
+  ["preset-windows-d3d11va", "windows-d3d11va"],
+  ["preset-windows-dxva2", "windows-d3d11va"],
   ["preset-nvidia", "nvidia"],
   ["preset-vaapi", "vaapi"],
   ["preset-intel-qsv", "intel-qsv"],
+  ["preset-amd-amf", "windows-d3d11va"],
   ["preset-rk", "rkmpp"],
   ["preset-jetson", "jetson"],
   ["preset-rpi", "rpi"],
@@ -298,6 +308,10 @@ const FAMILY_VENDORS: Record<HwaccelFamilyKey, GpuVendor[]> = {
   jetson: ["nvidia"],
   "intel-qsv": ["intel"],
   vaapi: ["intel", "amd"],
+  "windows-nvenc": ["nvidia"],
+  "windows-qsv": ["intel"],
+  // D3D11VA decodes on any Windows GPU that has a driver
+  "windows-d3d11va": ["intel", "amd", "nvidia"],
   rkmpp: ["rockchip"],
   rpi: ["rpi"],
   // lighter reports no decoder usage

@@ -22,6 +22,7 @@ from frigate.ffmpeg_presets import (
     parse_preset_hardware_acceleration_encode,
 )
 from frigate.models import Previews
+from frigate.util.file import robust_remove
 from frigate.util.image import copy_yuv_to_position, get_blank_yuv_frame, get_yuv_crop
 from frigate.util.ownership import chown_to_runtime
 from frigate.util.platform import (
@@ -310,7 +311,10 @@ class PreviewRecorder:
                 continue
 
             if file < start_file:
-                os.unlink(os.path.join(PREVIEW_CACHE_DIR, file))
+                try:
+                    robust_remove(os.path.join(PREVIEW_CACHE_DIR, file))
+                except OSError:
+                    logger.debug("Unable to delete stale preview frame %s", file)
                 continue
 
             try:

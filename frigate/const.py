@@ -148,6 +148,17 @@ SUPPORTED_RK_SOCS = ["rk3562", "rk3566", "rk3568", "rk3576", "rk3588"]
 # Regex constants
 
 REGEX_CAMERA_NAME = r"^[a-zA-Z0-9_-]+$"
+
+# Camera names that match REGEX_CAMERA_NAME but are not usable as file or
+# directory names on Windows: the path layer resolves them to a device rather
+# than to a file, so a camera named con writes its recordings to the console
+# and fails to create its own directories. Windows also treats a device name
+# as reserved with any extension appended, so only the bare name matters here.
+WINDOWS_RESERVED_NAMES = frozenset(
+    {"con", "prn", "aux", "nul"}
+    | {f"com{index}" for index in range(10)}
+    | {f"lpt{index}" for index in range(10)}
+)
 REGEX_RTSP_CAMERA_USER_PASS = r":\/\/[a-zA-Z0-9_-]+:[\S]+@"
 REGEX_HTTP_CAMERA_USER_PASS = r"user=[a-zA-Z0-9_-]+&password=[\S]+"
 REGEX_JSON = re.compile(r"^\s*\{")

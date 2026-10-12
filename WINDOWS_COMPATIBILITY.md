@@ -24,12 +24,35 @@ What remains, in rough order of cost to the user:
 1. **There is no installer, no service, and no bundled ffmpeg/go2rtc** — the
    documented install is a 7-step manual PowerShell recipe
    ([P3-1](#p3-1-no-windows-packaging-or-service-story)).
-2. **`hwaccel_args: auto` can never detect Windows hardware**, so the default
-   config means software decode even on a machine with a capable GPU
-   ([P1-1](#p1-1-hwaccel_args-auto-can-never-detect-windows-hardware)).
-3. **Windows CI is still a thin allowlist** of six tests against 121 test
-   files, so new tests are Linux-only by default and regressions go unseen
+2. **Windows CI is still a thin allowlist** of tests rather than the whole
+   suite, so new tests are Linux-only by default and regressions go unseen
    ([P3-2](#p3-2-windows-ci-is-a-thin-allowlist)).
+3. **Detector coverage is CPU and Intel only** ([P3-3](#p3-3-detector-coverage-on-windows-is-narrow)).
+
+**Update 2:** the P1 and P2 findings below have since been fixed, and a
+`windows_native_unit_suite` CI job now runs the whole `frigate/test` discovery
+on `windows-latest` through `testing-scripts/run_windows_unit_suite.py`, with
+`frigate/test/windows_suite_denylist.txt` naming the tests that genuinely cannot
+run there. The job is `continue-on-error` until that denylist is complete, so a
+Linux-only test is visible instead of invisible. Closed in that change:
+
+| Finding | Status |
+| --- | --- |
+| [P1-1](#p1-1-hwaccel_args-auto-can-never-detect-windows-hardware) `auto` on Windows | **fixed** — go2rtc sources first, display adapters as the fallback, returns `preset-windows-nvenc` / `-qsv` / `-d3d11va` |
+| [P1-2](#p1-2-the-docs-recommend-a-preset-that-does-not-exist-for-decode) docs recommend a decode preset that did not exist | **fixed** — real Windows decode presets, and an unknown or Linux-only preset is now a config validation error naming the valid ones |
+| [P1-3](#p1-3-the-hwaccel-recommender-can-emit-invalid-linux-presets-on-windows) recommender emits Linux presets | **fixed** — Windows families, `_intel_generation()` reads the CPU brand from `winreg` |
+| [P2-1](#p2-1-windows-reserved-device-names-are-valid-camera-names) reserved device names | **fixed** — rejected on Windows only |
+| [P2-2](#p2-2-path-length) path length | **mitigated** — startup warning with the base directory and the registry value; paths are not rewritten |
+| [P2-3](#p2-3-case-insensitive-filesystem) case-insensitive filesystem | **fixed** — camera names that differ only by case are rejected on Windows |
+| [P2-4](#p2-4-antivirus-and-indexing-hold-files-open) antivirus holds files open | **fixed** — `robust_remove` / `robust_move` with backoff, used by the record maintainer, the output process and preview frames, plus Defender exclusion docs |
+| [P2-6](#p2-6-shlexsplitposixtrue-mangles-unquoted-windows-paths) `shlex` mangles Windows paths | **fixed** — a Windows command splitter, POSIX behaviour unchanged |
+| [P2-8](#p2-8-smaller-items) smaller items | **partly** — `find_go2rtc()` suffix check, `hwaccel.py` Windows guard, requirements drift check. Virtual-NIC filtering and the `/dev/shm` label are open |
+| [P3-2](#p3-2-windows-ci-is-a-thin-allowlist) thin Windows CI | **partly** — the whole suite runs on Windows now, with the allowlist inverted into a denylist |
+
+Still open: [P2-5](#p2-5-filelock-on-windows-needs-a-real-cross-process-test)
+(cross-process `FileLock` test), [P2-7](#p2-7-timezone-and-dst-across-a-long-lived-process)
+(DST), and the [P3](#p3-1-no-windows-packaging-or-service-story) packaging,
+service and DirectML work.
 
 ---
 
@@ -602,13 +625,13 @@ Two cheap wins:
 | ~~2~~ | ~~[P0-2](#p0-2-ffmpeg-processes-are-hard-killed) graceful ffmpeg stop~~ | **done** |
 | ~~3~~ | ~~[P0-3](#p0-3-child-processes-are-orphaned-on-exit) Job Object~~ | **done** |
 | ~~4~~ | ~~[P0-4](#p0-4-child-processes-do-not-handle-sigbreak) `SIGBREAK` in children~~ | **done** |
-| 5 | [P3-2](#p3-2-windows-ci-is-a-thin-allowlist)(1) run the full suite on Windows | You cannot fix what CI never exercises; expect to find more |
-| 6 | [P1-2](#p1-2-the-docs-recommend-a-preset-that-does-not-exist-for-decode) preset validator + real Windows decode presets | Removes a documented path that cannot work |
-| 7 | [P1-1](#p1-1-hwaccel_args-auto-can-never-detect-windows-hardware) fix `auto` on Windows | The default config currently always means "software decode" |
-| 8 | [P2-1](#p2-1-windows-reserved-device-names-are-valid-camera-names) / [P2-2](#p2-2-path-length) / [P2-3](#p2-3-case-insensitive-filesystem) name + path validators | Cheap, prevents baffling field failures |
+| ~~5~~ | ~~[P3-2](#p3-2-windows-ci-is-a-thin-allowlist)(1) run the full suite on Windows~~ | **done** (`windows_native_unit_suite`, denylist driven) |
+| ~~6~~ | ~~[P1-2](#p1-2-the-docs-recommend-a-preset-that-does-not-exist-for-decode) preset validator + real Windows decode presets~~ | **done** |
+| ~~7~~ | ~~[P1-1](#p1-1-hwaccel_args-auto-can-never-detect-windows-hardware) fix `auto` on Windows~~ | **done** |
+| ~~8~~ | ~~[P2-1](#p2-1-windows-reserved-device-names-are-valid-camera-names) / [P2-2](#p2-2-path-length) / [P2-3](#p2-3-case-insensitive-filesystem) name + path validators~~ | **done** (path length warns at startup rather than rewriting paths) |
 | 9 | [P3-1](#p3-1-no-windows-packaging-or-service-story)(1)(2) bootstrap + prebuilt web | Biggest adoption win per unit of effort |
-| 10 | [P1-3](#p1-3-the-hwaccel-recommender-can-emit-invalid-linux-presets-on-windows) Windows hwaccel families | Defuses a landmine before it is wired up |
-| 11 | [P2-4](#p2-4-antivirus-and-indexing-hold-files-open) / [P2-5](#p2-5-filelock-on-windows-needs-a-real-cross-process-test) / [P2-6](#p2-6-shlexsplitposixtrue-mangles-unquoted-windows-paths) robustness | Field-hardening |
+| ~~10~~ | ~~[P1-3](#p1-3-the-hwaccel-recommender-can-emit-invalid-linux-presets-on-windows) Windows hwaccel families~~ | **done** |
+| 11 | [P2-4](#p2-4-antivirus-and-indexing-hold-files-open) / [P2-5](#p2-5-filelock-on-windows-needs-a-real-cross-process-test) / [P2-6](#p2-6-shlexsplitposixtrue-mangles-unquoted-windows-paths) robustness | **P2-4 and P2-6 done**, P2-5 still open |
 | 12 | [P3-1](#p3-1-no-windows-packaging-or-service-story)(3) Windows service | Do after the signal work in P0-4, or it will be built on a broken base |
 | 13 | [P3-3](#p3-3-detector-coverage-on-windows-is-narrow) DirectML | Broadens hardware support |
 

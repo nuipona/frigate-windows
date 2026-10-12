@@ -1,8 +1,11 @@
 """Path and file utilities."""
 
+import asyncio
 import base64
+import errno
 import logging
 import os
+import shutil
 import time
 from datetime import datetime
 from pathlib import Path
@@ -24,6 +27,7 @@ except ImportError:  # pragma: no cover - POSIX
 from frigate.const import CLIPS_DIR, THUMB_DIR
 from frigate.models import Event
 from frigate.util.image import get_snapshot_bytes, relative_box_to_absolute
+from frigate.util.platform import IS_WINDOWS
 
 logger = logging.getLogger(__name__)
 
@@ -549,3 +553,121 @@ class FileLock:
         """Destructor - ensure lock is released."""
         if self._acquired:
             self.release()
+
+
+### Retrying file operations
+
+
+#: Windows error codes another process holding a file produces: access denied,
+#: sharing violation and lock violation. Antivirus real time scanning and the
+#: search indexer open every file Frigate writes for a moment after it appears,
+#: so a move or a delete can fail even though nothing in Frigate holds it.
+WINDOWS_SHARING_ERRORS = (5, 32, 33)
+
+FILE_OPERATION_ATTEMPTS = 5
+FILE_OPERATION_DELAY = 0.2
+
+
+def is_held_by_another_process(err: OSError) -> bool:
+    """Whether a file operation failed because another process held the file."""
+    if getattr(err, "winerror", None) in WINDOWS_SHARING_ERRORS:
+        return True
+
+    if IS_WINDOWS:
+        # CPython maps a sharing violation onto EACCES as well as winerror
+        return err.errno in (errno.EACCES, errno.EBUSY)
+
+    return err.errno == errno.EBUSY
+
+
+def _run_with_retry(operation, attempts: int, delay: float, description: str) -> None:
+    """Run a file operation, retrying while another process holds the file."""
+    for attempt in range(1, attempts + 1):
+        try:
+            operation()
+            return
+        except OSError as err:
+            if attempt == attempts or not is_held_by_another_process(err):
+                raise
+
+            logger.debug(
+                "Retrying %s, another process holds the file (attempt %d of %d): %s",
+                description,
+                attempt,
+                attempts,
+                err,
+            )
+            time.sleep(delay * attempt)
+
+
+def robust_remove(
+    path: str,
+    attempts: int = FILE_OPERATION_ATTEMPTS,
+    delay: float = FILE_OPERATION_DELAY,
+) -> None:
+    """Remove a file, retrying while another process holds it open."""
+    _run_with_retry(lambda: os.remove(path), attempts, delay, f"removal of {path}")
+
+
+def robust_move(
+    src: str,
+    dst: str,
+    attempts: int = FILE_OPERATION_ATTEMPTS,
+    delay: float = FILE_OPERATION_DELAY,
+) -> None:
+    """Move a file or directory, retrying while another process holds it open."""
+    _run_with_retry(
+        lambda: shutil.move(src, dst), attempts, delay, f"move of {src} to {dst}"
+    )
+
+
+async def async_robust_remove(
+    path: str,
+    attempts: int = FILE_OPERATION_ATTEMPTS,
+    delay: float = FILE_OPERATION_DELAY,
+) -> None:
+    """Remove a file without blocking the event loop while it retries."""
+    for attempt in range(1, attempts + 1):
+        try:
+            os.remove(path)
+            return
+        except OSError as err:
+            if attempt == attempts or not is_held_by_another_process(err):
+                raise
+
+            logger.debug(
+                "Retrying removal of %s, another process holds the file "
+                "(attempt %d of %d): %s",
+                path,
+                attempt,
+                attempts,
+                err,
+            )
+            await asyncio.sleep(delay * attempt)
+
+
+async def async_robust_move(
+    src: str,
+    dst: str,
+    attempts: int = FILE_OPERATION_ATTEMPTS,
+    delay: float = FILE_OPERATION_DELAY,
+) -> None:
+    """Move a file or directory without blocking the event loop while it retries."""
+    for attempt in range(1, attempts + 1):
+        try:
+            shutil.move(src, dst)
+            return
+        except OSError as err:
+            if attempt == attempts or not is_held_by_another_process(err):
+                raise
+
+            logger.debug(
+                "Retrying move of %s to %s, another process holds the file "
+                "(attempt %d of %d): %s",
+                src,
+                dst,
+                attempt,
+                attempts,
+                err,
+            )
+            await asyncio.sleep(delay * attempt)
