@@ -13,6 +13,7 @@ import unittest
 from unittest.mock import patch
 
 from frigate.util import job_object
+from frigate.util.platform import IS_WINDOWS
 
 
 class TestJobObjectStructures(unittest.TestCase):
@@ -67,9 +68,25 @@ class TestJobObjectInstall(unittest.TestCase):
         job_object.reset()
         self.addCleanup(job_object.reset)
 
+    @unittest.skipIf(
+        IS_WINDOWS, "a Windows machine installs its own job object instead"
+    )
     def test_is_a_noop_off_windows(self):
         self.assertFalse(job_object.install())
         self.assertFalse(job_object.installed())
+
+    @unittest.skipUnless(IS_WINDOWS, "job objects only exist on Windows")
+    def test_installs_its_own_job_object(self):
+        """The point of the module: this process gets a job that outlives it."""
+        installed = job_object.install()
+
+        self.assertEqual(installed, job_object.installed())
+
+        if not installed:
+            # an environment can refuse the job (a service wrapper that already
+            # put this process in a job with UI restrictions, for example), and
+            # then the reason why is recorded rather than raised
+            self.assertIsNotNone(job_object.error())
 
     @patch.object(job_object, "IS_WINDOWS", True)
     @patch.object(os, "name", "nt")

@@ -239,6 +239,28 @@ class TestNativeEndToEnd(unittest.TestCase):
         except ValueError:
             return False
 
+    def _cache_listing(self) -> str:
+        """What ffmpeg has written so far, and therefore where to look next.
+
+        Segments are written into the cache first and only moved into
+        recordings afterwards, so an empty recordings directory means
+        something very different depending on what the cache holds: nothing at
+        all means ffmpeg never wrote a segment, a pile of mp4 files means the
+        mover never picked them up.
+        """
+        cache = Path(self.base) / "cache"
+        if not cache.is_dir():
+            return f"there is no cache directory at {cache}\n"
+
+        segments = sorted(path.name for path in cache.rglob("*.mp4"))
+        if not segments:
+            return f"there are no segments in {cache}\n"
+
+        return (
+            f"{len(segments)} segments are sitting in the cache: "
+            f"{', '.join(segments[:8])}\n"
+        )
+
     def _snapshot_children(self) -> None:
         """Remember the ffmpeg processes that were already running.
 
@@ -290,6 +312,7 @@ class TestNativeEndToEnd(unittest.TestCase):
         self.assertTrue(
             recorded,
             "No recording segments appeared under media/recordings.\n"
+            + self._cache_listing()
             + self._log_tail(),
         )
 
