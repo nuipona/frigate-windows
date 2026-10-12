@@ -109,6 +109,7 @@ jobs:
           npm run build:native
         working-directory: ./web
       - name: Run Windows path, process, hardware, and config smoke tests
+        shell: pwsh
         run: |
           python -m unittest `
             frigate.test.test_platform_windows `
@@ -123,7 +124,19 @@ jobs:
             frigate.test.test_config.TestConfig.test_windows_hwaccel_preset_is_accepted `
             frigate.test.test_config.TestConfig.test_reserved_camera_name_is_rejected_on_windows `
             frigate.test.test_config.TestConfig.test_camera_names_that_differ_only_by_case_are_rejected_on_windows `
-            frigate.test.test_detector_hardware.TestWindowsOpenVINODevices
+            frigate.test.test_detector_hardware.TestWindowsOpenVINODevices *> smoke.log
+          if ($LASTEXITCODE -ne 0) {
+            Write-Output "::error title=smoke-exit::unittest exited $LASTEXITCODE"
+            Select-String -Path smoke.log -Pattern '^(ERROR|FAIL): |Error: |Ran [0-9]+ tests' |
+              Select-Object -First 8 | ForEach-Object {
+                $msg = ($_.Line -replace "`r", '' -replace "`n", ' ')
+                Write-Output "::error title=smoke::$msg"
+              }
+            Get-Content smoke.log -Tail 12 | ForEach-Object {
+              Write-Output ("::error title=smoke-tail::{0}" -f ($_ -replace "`r", '' -replace "`n", ' '))
+            }
+            exit 1
+          }
       - name: Check the Windows requirements can install and cover every import
         run: python testing-scripts/check_windows_requirements.py
       - name: Run process lifecycle tests
