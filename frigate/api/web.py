@@ -32,6 +32,8 @@ Two details are worth calling out because they are easy to get wrong:
 import asyncio
 import logging
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 import aiohttp
@@ -770,6 +772,19 @@ async def _startup() -> None:
     vod_native.start_cache_maintenance()
 
 
+@asynccontextmanager
+async def _lifespan(app: Starlette) -> AsyncIterator[None]:
+    """Run the startup work through the lifespan API.
+
+    Starlette removed the ``on_startup`` and ``on_shutdown`` arguments, so the
+    native server, which has no nginx in front of it, has to pass a lifespan
+    context manager instead. Without this the app cannot be constructed at all
+    and the Windows install never answers on any port.
+    """
+    await _startup()
+    yield
+
+
 def create_native_web_app(api_app: Any, port: int) -> Starlette:
     """Build the app that serves Frigate where nginx would.
 
@@ -811,7 +826,7 @@ def create_native_web_app(api_app: Any, port: int) -> Starlette:
         Mount("/", app=SpaFiles(web_dir)),
     ]
 
-    app = Starlette(routes=routes, on_startup=[_startup])
+    app = Starlette(routes=routes, lifespan=_lifespan)
     app.add_middleware(NativeAuthMiddleware, api_app=api_app, port=port)
     return app
 

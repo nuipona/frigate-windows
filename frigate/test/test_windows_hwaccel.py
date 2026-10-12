@@ -15,6 +15,7 @@ from frigate.ffmpeg_presets import (
 )
 from frigate.util import hwaccel
 from frigate.util.platform import (
+    IS_WINDOWS,
     classify_adapter_vendors,
     get_cpu_brand,
     get_display_adapter_vendors,
@@ -47,6 +48,10 @@ class TestAdapterVendorClassification(unittest.TestCase):
             classify_adapter_vendors(["Microsoft Basic Display Adapter"]), set()
         )
 
+    @unittest.skipIf(
+        IS_WINDOWS,
+        "a Windows machine reports its own adapters, this asserts the POSIX path",
+    )
     def test_no_adapters_on_this_platform(self):
         # the enumeration is Windows only, so a POSIX run must return empty
         self.assertEqual(get_display_adapters(), [])
