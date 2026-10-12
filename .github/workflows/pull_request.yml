@@ -99,10 +99,31 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - name: Install native Windows Python requirements
+        shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r docker/main/requirements-windows.txt
+          # TEMPORARY DIAGNOSTIC: surface the pip failure as annotations, which
+          # are readable from an environment that cannot download job logs.
+          python -m pip install -r docker/main/requirements-windows.txt *> pip-diagnose.log
+          $pipCode = $LASTEXITCODE
+          if ($pipCode -ne 0) {
+            Write-Output "::error title=pip-exit::requirements install exited $pipCode"
+            $hits = Select-String -Path pip-diagnose.log -Pattern 'ERROR: |error: |No matching distribution|Failed building|error during|Requires-Python|not a supported wheel' |
+              Select-Object -First 8
+            foreach ($hit in $hits) {
+              $msg = ($hit.Line -replace "`r", '' -replace "`n", ' ')
+              Write-Output "::error title=pip::$msg"
+            }
+            Get-Content pip-diagnose.log -Tail 6 | ForEach-Object {
+              Write-Output ("::error title=pip-tail::{0}" -f ($_ -replace "`r", '' -replace "`n", ' '))
+            }
+            exit 1
+          }
           python -m pip install --editable --no-deps .
+          if ($LASTEXITCODE -ne 0) {
+            Write-Output "::error title=pip-editable::editable install failed with $LASTEXITCODE"
+            exit 1
+          }
       - name: Build the native Windows web interface
         run: |
           npm ci
