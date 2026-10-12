@@ -159,6 +159,45 @@ jobs:
               }
           }
           exit $lifecycleCode
+      - name: Report the lifecycle log
+        if: failure()
+        shell: pwsh
+        run: |
+          function Write-LogAnnotations {
+            param([string]$Path, [string]$Prefix, [int]$MaxChunks = 40)
+            # GitHub truncates a long annotation, so the log is reduced first:
+            # repeated lines collapse into a single "x N repeated" marker and
+            # the rest is emitted in small chunks, one annotation per chunk.
+            if (-not (Test-Path $Path)) { return }
+            $deduped = New-Object System.Collections.Generic.List[string]
+            $previous = $null
+            $repeat = 0
+            foreach ($line in (Get-Content -Path $Path)) {
+              $clean = $line -replace "`r", ''
+              if ($clean -eq $previous) { $repeat++; continue }
+              if ($repeat -gt 0) { $deduped.Add(("  (x{0} like the line above)" -f $repeat)); $repeat = 0 }
+              $deduped.Add($clean)
+              $previous = $clean
+            }
+            if ($repeat -gt 0) { $deduped.Add(("  (x{0} like the line above)" -f $repeat)) }
+
+            $chunk = New-Object System.Collections.Generic.List[string]
+            $number = 0
+            foreach ($line in $deduped) {
+              $chunk.Add($line)
+              if ($chunk.Count -ge 4) {
+                $number++
+                if ($number -gt $MaxChunks) { return }
+                Write-Output ("::error title={0}-{1}::{2}" -f $Prefix, $number, ($chunk -join ' // '))
+                $chunk.Clear()
+              }
+            }
+            if ($chunk.Count -gt 0 -and $number -lt $MaxChunks) {
+              $number++
+              Write-Output ("::error title={0}-{1}::{2}" -f $Prefix, $number, ($chunk -join ' // '))
+            }
+          }
+          Write-LogAnnotations -Path 'lifecycle.log' -Prefix 'lifecycle-log' -MaxChunks 20
       - name: Validate first-run native configuration
         run: |
           $env:FRIGATE_BASE_DIR = Join-Path $env:RUNNER_TEMP "frigate-native-smoke"
@@ -225,18 +264,49 @@ jobs:
               Select-Object -First 2 | ForEach-Object {
                 Write-Output ("::error title=e2e::{0}" -f ($_.Line -replace "`r", '' -replace "`n", ' '))
               }
-            $runLog = Join-Path $env:FRIGATE_E2E_DIR 'frigate-run.log'
-            if (Test-Path $runLog) {
-              Select-String -Path $runLog -Pattern 'libx264|lavfi|Invalid|No such|Conversion failed|Error initializing|Unknown encoder|Stream map|Cannot' |
-                Select-Object -Last 4 | ForEach-Object {
-                  Write-Output ("::error title=ffmpeg-says::{0}" -f ($_.Line -replace "`r", '' -replace "`n", ' '))
-                }
-              Get-Content $runLog -Tail 4 | ForEach-Object {
-                Write-Output ("::error title=run-log-tail::{0}" -f ($_ -replace "`r", '' -replace "`n", ' '))
-              }
-            }
           }
           exit $e2eCode
+      - name: Report the end to end failure
+        if: failure()
+        shell: pwsh
+        run: |
+          function Write-LogAnnotations {
+            param([string]$Path, [string]$Prefix, [int]$MaxChunks = 40)
+            # GitHub truncates a long annotation, so the log is reduced first:
+            # repeated lines collapse into a single "x N repeated" marker and
+            # the rest is emitted in small chunks, one annotation per chunk.
+            if (-not (Test-Path $Path)) { return }
+            $deduped = New-Object System.Collections.Generic.List[string]
+            $previous = $null
+            $repeat = 0
+            foreach ($line in (Get-Content -Path $Path)) {
+              $clean = $line -replace "`r", ''
+              if ($clean -eq $previous) { $repeat++; continue }
+              if ($repeat -gt 0) { $deduped.Add(("  (x{0} like the line above)" -f $repeat)); $repeat = 0 }
+              $deduped.Add($clean)
+              $previous = $clean
+            }
+            if ($repeat -gt 0) { $deduped.Add(("  (x{0} like the line above)" -f $repeat)) }
+
+            $chunk = New-Object System.Collections.Generic.List[string]
+            $number = 0
+            foreach ($line in $deduped) {
+              $chunk.Add($line)
+              if ($chunk.Count -ge 4) {
+                $number++
+                if ($number -gt $MaxChunks) { return }
+                Write-Output ("::error title={0}-{1}::{2}" -f $Prefix, $number, ($chunk -join ' // '))
+                $chunk.Clear()
+              }
+            }
+            if ($chunk.Count -gt 0 -and $number -lt $MaxChunks) {
+              $number++
+              Write-Output ("::error title={0}-{1}::{2}" -f $Prefix, $number, ($chunk -join ' // '))
+            }
+          }
+          Write-LogAnnotations -Path 'e2e.log' -Prefix 'e2e-log' -MaxChunks 12
+          Write-LogAnnotations -Path (Join-Path $env:FRIGATE_E2E_DIR 'frigate-run.log') -Prefix 'frigate-log' -MaxChunks 45
+
       - name: Upload Frigate's log and media
         if: failure()
         uses: actions/upload-artifact@v7

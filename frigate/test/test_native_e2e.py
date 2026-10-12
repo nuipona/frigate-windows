@@ -71,7 +71,9 @@ cameras:
       fps: 10
     record:
       enabled: true
-      retain:
+      continuous:
+        days: 1
+      motion:
         days: 1
     snapshots:
       enabled: false
