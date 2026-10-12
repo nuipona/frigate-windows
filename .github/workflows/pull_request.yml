@@ -119,9 +119,17 @@ jobs:
             }
             exit 1
           }
-          python -m pip install --editable --no-deps .
+          python -m pip install --editable --no-deps . *> pip-editable.log
           if ($LASTEXITCODE -ne 0) {
             Write-Output "::error title=pip-editable::editable install failed with $LASTEXITCODE"
+            Select-String -Path pip-editable.log -Pattern 'ERROR|error|Traceback|WinError|Multiple|discover|invalid|cannot|No such' |
+              Select-Object -First 8 | ForEach-Object {
+                $msg = ($_.Line -replace "`r", '' -replace "`n", ' ')
+                Write-Output "::error title=pip-editable::$msg"
+              }
+            Get-Content pip-editable.log -Tail 12 | ForEach-Object {
+              Write-Output ("::error title=pip-editable-tail::{0}" -f ($_ -replace "`r", '' -replace "`n", ' '))
+            }
             exit 1
           }
       - name: Build the native Windows web interface
