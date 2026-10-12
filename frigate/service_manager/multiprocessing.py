@@ -157,10 +157,15 @@ class ServiceProcess(BaseServiceProcess):
         # A child that does not handle SIGBREAK is killed by the default
         # action, so it never runs after_run() and never stops the ffmpeg
         # processes it started.
-        handled = (signal.SIGTERM, signal.SIGINT)
+        handled: list[signal.Signals] = [signal.SIGTERM, signal.SIGINT]
 
-        if getattr(signal, "SIGBREAK", None) is not None:
-            handled += (signal.SIGBREAK,)
+        # getattr rather than signal.SIGBREAK, which only exists on the
+        # platform it is defined for: mypy resolves the module against the
+        # system it runs on, and CI checks on Linux.
+        break_signal = getattr(signal, "SIGBREAK", None)
+
+        if break_signal is not None:
+            handled.append(break_signal)
 
         for signum in handled:
             try:
