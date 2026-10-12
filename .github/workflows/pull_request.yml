@@ -252,8 +252,9 @@ jobs:
           # everything ffmpeg or the recording maintainer complains about,
           # without the frame reader's retry storm drowning it out
           Publish-Log -Path (Join-Path $env:FRIGATE_E2E_DIR 'frigate-run.log') `
-            -Prefix 'frigate-said' -Drop @('Unable to read frames') `
-            -Keep 'ffmpeg|lavfi|Invalid|No such|Conversion|Error|error|Unable|discard|recording'
+            -Prefix 'frigate-said' `
+            -Drop @('Unable to read frames', 'peewee_migrate', 'Migrate ') `
+            -Keep 'ffmpeg|lavfi|Invalid|No such|Conversion|Error|error|Unable|discard|segment'
           # the frame read failures repeat hundreds of times, so only the
           # first and the last few are worth looking at
           Publish-Log -Path (Join-Path $env:FRIGATE_E2E_DIR 'frigate-run.log') `
@@ -317,7 +318,8 @@ jobs:
             -Keep '^(FAIL|ERROR): |^Traceback|^[A-Za-z]+Error|^Ran |^ran '
           # the tail carries the failing test ids, which are printed above
           # each traceback by the runner
-          Publish-Log -Path 'suite.log' -Prefix 'suite-tail' -Tail 60
+          Publish-Log -Path 'suite.log' -Prefix 'suite-tail' -Tail 200 `
+            -Drop @('peewee_migrate|transformers|PyTorch')
       - name: Upload the test report
         if: failure()
         uses: actions/upload-artifact@v7
