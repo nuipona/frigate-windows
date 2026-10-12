@@ -7,6 +7,7 @@ from typing import Any
 
 from frigate.const import PROCESS_PRIORITY_LOW
 from frigate.log import LogPipe
+from frigate.util.platform import IS_WINDOWS, get_process_priority_class
 
 
 def stop_ffmpeg(ffmpeg_process: sp.Popen[Any], logger: logging.Logger):
@@ -109,16 +110,23 @@ def run_ffmpeg_with_progress(
             export for concat playlists).
         process_started: Optional callback invoked with the live `Popen`
             once spawned — lets callers store the ref for cancellation.
-        use_low_priority: When True, prepend `nice -n PROCESS_PRIORITY_LOW`
-            so concat doesn't starve detection.
+        use_low_priority: When True, run FFmpeg at low process priority so
+            concat doesn't starve detection. Uses `nice` on POSIX and a Windows
+            process priority class on Windows.
 
     Returns:
         Tuple of `(returncode, captured_stderr)`. Stdout is left attached
         to the parent process to avoid buffer-full deadlocks.
     """
     full_cmd = inject_progress_flags(cmd)
+    popen_kwargs: dict[str, Any] = {}
     if use_low_priority:
-        full_cmd = ["nice", "-n", str(PROCESS_PRIORITY_LOW)] + full_cmd
+        if IS_WINDOWS:
+            priority_class = get_process_priority_class(PROCESS_PRIORITY_LOW)
+            if priority_class is not None:
+                popen_kwargs["creationflags"] = priority_class
+        else:
+            full_cmd = ["nice", "-n", str(PROCESS_PRIORITY_LOW)] + full_cmd
 
     def emit(percent: float) -> None:
         if on_progress is None:
@@ -135,8 +143,9 @@ def run_ffmpeg_with_progress(
         stdin=sp.PIPE if stdin_payload is not None else None,
         stderr=sp.PIPE,
         text=True,
-        encoding="ascii",
+        encoding="utf-8",
         errors="replace",
+        **popen_kwargs,
     )
     if process_started is not None:
         try:

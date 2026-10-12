@@ -4,7 +4,10 @@ import io
 import json
 import logging
 import os
+import shutil
+import tempfile
 from typing import Any, Self
+from urllib.request import urlopen
 
 import numpy as np
 from pydantic import (
@@ -17,7 +20,7 @@ from pydantic import (
 )
 from ruamel.yaml import YAML
 
-from frigate.const import REGEX_JSON
+from frigate.const import MODEL_CACHE_DIR, REGEX_JSON
 from frigate.detectors import ModelConfig
 from frigate.detectors.detector_config import DEFAULT_SCENE
 from frigate.detectors.device import DeviceParseError, DeviceSpec, parse_device
@@ -41,6 +44,7 @@ from frigate.util.live_streams import (
     transcode_stream_name,
     transcode_streams,
 )
+from frigate.util.platform import IS_WINDOWS, get_default_labelmap_path
 from frigate.util.runtime_deps import sha256_of
 from frigate.util.services import auto_detect_hwaccel
 
@@ -96,8 +100,8 @@ def _default_models() -> list[ModelConfig]:
     return [ModelConfig.model_validate(model) for model in DEFAULT_MODELS]
 
 
-# Used by the openvino branch below and rendered into the new-config YAML
-# template so first-time setups default to openvino on CPU.
+# Used by the OpenVINO branch below and as the Linux new-config model. Native
+# Windows starts with a CPU TFLite model because these assets live in the image.
 DEFAULT_MODEL = {
     "width": 300,
     "height": 300,
@@ -106,7 +110,17 @@ DEFAULT_MODEL = {
     "path": "/openvino-model/ssdlite_mobilenet_v2.xml",
     "labelmap_path": "/openvino-model/coco_91cl_bkgr.txt",
 }
-NEW_CONFIG_MODELS = [{"devices": ["openvino:CPU"], **DEFAULT_MODEL}]
+WINDOWS_DEFAULT_MODEL_PATH = os.path.join(MODEL_CACHE_DIR, "cpu_model.tflite")
+if IS_WINDOWS:
+    windows_default_model = {
+        "path": WINDOWS_DEFAULT_MODEL_PATH,
+    }
+    windows_labelmap_path = get_default_labelmap_path()
+    if windows_labelmap_path:
+        windows_default_model["labelmap_path"] = windows_labelmap_path
+    NEW_CONFIG_MODELS = [{"devices": ["cpu"], **windows_default_model}]
+else:
+    NEW_CONFIG_MODELS = [{"devices": ["openvino:CPU"], **DEFAULT_MODEL}]
 DEFAULT_DETECT_DIMENSIONS = {"width": 1280, "height": 720}
 
 
@@ -126,6 +140,47 @@ mqtt:
 cameras: {{}}  # No cameras defined, UI wizard should be used
 version: {CURRENT_CONFIG_VERSION}
 """
+
+WINDOWS_DEFAULT_MODEL_URL = (
+    "https://github.com/google-coral/test_data/raw/release-frogfish/"
+    "ssdlite_mobiledet_coco_qat_postprocess.tflite"
+)
+
+
+def _ensure_windows_default_cpu_model(model_path: str) -> None:
+    """Download the default CPU model on first use of the native Windows config."""
+    if not IS_WINDOWS or os.path.isfile(model_path):
+        return
+
+    model_dir = os.path.dirname(model_path)
+    os.makedirs(model_dir, exist_ok=True)
+    temp_fd, temp_path = tempfile.mkstemp(
+        prefix="cpu_model_", suffix=".download", dir=model_dir
+    )
+
+    try:
+        with os.fdopen(temp_fd, "wb") as destination:
+            with urlopen(WINDOWS_DEFAULT_MODEL_URL, timeout=60) as response:
+                shutil.copyfileobj(response, destination)
+
+        if os.path.getsize(temp_path) == 0:
+            raise OSError("Downloaded default CPU model is empty")
+
+        os.replace(temp_path, model_path)
+        logger.info("Downloaded the default Windows CPU detection model")
+    except Exception:
+        logger.warning(
+            "Unable to download the default Windows CPU model. The web interface "
+            "will still start, but detection needs the model at %s",
+            model_path,
+            exc_info=True,
+        )
+    finally:
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            pass
+
 
 # stream info handler
 stream_info_retriever = StreamInfoRetriever()
@@ -826,13 +881,24 @@ class FrigateConfig(FrigateBaseModel):
         model_config = model.model_dump(exclude_unset=True, warnings="none")
 
         if "path" not in model_config:
-            if detector == "cpu" or detector.endswith("_tfl"):
+            if detector == "cpu":
+                model_config["path"] = (
+                    WINDOWS_DEFAULT_MODEL_PATH if IS_WINDOWS else "/cpu_model.tflite"
+                )
+            elif detector.endswith("_tfl"):
                 model_config["path"] = "/cpu_model.tflite"
             elif detector == "edgetpu":
                 model_config["path"] = "/edgetpu_model.tflite"
             elif detector == "openvino":
                 for default_key, default_value in DEFAULT_MODEL.items():
                     model_config.setdefault(default_key, default_value)
+
+        if (
+            IS_WINDOWS
+            and detector == "cpu"
+            and model_config.get("path") == WINDOWS_DEFAULT_MODEL_PATH
+        ):
+            _ensure_windows_default_cpu_model(WINDOWS_DEFAULT_MODEL_PATH)
 
         loaded = ModelConfig.model_validate(model_config)
         loaded.check_and_load_plus_model(self.plus_api, detector)
@@ -1487,7 +1553,7 @@ class FrigateConfig(FrigateBaseModel):
             migrate_frigate_config(config_path)
 
         # Finally, load the resulting configuration file.
-        with open(config_path, "a+" if new_config else "r") as f:
+        with open(config_path, "a+" if new_config else "r", encoding="utf-8") as f:
             # Only write the default config if the opened file is non-empty. This can happen as
             # a race condition. It's extremely unlikely, but eh. Might as well check it.
             if new_config and f.tell() == 0:

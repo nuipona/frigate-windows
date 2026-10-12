@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import tempfile
@@ -11,6 +12,10 @@ from pydantic import ValidationError
 from ruamel.yaml.constructor import DuplicateKeyError
 
 from frigate.config import BirdseyeModeEnum, FrigateConfig, RetainModeEnum
+from frigate.config.config import (
+    WINDOWS_DEFAULT_MODEL_URL,
+    _ensure_windows_default_cpu_model,
+)
 from frigate.const import MODEL_CACHE_DIR
 from frigate.detectors import DetectorTypeEnum
 from frigate.detectors.device import build_detector_config, runner_names
@@ -110,6 +115,37 @@ class TestConfig(unittest.TestCase):
             config = {"models": [{"devices": devices}]}
             frigate_config = FrigateConfig(**(deep_merge(config, self.minimal)))
             assert frigate_config.primary_model.path == expected
+
+    @patch("frigate.detectors.detector_config.load_labels")
+    @patch("frigate.config.config._ensure_windows_default_cpu_model")
+    @patch(
+        "frigate.config.config.WINDOWS_DEFAULT_MODEL_PATH",
+        r"C:\Frigate\config\model_cache\cpu_model.tflite",
+    )
+    @patch("frigate.config.config.IS_WINDOWS", True)
+    def test_windows_cpu_default_uses_a_native_model_path(
+        self, ensure_model, mock_labels
+    ):
+        mock_labels.return_value = {}
+        frigate_config = FrigateConfig(**self.minimal)
+
+        expected_path = r"C:\Frigate\config\model_cache\cpu_model.tflite"
+        self.assertEqual(frigate_config.primary_model.path, expected_path)
+        ensure_model.assert_called_once_with(expected_path)
+
+    @patch("frigate.config.config.IS_WINDOWS", True)
+    @patch("frigate.config.config.urlopen")
+    def test_windows_default_cpu_model_download_is_atomic(self, urlopen):
+        with tempfile.TemporaryDirectory() as model_dir:
+            model_path = os.path.join(model_dir, "cpu_model.tflite")
+            urlopen.return_value = io.BytesIO(b"test model weights")
+
+            _ensure_windows_default_cpu_model(model_path)
+
+            with open(model_path, "rb") as model_file:
+                self.assertEqual(model_file.read(), b"test model weights")
+            urlopen.assert_called_once_with(WINDOWS_DEFAULT_MODEL_URL, timeout=60)
+            self.assertEqual(os.listdir(model_dir), ["cpu_model.tflite"])
 
     @patch("frigate.detectors.detector_config.load_labels")
     def test_camera_picks_model_by_scene(self, mock_labels):

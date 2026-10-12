@@ -133,6 +133,35 @@ class TestGpus(HardwareProbeTestCase):
         self.assertNotIn("openvino:NPU", self.probe())
 
 
+class TestWindowsOpenVINODevices(unittest.TestCase):
+    def test_openvino_devices_are_discovered_without_linux_sysfs(self):
+        available = ["CPU", "GPU.0", "GPU.1", "NPU"]
+        with (
+            patch.object(hardware, "IS_WINDOWS", True),
+            patch.object(
+                hardware, "_openvino_available_devices", return_value=available
+            ),
+        ):
+            gpu = hardware.detect_intel_gpu()
+            npu = hardware.detect_intel_npu()
+
+        self.assertEqual(
+            [unit.device for unit in gpu.units],
+            ["openvino:GPU.0", "openvino:GPU.1"],
+        )
+        self.assertEqual([unit.device for unit in npu.units], ["openvino:NPU"])
+        self.assertEqual(gpu.detector, "openvino")
+        self.assertEqual(npu.detector, "openvino")
+
+    def test_missing_openvino_devices_are_ignored(self):
+        with (
+            patch.object(hardware, "IS_WINDOWS", True),
+            patch.object(hardware, "_openvino_available_devices", return_value=["CPU"]),
+        ):
+            self.assertIsNone(hardware.detect_intel_gpu())
+            self.assertIsNone(hardware.detect_intel_npu())
+
+
 class TestNvidia(HardwareProbeTestCase):
     def _add_gpu(self, address: str, model: str) -> None:
         write(

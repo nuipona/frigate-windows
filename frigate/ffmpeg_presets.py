@@ -3,6 +3,8 @@
 import logging
 import os
 from enum import Enum
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from typing import Any
 
 from frigate.const import (
@@ -14,9 +16,18 @@ from frigate.const import (
     FFMPEG_HWACCEL_VULKAN,
     LIBAVFORMAT_VERSION_MAJOR,
 )
-from frigate.util.platform import IS_WINDOWS
+from frigate.util.platform import IS_WINDOWS, quote_ffmpeg_arg
 from frigate.util.services import vainfo_hwaccel
-from frigate.version import VERSION
+
+try:
+    from frigate.version import VERSION
+except ModuleNotFoundError:
+    # ``make version`` generates this module for the container image. Native
+    # editable installs use the distribution metadata instead.
+    try:
+        VERSION = package_version("frigate-nvr")
+    except PackageNotFoundError:
+        VERSION = "dev"
 
 logger = logging.getLogger(__name__)
 
@@ -316,14 +327,14 @@ def parse_preset_hardware_acceleration_encode(
         arg_map = PRESETS_HW_ACCEL_ENCODE_TIMELAPSE
 
     if not isinstance(arg, str):
-        return arg_map["default"].format(ffmpeg_path, input, output)
+        return arg_map["default"].format(quote_ffmpeg_arg(ffmpeg_path), input, output)
 
     # Not all jetsons have HW encoders, so fall back to default SW encoder if not
     if arg.startswith("preset-jetson-") and not os.path.exists("/dev/nvhost-msenc"):
         arg = "default"
 
     return arg_map.get(arg, arg_map["default"]).format(
-        ffmpeg_path,
+        quote_ffmpeg_arg(ffmpeg_path),
         input,
         output,
         _gpu_selector.get_gpu_arg(arg, 0),

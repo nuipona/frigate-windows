@@ -87,6 +87,27 @@ class TestRunFfmpegWithProgress(unittest.TestCase):
 
         self.assertEqual(seen, [proc])
 
+    def test_windows_low_priority_uses_process_priority_class(self):
+        proc = self._make_fake_proc([])
+        proc.stderr = MagicMock()
+        proc.stderr.__iter__ = lambda self: iter([])
+        proc.stderr.read = MagicMock(return_value="")
+
+        with (
+            patch("frigate.util.ffmpeg.IS_WINDOWS", True),
+            patch("frigate.util.ffmpeg.get_process_priority_class", return_value=0x40),
+            patch("subprocess.Popen", return_value=proc) as popen,
+        ):
+            run_ffmpeg_with_progress(
+                ["ffmpeg", "out"],
+                expected_duration_seconds=1.0,
+                use_low_priority=True,
+            )
+
+        command = popen.call_args.args[0]
+        self.assertEqual(command[0], "ffmpeg")
+        self.assertEqual(popen.call_args.kwargs["creationflags"], 0x40)
+
     def test_clamps_percent_to_0_100(self):
         captured: list[float] = []
 

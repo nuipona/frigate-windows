@@ -62,7 +62,7 @@ def main() -> None:
         print("*************************************************************\n")
         # Attempt to get the original config file for line number tracking
         config_path = find_config_file()
-        with open(config_path) as f:
+        with open(config_path, encoding="utf-8") as f:
             yaml_config = ruamel.yaml.YAML()
             yaml_config.preserve_quotes = True
             full_config = yaml_config.load(f)

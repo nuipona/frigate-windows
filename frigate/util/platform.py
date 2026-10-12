@@ -35,6 +35,7 @@ and ``FRIGATE_TMP_DIR`` to override a single directory.
 
 import logging
 import os
+import shlex
 import shutil
 import sys
 import zlib
@@ -107,6 +108,18 @@ def base_dir_is_overridden() -> bool:
 def get_source_root() -> str:
     """Directory containing the ``frigate`` package and the ``web`` build."""
     return str(Path(__file__).resolve().parents[2])
+
+
+def get_default_labelmap_path() -> str | None:
+    """Find the bundled label map in a container or source checkout."""
+    if not IS_WINDOWS and os.path.isfile("/labelmap.txt"):
+        return "/labelmap.txt"
+
+    source_labelmap = os.path.join(get_source_root(), "labelmap.txt")
+    if os.path.isfile(source_labelmap):
+        return source_labelmap
+
+    return None
 
 
 def get_install_dir() -> str:
@@ -390,6 +403,16 @@ def ffmpeg_concat_file_line(path: str) -> str:
     return f"file '{normalized}'"
 
 
+def quote_ffmpeg_arg(value: str) -> str:
+    """Quote one argument embedded in a command string later parsed by shlex."""
+    return shlex.quote(str(value))
+
+
+def split_ffmpeg_command(command: str) -> list[str]:
+    """Split an FFmpeg command string while preserving quoted arguments."""
+    return shlex.split(command, posix=True)
+
+
 def get_service_log_path(service: str) -> str:
     """Path of the file the log viewer in the web UI reads for a service.
 
@@ -559,6 +582,26 @@ def resolve_ffmpeg_binary(name: str = "ffmpeg") -> str:
 # ---------------------------------------------------------------------------
 
 
+def get_process_priority_class(priority: int) -> int | None:
+    """Map Frigate's POSIX-style priority to a Windows process priority class."""
+    if not IS_WINDOWS:
+        return None
+
+    try:
+        import psutil
+    except ImportError:  # pragma: no cover - psutil is a runtime dependency
+        return None
+
+    # Frigate uses nice values between 0 and 19 while Windows only has coarse
+    # classes, so use idle for background work and below-normal otherwise.
+    if priority >= 10:
+        return psutil.IDLE_PRIORITY_CLASS
+    elif priority > 0:
+        return psutil.BELOW_NORMAL_PRIORITY_CLASS
+
+    return psutil.NORMAL_PRIORITY_CLASS
+
+
 def set_process_priority(priority: int) -> None:
     """Lower the scheduling priority of the current process.
 
@@ -570,17 +613,9 @@ def set_process_priority(priority: int) -> None:
         try:
             import psutil
 
-            # Frigate uses nice values between 0 and 19 while Windows only has
-            # coarse classes, so map onto the two that make sense here: idle for
-            # background work, below normal for everything else.
-            if priority >= 10:
-                value = psutil.IDLE_PRIORITY_CLASS
-            elif priority > 0:
-                value = psutil.BELOW_NORMAL_PRIORITY_CLASS
-            else:
-                value = psutil.NORMAL_PRIORITY_CLASS
-
-            psutil.Process().nice(value)
+            value = get_process_priority_class(priority)
+            if value is not None:
+                psutil.Process().nice(value)
         except Exception as err:  # pragma: no cover - depends on host permissions
             logger.debug("Unable to set process priority: %s", err)
 
