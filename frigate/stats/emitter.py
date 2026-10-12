@@ -16,6 +16,7 @@ from frigate.stats.hardware import HardwareStats
 from frigate.stats.prometheus import update_metrics
 from frigate.stats.util import get_latest_version, is_newer_version, stats_snapshot
 from frigate.types import StatsTrackingTypes
+from frigate.util.platform import storage_stat_key
 from frigate.version import VERSION
 
 logger = logging.getLogger(__name__)
@@ -283,7 +284,7 @@ class StatsEmitter(threading.Thread):
                     raise_notice(kind, scope=camera, params={"cpu": averages[camera]})
 
         # shm too small for the cameras
-        self._update_shm_notice(stats["service"]["storage"]["/dev/shm"])
+        self._update_shm_notice(stats["service"]["storage"][storage_stat_key("shm")])
 
         # repeats of batched kinds, such as failed logins
         flush_notices()

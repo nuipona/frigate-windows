@@ -1,4 +1,5 @@
 import logging
+import os
 import sqlite3
 import threading
 from typing import Any
@@ -6,6 +7,8 @@ from typing import Any
 import regex
 from peewee import DatabaseError
 from playhouse.sqliteq import SqliteQueueDatabase
+
+from frigate.util.platform import IS_WINDOWS
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +20,14 @@ class SqliteVecQueueDatabase(SqliteQueueDatabase):
         self, *args: Any, load_vec_extension: bool = False, **kwargs: Any
     ) -> None:
         self.load_vec_extension: bool = load_vec_extension
-        # no extension necessary, sqlite will load correctly for each platform
-        self.sqlite_vec_path = "/usr/local/lib/vec0"
+        # the container builds sqlite-vec into /usr/local/lib; elsewhere the
+        # library is loaded by name so the platform looks it up (vec0.dll on
+        # Windows, libvec0.so on Linux) and a missing library only disables
+        # semantic search instead of failing the database
+        self.sqlite_vec_path = os.environ.get(
+            "FRIGATE_SQLITE_VEC_PATH",
+            "/usr/local/lib/vec0" if not IS_WINDOWS else "vec0",
+        )
         self.upsert_lock = threading.Lock()
         super().__init__(*args, **kwargs)
 

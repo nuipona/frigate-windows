@@ -19,9 +19,10 @@ import numpy as np
 from frigate.comms.inter_process import InterProcessRequestor
 from frigate.comms.review_updater import ReviewDataSubscriber
 from frigate.config import BirdseyeModeEnum, FfmpegConfig, FrigateConfig
-from frigate.const import BASE_DIR, BIRDSEYE_PIPE, INSTALL_DIR, UPDATE_BIRDSEYE_LAYOUT
+from frigate.const import BASE_DIR, INSTALL_DIR, UPDATE_BIRDSEYE_LAYOUT
 from frigate.output.ws_auth import ws_has_camera_access
 from frigate.review.types import SeverityEnum
+from frigate.util.birdseye_pipe import BirdseyePipe, create_birdseye_pipe
 from frigate.util.image import (
     SharedMemoryFrameManager,
     copy_yuv_to_position,
@@ -145,7 +146,9 @@ class FFMpegConverter(threading.Thread):
         self.camera = "birdseye"
         self.input_queue = input_queue
         self.stop_event = stop_event
-        self.bd_pipe: int | None = None
+        self.restream = birdseye_rtsp
+        self.reading_birdseye = False
+        self.bd_pipe: BirdseyePipe = create_birdseye_pipe()
 
         if birdseye_rtsp:
             self.recreate_birdseye_pipe()
@@ -186,37 +189,31 @@ class FFMpegConverter(threading.Thread):
         )
 
     def recreate_birdseye_pipe(self) -> None:
-        if self.bd_pipe:
-            os.close(self.bd_pipe)
-
-        if os.path.exists(BIRDSEYE_PIPE):
-            os.remove(BIRDSEYE_PIPE)
-
-        os.mkfifo(BIRDSEYE_PIPE, mode=0o777)
-        stdin = os.open(BIRDSEYE_PIPE, os.O_RDONLY | os.O_NONBLOCK)
-        self.bd_pipe = os.open(BIRDSEYE_PIPE, os.O_WRONLY)
-        os.close(stdin)
-        self.reading_birdseye = False
+        # a FIFO where the platform has them, a loopback listener where it does
+        # not (see frigate.util.birdseye_pipe)
+        self.bd_pipe.recreate()
 
     def __write(self, b: bytes) -> None:
         assert self.process.stdin is not None
         self.process.stdin.write(b)
 
-        if self.bd_pipe:
-            try:
-                os.write(self.bd_pipe, b)
-                self.reading_birdseye = True
-            except BrokenPipeError:
-                if self.reading_birdseye:
-                    # we know the pipe was being read from and now it is not
-                    # so we should recreate the pipe to ensure no partially-read
-                    # frames exist
-                    logger.debug(
-                        "Recreating the birdseye pipe because it was read from and now is not"
-                    )
-                    self.recreate_birdseye_pipe()
+        if not self.restream:
+            return
 
-                return
+        if self.bd_pipe.write(b):
+            self.reading_birdseye = True
+            return
+
+        if self.reading_birdseye:
+            # we know the pipe was being read from and now it is not
+            # so we should recreate the pipe to ensure no partially-read
+            # frames exist
+            logger.debug(
+                "Recreating the birdseye pipe because it was read from and now is not"
+            )
+            self.bd_pipe.recreate()
+
+        self.reading_birdseye = False
 
     def read(self, length: int) -> Any:
         try:
@@ -225,8 +222,7 @@ class FFMpegConverter(threading.Thread):
             return False
 
     def exit(self) -> None:
-        if self.bd_pipe:
-            os.close(self.bd_pipe)
+        self.bd_pipe.close()
 
         self.process.terminate()
         try:

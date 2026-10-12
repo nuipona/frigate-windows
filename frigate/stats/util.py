@@ -17,6 +17,7 @@ from frigate.data_processing.types import DataProcessorMetrics
 from frigate.object_detection.base import ObjectDetectProcess
 from frigate.stats.hardware import HardwareStats, get_hardware_temperatures
 from frigate.types import StatsTrackingTypes
+from frigate.util.platform import storage_stat_key
 from frigate.util.services import (
     calculate_shm_requirements,
     get_bandwidth_stats,
@@ -349,21 +350,29 @@ def stats_snapshot(
         ),
     }
 
-    for path in [RECORD_DIR, CLIPS_DIR, CACHE_DIR]:
+    for name, path in (
+        ("recordings", RECORD_DIR),
+        ("clips", CLIPS_DIR),
+        ("cache", CACHE_DIR),
+    ):
+        key = storage_stat_key(name, path)
+
         try:
             storage_stats = shutil.disk_usage(path)
         except (FileNotFoundError, OSError):
-            stats["service"]["storage"][path] = {}
+            stats["service"]["storage"][key] = {}
             continue
 
-        stats["service"]["storage"][path] = {
+        stats["service"]["storage"][key] = {
             "total": round(storage_stats.total / pow(2, 20), 1),
             "used": round(storage_stats.used / pow(2, 20), 1),
             "free": round(storage_stats.free / pow(2, 20), 1),
             "mount_type": get_fs_type(path),
         }
 
-    stats["service"]["storage"]["/dev/shm"] = calculate_shm_requirements(config)
+    stats["service"]["storage"][storage_stat_key("shm")] = calculate_shm_requirements(
+        config
+    )
 
     cpu_usages = stats.get("cpu_usages", {})
 

@@ -14,6 +14,7 @@ from frigate.const import (
     FFMPEG_HWACCEL_VULKAN,
     LIBAVFORMAT_VERSION_MAJOR,
 )
+from frigate.util.platform import IS_WINDOWS
 from frigate.util.services import vainfo_hwaccel
 from frigate.version import VERSION
 
@@ -27,6 +28,12 @@ class LibvaGpuSelector:
 
     def __get_valid_gpus(self) -> None:
         """Get valid libva GPUs."""
+        if IS_WINDOWS:
+            # there is no /dev/dri and no libva on Windows; accelerated
+            # decoding uses d3d11va, dxva2, qsv, amf or cuda instead
+            self._valid_gpus = []
+            return
+
         if not os.path.exists("/dev/dri"):
             self._valid_gpus = []
             return
@@ -97,6 +104,18 @@ PRESETS_HW_ACCEL_DECODE = {
     FFMPEG_HWACCEL_VULKAN: "-hwaccel vulkan -init_hw_device vulkan=gpu:0 -filter_hw_device gpu -hwaccel_output_format vulkan",
     FFMPEG_HWACCEL_AMF: "-hwaccel amf -init_hw_device amf=gpu:0 -filter_hw_device gpu -hwaccel_output_format amf",
 }
+# Windows uses the platform decode APIs rather than libva. Frames are left in
+# system memory so the existing CPU scale presets keep working, which costs one
+# copy per frame but avoids a per GPU scale preset for every driver.
+PRESETS_HW_ACCEL_DECODE.update(
+    {
+        "preset-windows-d3d11va": "-hwaccel d3d11va",
+        "preset-windows-dxva2": "-hwaccel dxva2",
+        "preset-windows-qsv-h264": "-hwaccel qsv -c:v h264_qsv",
+        "preset-windows-qsv-h265": "-load_plugin hevc_hw -hwaccel qsv -c:v hevc_qsv",
+    }
+)
+
 PRESETS_HW_ACCEL_DECODE["preset-nvidia-h264"] = PRESETS_HW_ACCEL_DECODE[
     FFMPEG_HWACCEL_NVIDIA
 ]
@@ -172,6 +191,14 @@ PRESETS_HW_ACCEL_ENCODE_BIRDSEYE = {
     FFMPEG_HWACCEL_AMF: "{0} -hide_banner {1} -c:v h264_amf -g 50 -profile:v high {2}",
     "default": "{0} -hide_banner {1} -c:v libx264 -g 50 -profile:v high -level:v 4.1 -preset:v superfast -tune:v zerolatency {2}",
 }
+# Windows encoders: the same presets minus the Linux device arguments
+PRESETS_HW_ACCEL_ENCODE_BIRDSEYE.update(
+    {
+        "preset-windows-nvenc": "{0} -hide_banner {1} -c:v h264_nvenc -g 50 -profile:v high -level:v auto -preset:v p2 -tune:v ll {2}",
+        "preset-windows-qsv": "{0} -hide_banner {1} -c:v h264_qsv -g 50 -bf 0 -profile:v high -level:v 4.1 -async_depth:v 1 {2}",
+    }
+)
+
 PRESETS_HW_ACCEL_ENCODE_BIRDSEYE["preset-nvidia-h264"] = (
     PRESETS_HW_ACCEL_ENCODE_BIRDSEYE[FFMPEG_HWACCEL_NVIDIA]
 )
@@ -205,6 +232,13 @@ PRESETS_HW_ACCEL_ENCODE_TIMELAPSE = {
     FFMPEG_HWACCEL_AMF: "{0} -hide_banner {1} -c:v h264_amf -profile:v high {2}",
     "default": "{0} -hide_banner {1} -c:v libx264 -preset:v ultrafast -tune:v zerolatency {2}",
 }
+PRESETS_HW_ACCEL_ENCODE_TIMELAPSE.update(
+    {
+        "preset-windows-nvenc": "{0} -hide_banner -hwaccel cuda -extra_hw_frames 8 {1} -c:v h264_nvenc {2}",
+        "preset-windows-qsv": "{0} -hide_banner {1} -c:v h264_qsv -profile:v high -level:v 4.1 -async_depth:v 1 {2}",
+    }
+)
+
 PRESETS_HW_ACCEL_ENCODE_TIMELAPSE["preset-nvidia-h264"] = (
     PRESETS_HW_ACCEL_ENCODE_TIMELAPSE[FFMPEG_HWACCEL_NVIDIA]
 )

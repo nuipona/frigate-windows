@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from frigate.const import SUPPORTED_RK_SOCS
 from frigate.detectors.detector_types import config_types
+from frigate.util.platform import IS_WINDOWS
 from frigate.util.services import enumerate_drm_devices
 
 logger = logging.getLogger(__name__)
@@ -208,7 +209,15 @@ def detect_amd_gpu() -> DetectionHardware | None:
 
 
 def detect_nvidia_gpu() -> DetectionHardware | None:
-    """Find discrete Nvidia GPUs through the nvidia driver's proc entries."""
+    """Find discrete Nvidia GPUs.
+
+    The nvidia driver's proc entries are Linux only. On Windows the same
+    information comes from NVML, which the driver installs, so a Windows
+    install with an Nvidia card still gets offered the onnx detector.
+    """
+    if IS_WINDOWS:
+        return _detect_nvidia_gpu_nvml()
+
     units = []
 
     for index, gpu_dir in enumerate(sorted(glob(f"{PROC_ROOT}/driver/nvidia/gpus/*"))):
@@ -226,6 +235,33 @@ def detect_nvidia_gpu() -> DetectionHardware | None:
         return None
 
     # the model name is more useful as the hardware name when there is only one
+    name = units[0].label if len(units) == 1 else "NVIDIA GPU"
+    return _hardware("onnx:nvidia", "onnx", name, units)
+
+
+def _detect_nvidia_gpu_nvml() -> DetectionHardware | None:
+    """Find Nvidia GPUs through NVML."""
+    try:
+        import py3nvml.py3nvml as nvml
+
+        nvml.nvmlInit()
+        count = nvml.nvmlDeviceGetCount()
+        units = []
+
+        for index in range(count):
+            handle = nvml.nvmlDeviceGetHandleByIndex(index)
+            name = nvml.nvmlDeviceGetName(handle)
+
+            if isinstance(name, bytes):
+                name = name.decode("utf-8", errors="replace")
+
+            units.append(HardwareUnit(device=f"onnx:{index}", label=name))
+    except Exception:
+        return None
+
+    if not units:
+        return None
+
     name = units[0].label if len(units) == 1 else "NVIDIA GPU"
     return _hardware("onnx:nvidia", "onnx", name, units)
 

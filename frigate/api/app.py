@@ -76,6 +76,7 @@ from frigate.util.live_streams import (
     sync_transcode_streams,
 )
 from frigate.util.object_names import get_categorized_object_names
+from frigate.util.platform import get_service_log_path
 from frigate.util.schema import get_config_schema
 from frigate.util.services import (
     get_nvidia_driver_info,
@@ -1138,10 +1139,13 @@ async def logs(
         except FileNotFoundError:
             yield "Log file not found.\n"
 
+    # in the container s6-log writes these under /dev/shm; a native install
+    # writes them under its own log directory (go2rtc's output is redirected
+    # there by the launcher)
     log_locations = {
-        "frigate": "/dev/shm/logs/frigate/current",
-        "go2rtc": "/dev/shm/logs/go2rtc/current",
-        "nginx": "/dev/shm/logs/nginx/current",
+        "frigate": get_service_log_path("frigate"),
+        "go2rtc": get_service_log_path("go2rtc"),
+        "nginx": get_service_log_path("web"),
     }
     service_location = log_locations.get(service)
 

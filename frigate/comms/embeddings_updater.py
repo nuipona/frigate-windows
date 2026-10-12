@@ -7,10 +7,12 @@ from typing import Any
 
 import zmq
 
+from frigate.util.platform import ipc_endpoint
+
 logger = logging.getLogger(__name__)
 
 
-SOCKET_REP_REQ = "ipc:///tmp/cache/embeddings"
+SOCKET_REP_REQ = ipc_endpoint("embeddings")
 
 
 class EmbeddingsRequestEnum(Enum):

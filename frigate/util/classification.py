@@ -24,6 +24,7 @@ from frigate.const import (
 from frigate.log import redirect_output_to_logger, suppress_stderr_during
 from frigate.models import Event, Recordings, ReviewSegment
 from frigate.types import ModelStatusTypesEnum
+from frigate.util.config import default_ffmpeg_binary
 from frigate.util.downloader import ModelDownloader
 from frigate.util.file import get_event_thumbnail_bytes, load_event_snapshot_image
 from frigate.util.image import (
@@ -395,7 +396,7 @@ def collect_state_classification_examples(
 
     # Step 3: Extract keyframes from recordings with crops applied
     keyframes = _extract_keyframes(
-        "/usr/lib/ffmpeg/8.0/bin/ffmpeg", timestamps, temp_dir, cameras
+        default_ffmpeg_binary("ffmpeg"), timestamps, temp_dir, cameras
     )
 
     # Step 4: Select 24 most visually distinct images (they're already cropped)
@@ -568,7 +569,7 @@ def _extract_keyframes(
         relative_time = timestamp - recording.start_time
 
         try:
-            config = FfmpegConfig(path="/usr/lib/ffmpeg/8.0")
+            config = FfmpegConfig(path=os.path.dirname(default_ffmpeg_binary()))
             image_data = get_image_from_recording(
                 config,
                 recording.path,

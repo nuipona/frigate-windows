@@ -7,9 +7,10 @@ from typing import Generic, TypeVar
 import zmq
 
 from frigate.const import FAST_QUEUE_TIMEOUT
+from frigate.util.platform import ipc_endpoint
 
-SOCKET_PUB = "ipc:///tmp/cache/proxy_pub"
-SOCKET_SUB = "ipc:///tmp/cache/proxy_sub"
+SOCKET_PUB = ipc_endpoint("proxy_pub")
+SOCKET_SUB = ipc_endpoint("proxy_sub")
 
 
 class ZmqProxyRunner(threading.Thread):

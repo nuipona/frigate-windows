@@ -58,6 +58,7 @@ from frigate.util.file import (
 )
 from frigate.util.image import get_image_from_recording, get_image_quality_params
 from frigate.util.object import create_empty_regions_grid
+from frigate.util.platform import ffmpeg_concat_file_line, ffmpeg_stdin_input
 from frigate.util.recording_coverage import (
     build_spans,
     null_audio_glitches,
@@ -572,7 +573,7 @@ async def recording_clip(
     with open(file_path, "w") as file:
         clip: Recordings
         for clip in recordings:
-            file.write(f"file '{clip.path}'\n")
+            file.write(f"{ffmpeg_concat_file_line(clip.path)}\n")
 
             # if this is the starting clip, add an inpoint
             if clip.start_time < start_ts:
@@ -1597,7 +1598,9 @@ async def preview_gif(
             if file > end_file:
                 break
 
-            selected_previews.append(f"file '{os.path.join(preview_dir, file)}'")
+            selected_previews.append(
+                ffmpeg_concat_file_line(os.path.join(preview_dir, file))
+            )
             selected_previews.append("duration 0.12")
 
         if not selected_previews:
@@ -1623,7 +1626,7 @@ async def preview_gif(
             "-safe",
             "0",
             "-i",
-            "/dev/stdin",
+            ffmpeg_stdin_input(),
             "-loop",
             "0",
             "-c:v",
@@ -1786,7 +1789,9 @@ async def preview_mp4(
             if file > end_file:
                 break
 
-            selected_previews.append(f"file '{os.path.join(preview_dir, file)}'")
+            selected_previews.append(
+                ffmpeg_concat_file_line(os.path.join(preview_dir, file))
+            )
             selected_previews.append("duration 0.12")
 
         if not selected_previews:
@@ -1812,7 +1817,7 @@ async def preview_mp4(
             "-safe",
             "0",
             "-i",
-            "/dev/stdin",
+            ffmpeg_stdin_input(),
             "-c:v",
             "libx264",
             "-movflags",

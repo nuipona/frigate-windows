@@ -9,6 +9,7 @@ from pydantic import ConfigDict, Field
 
 from frigate.detectors.detection_api import DetectionApi
 from frigate.detectors.detector_config import BaseDetectorConfig
+from frigate.util.platform import ipc_endpoint
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +26,10 @@ class ZmqDetectorConfig(BaseDetectorConfig):
 
     type: Literal[DETECTOR_KEY]
     endpoint: str = Field(
-        default="ipc:///tmp/cache/zmq_detector",
+        default_factory=lambda: ipc_endpoint("zmq_detector"),
         title="ZMQ IPC endpoint",
-        description="The ZMQ endpoint to connect to.",
+        description="The ZMQ endpoint to connect to. Defaults to the socket "
+        "Frigate creates for a detector running in another process.",
     )
     request_timeout_ms: int = Field(
         default=200,
