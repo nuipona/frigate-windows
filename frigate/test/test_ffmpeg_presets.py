@@ -14,7 +14,7 @@ from frigate.ffmpeg_presets import (
     validate_ffmpeg_args,
     windows_decode_presets,
 )
-from frigate.util.platform import quote_ffmpeg_arg, split_ffmpeg_command
+from frigate.util.platform import IS_WINDOWS, quote_ffmpeg_arg, split_ffmpeg_command
 
 
 class TestFfmpegPresets(unittest.TestCase):
@@ -68,6 +68,9 @@ class TestFfmpegPresets(unittest.TestCase):
     def test_default_ffmpeg(self):
         FrigateConfig(**self.default_ffmpeg)
 
+    @unittest.skipIf(
+        IS_WINDOWS, "preset-rpi-64-h264 decodes through the Raspberry Pi v4l2m2m API"
+    )
     def test_ffmpeg_hwaccel_preset(self):
         self.default_ffmpeg["cameras"]["back"]["ffmpeg"]["hwaccel_args"] = (
             "preset-rpi-64-h264"
@@ -80,6 +83,9 @@ class TestFfmpegPresets(unittest.TestCase):
             " ".join(frigate_config.cameras["back"].ffmpeg_cmds[0]["cmd"])
         )
 
+    @unittest.skipIf(
+        IS_WINDOWS, "preset-apple-silicon-h265 needs the Apple media engine"
+    )
     def test_ffmpeg_hwaccel_apple_preset_decodes_every_stream(self):
         self.default_ffmpeg["cameras"]["back"]["ffmpeg"]["hwaccel_args"] = (
             "preset-apple-silicon-h265"
@@ -99,6 +105,9 @@ class TestFfmpegPresets(unittest.TestCase):
             " ".join(frigate_config.cameras["back"].ffmpeg_cmds[0]["cmd"])
         )
 
+    @unittest.skipIf(
+        IS_WINDOWS, "preset-nvidia-h264 carries a Linux DRM device argument"
+    )
     def test_ffmpeg_hwaccel_scale_preset(self):
         self.default_ffmpeg["cameras"]["back"]["ffmpeg"]["hwaccel_args"] = (
             "preset-nvidia-h264"
@@ -249,6 +258,9 @@ class TestPresetValidation(unittest.TestCase):
 
                     self.assertIn(replacement, str(raised.exception))
 
+    @unittest.skipIf(
+        IS_WINDOWS, "the config validator rejects Linux decode presets on Windows"
+    )
     def test_linux_only_presets_still_work_on_linux(self):
         for preset in ("preset-vaapi", "preset-nvidia", "preset-intel-qsv-h264"):
             with self.subTest(preset=preset):

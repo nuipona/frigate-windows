@@ -128,7 +128,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             Write-Output "::error title=smoke-exit::unittest exited $LASTEXITCODE"
             Select-String -Path smoke.log -Pattern '^(ERROR|FAIL): |Error: |Ran [0-9]+ tests' |
-              Select-Object -First 8 | ForEach-Object {
+              Select-Object -First 20 | ForEach-Object {
                 $msg = ($_.Line -replace "`r", '' -replace "`n", ' ')
                 Write-Output "::error title=smoke::$msg"
               }
@@ -202,8 +202,20 @@ jobs:
         env:
           FRIGATE_E2E: "1"
           FRIGATE_E2E_DIR: ${{ runner.temp }}\frigate-e2e
+        shell: pwsh
         run: |
-          python -m unittest frigate.test.test_native_e2e
+          python -m unittest frigate.test.test_native_e2e *> e2e.log
+          $e2eCode = $LASTEXITCODE
+          if ($e2eCode -ne 0) {
+            Select-String -Path e2e.log -Pattern '^(ERROR|FAIL): |Error: |Ran [0-9]+ tests' |
+              Select-Object -First 6 | ForEach-Object {
+                Write-Output ("::error title=e2e::{0}" -f ($_.Line -replace "`r", '' -replace "`n", ' '))
+              }
+            Get-Content e2e.log -Tail 20 | ForEach-Object {
+              Write-Output ("::error title=e2e-tail::{0}" -f ($_ -replace "`r", '' -replace "`n", ' '))
+            }
+          }
+          exit $e2eCode
       - name: Upload Frigate's log and media
         if: failure()
         uses: actions/upload-artifact@v7
@@ -238,9 +250,19 @@ jobs:
           python -m pip install -r docker/main/requirements-windows.txt
           python -m pip install --editable . --no-deps
       - name: Run the unit suite
+        shell: pwsh
         env:
           FRIGATE_BASE_DIR: ${{ runner.temp }}\frigate-unit
-        run: python testing-scripts/run_windows_unit_suite.py
+        run: |
+          python testing-scripts/run_windows_unit_suite.py *> suite.log
+          $suiteCode = $LASTEXITCODE
+          Select-String -Path suite.log -Pattern '^(ran [0-9]+|\d+ tests fail|Every test|Skipping )' |
+            ForEach-Object { Write-Output ("::error title=suite-summary::{0}" -f $_.Line) }
+          Select-String -Path suite.log -Pattern '^frigate\.test\.[A-Za-z0-9_.]+ ' |
+            Select-Object -First 30 | ForEach-Object {
+              Write-Output ("::error title=suite-fail::{0}" -f ($_.Line -replace ' .*$', ''))
+            }
+          exit $suiteCode
       - name: Upload the test report
         if: failure()
         uses: actions/upload-artifact@v7
