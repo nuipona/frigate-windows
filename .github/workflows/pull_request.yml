@@ -253,6 +253,10 @@ jobs:
           Publish-Log -Path (Join-Path $env:FRIGATE_E2E_DIR 'frigate-run.log') `
             -Prefix 'frigate-said' -Drop @('Unable to read frames') `
             -Keep 'ffmpeg|lavfi|Invalid|No such|Conversion|Error|error|Unable|discard|recording'
+          # the frame read failures repeat hundreds of times, so only the
+          # first and the last few are worth looking at
+          Publish-Log -Path (Join-Path $env:FRIGATE_E2E_DIR 'frigate-run.log') `
+            -Prefix 'frigate-frames' -Keep 'Unable to read frames' -Head 5 -Tail 5
 
       - name: Upload Frigate's log and media
         if: failure()

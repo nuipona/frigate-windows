@@ -19,6 +19,7 @@ Every failure dumps the tail of Frigate's own log, so a broken run on CI says
 what went wrong rather than just timing out.
 """
 
+import json
 import logging
 import os
 import shutil
@@ -266,6 +267,28 @@ class TestNativeEndToEnd(unittest.TestCase):
             f"{', '.join(segments[:8])}\n"
         )
 
+    def _camera_stats(self) -> str:
+        """The counters that say whether any frame moved at all.
+
+        Nothing downstream of the capture process can be trusted if these
+        are zero, and the recording maintainer keeps the cache empty by
+        discarding segments it has no processed frame for.
+        """
+        try:
+            with urllib.request.urlopen(self._url("/api/stats"), timeout=5) as resp:
+                stats = json.load(resp)
+        except (urllib.error.URLError, OSError, ValueError) as err:
+            return f"could not read /api/stats: {err}\n"
+
+        camera = stats.get("cameras", {}).get("e2e", {})
+        counters = ("camera_fps", "process_fps", "detection_fps", "skipped_fps")
+
+        return (
+            "e2e camera: "
+            + ", ".join(f"{name}={camera.get(name)}" for name in counters)
+            + "\n"
+        )
+
     def _snapshot_children(self) -> None:
         """Remember the ffmpeg processes that were already running.
 
@@ -318,6 +341,7 @@ class TestNativeEndToEnd(unittest.TestCase):
             recorded,
             "No recording segments appeared under media/recordings.\n"
             + self._cache_listing()
+            + self._camera_stats()
             + self._log_tail(),
         )
 

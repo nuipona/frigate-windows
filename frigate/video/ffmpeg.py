@@ -79,14 +79,18 @@ def capture_frames(
         frame_name = f"{config.name}_frame{frame_index}"
         frame_buffer = frame_manager.write(frame_name)
         try:
-            if ffmpeg_process.stdout.readinto(frame_buffer) != frame_size:
-                raise EOFError("incomplete frame")
-        except Exception:
+            read = ffmpeg_process.stdout.readinto(frame_buffer)
+
+            if read != frame_size:
+                raise EOFError(f"incomplete frame: {read} of {frame_size} bytes")
+        except Exception as err:
             # shutdown has been initiated
             if stop_event.is_set():
                 break
 
-            logger.error(f"{config.name}: Unable to read frames from ffmpeg process.")
+            logger.error(
+                f"{config.name}: Unable to read frames from ffmpeg process: {err!r}"
+            )
 
             if ffmpeg_process.poll() is not None:
                 logger.error(
