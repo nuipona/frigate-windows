@@ -229,10 +229,16 @@ class StatsEmitter(threading.Thread):
         ).start()
 
     def _update_shm_notice(self, shm: dict[str, Any]) -> None:
-        """Raise the shm notice while /dev/shm is smaller than the cameras need."""
+        """Raise the shm notice while /dev/shm is smaller than the cameras need.
+
+        Shared memory backed by the page file (Windows, macOS) has no fixed
+        size to raise, so there is nothing to warn about there.
+        """
         params = (
             {"total": shm["total"], "min": shm["min_shm"]}
-            if shm and shm["total"] < shm["min_shm"]
+            if shm
+            and not shm.get("page_file_backed", False)
+            and shm["total"] < shm["min_shm"]
             else None
         )
 

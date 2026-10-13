@@ -610,18 +610,30 @@ Frigate can run natively on Windows without Docker or WSL. The API, media endpoi
 
 - Windows 10 or 11, 64-bit
 - [Python](https://www.python.org/downloads/) 3.12, 64-bit
-- [Node.js](https://nodejs.org/) 22 LTS, to build the web interface
-- [FFmpeg](https://ffmpeg.org/download.html), for example `winget install Gyan.FFmpeg`; restart PowerShell after installing it
-- [go2rtc](https://github.com/AlexxIT/go2rtc/releases) for live view (optional; see below)
+- Everything else (FFmpeg, go2rtc, the built web interface) is fetched or built by the bootstrap script below. Node.js is only needed to build the web interface yourself; a [release bundle](https://github.com/nuipona/frigate-windows/releases) ships it prebuilt.
 
 ### Installing
 
-Run these commands from PowerShell in the directory where you want the Frigate checkout. The frontend build is required for the native server to serve the UI.
+The bootstrap script sets everything up from an ordinary PowerShell window: it creates the virtual environment, installs the Windows requirements, fetches pinned FFmpeg and go2rtc builds into the Frigate base directory, builds the web interface when Node.js is available, and writes a launcher with a Start Menu shortcut.
 
 ```powershell
 # native Windows support lives in the frigate-windows fork
 git clone https://github.com/nuipona/frigate-windows.git
 cd frigate-windows
+py -3.12 bootstrap_windows.py
+```
+
+Start Frigate with the launcher it writes (this is what the Start Menu shortcut runs):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_frigate.ps1
+```
+
+Useful options: `--skip-web` to skip the frontend build, `--directml` to run detection on AMD, Intel or Nvidia GPUs through DirectML (see [hardware acceleration](#hardware-acceleration-1)), and `--add-defender-exclusion` to exclude the Frigate directories from Microsoft Defender, which the [tuning](#tuning-windows-for-frigate) section recommends. The FFmpeg and go2rtc downloads are pinned to exact builds and land in `%LOCALAPPDATA%\Frigate\config` (`ffmpeg\` and `go2rtc.exe`), which Frigate looks in before `PATH`; their SHA-256 digests are recorded on first use and verified on every later run.
+
+To install by hand instead, run these commands from PowerShell in the directory where you want the Frigate checkout. The frontend build is required for the native server to serve the UI.
+
+```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -r docker/main/requirements-windows.txt
@@ -640,7 +652,9 @@ The Windows requirements install CPU-capable TFLite, ONNX Runtime, and OpenVINO 
 .\.venv\Scripts\python.exe -m frigate
 ```
 
-Frigate stops on Ctrl+C. Closing the console window also stops it. Logs are written to `%LOCALAPPDATA%\Frigate\tmp\logs\frigate\current` by default. Native Windows does not install a service supervisor, so start Frigate again from the same command after it exits.
+Frigate stops on Ctrl+C. Closing the console window also stops it. Logs are written to `%LOCALAPPDATA%\Frigate\tmp\logs\frigate\current` by default.
+
+Under the launcher, the restart action in the web UI and the watchdog's restart of a failed detector start Frigate again automatically; Frigate marks the restart request before it exits and the launcher starts it again only when that mark is present, so Ctrl+C still stops it for good. Native Windows does not install a service supervisor, so without the launcher Frigate stays stopped when it exits.
 
 ### Where files go
 
@@ -665,7 +679,7 @@ To save the setting for future terminals, run `setx FRIGATE_BASE_DIR "D:\Frigate
 
 ### go2rtc
 
-Live view uses go2rtc, which Frigate starts and stops itself. Download the [Windows build](https://github.com/AlexxIT/go2rtc/releases) and put `go2rtc.exe` in `%LOCALAPPDATA%\Frigate\config`, in `bin\` beside the Frigate checkout, or anywhere on `PATH`. Without it the rest of Frigate can still run, but live view and restreaming are unavailable.
+Live view uses go2rtc, which Frigate starts and stops itself. The bootstrap script fetches a pinned build into `%LOCALAPPDATA%\Frigate\config`; to install it by hand, download the [Windows build](https://github.com/AlexxIT/go2rtc/releases) and put `go2rtc.exe` in `%LOCALAPPDATA%\Frigate\config`, in `bin\` beside the Frigate checkout, or anywhere on `PATH`. Without it the rest of Frigate can still run, but live view and restreaming are unavailable.
 
 ### Ports
 
@@ -704,7 +718,16 @@ models:
       - onnx:0
 ```
 
-Intel OpenVINO devices can be selected with `openvino:CPU`, `openvino:GPU`, or `openvino:NPU` when the installed driver and OpenVINO runtime support them. The starter config uses the CPU TFLite model; OpenVINO requires a compatible model of its own, so the container-only `/openvino-model` assets are not available in a native install. Coral, Hailo, and other accelerators that require Linux-only drivers/runtimes are not supported by this native Windows dependency set. FFmpeg decode/encode acceleration is separate from detector inference and also requires a compatible Windows FFmpeg build.
+On a machine with an AMD, Intel or Nvidia GPU, `onnxruntime-directml` is the one package that covers all three: it adds GPU inference across vendors through DirectML and is the recommended detector for a Windows machine without an Intel iGPU. Both packages provide the `onnxruntime` import, so one replaces the other; `bootstrap_windows.py --directml` performs the swap, or do it by hand:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip uninstall onnxruntime
+.\.venv\Scripts\python.exe -m pip install onnxruntime-directml
+```
+
+The `onnx` detector then uses the GPU automatically, and the system page reports it as DirectML. If DirectML inference fails to start, the GPU driver is the usual cause, since DirectML requires a recent one.
+
+Intel OpenVINO devices can be selected with `openvino:CPU`, `openvino:GPU`, or `openvino:NPU` when the installed driver and OpenVINO runtime support them. The starter config uses the CPU TFLite model; OpenVINO requires a compatible model of its own, so the container-only `/openvino-model` assets are not available in a native install. Coral, Hailo, and other accelerators that require Linux-only drivers/runtimes are not supported by this native Windows dependency set, and a config that names one fails validation at startup with the detectors that are available (`cpu`, `onnx`, `openvino`, and `zmq` for offloading to another machine). FFmpeg decode/encode acceleration is separate from detector inference and also requires a compatible Windows FFmpeg build.
 
 ### Tuning Windows for Frigate
 
@@ -717,6 +740,10 @@ Add-MpPreference -ExclusionPath "D:\Frigate"
 ```
 
 Frigate retries a move or delete for a couple of seconds when Windows reports a sharing violation, so a scanner holding a file open briefly is fine, but a permanent exclusion avoids the delay entirely.
+
+### Time zones
+
+Recording segments are named with the local UTC offset, so a change to the Windows time zone while Frigate is running, such as moving the machine or turning the automatic time zone on, leaves new segments carrying the old offset until Frigate is restarted. Ordinary DST transitions need nothing: the offset updates on its own. If you change the time zone itself, restart Frigate afterwards.
 
 Windows limits paths to 260 characters unless long paths are enabled, and recordings nest as `media\recordings\<date>\<hour>\<camera>\<time>.mp4`. Frigate warns at startup when the base directory plus the longest camera name can overrun that limit. Either shorten the base directory or the camera names, or allow long paths:
 

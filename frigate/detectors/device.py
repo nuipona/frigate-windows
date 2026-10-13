@@ -6,11 +6,89 @@ from dataclasses import dataclass
 from pydantic import TypeAdapter, ValidationError
 
 from frigate.detectors.detector_config import BaseDetectorConfig, ModelConfig
-from frigate.detectors.detector_types import DetectorConfig, config_types
+from frigate.detectors.detector_types import (
+    DetectorConfig,
+    config_types,
+    failed_plugin_imports,
+)
+from frigate.util.platform import IS_WINDOWS
 
 logger = logging.getLogger(__name__)
 
 _detector_adapter: TypeAdapter[BaseDetectorConfig] = TypeAdapter(DetectorConfig)
+
+# plugin module file name -> detector key, for the modules whose name does not
+# already match the key their plugin registers
+_PLUGIN_MODULE_KEYS = {
+    "cpu_tfl": "cpu",
+    "edgetpu_tfl": "edgetpu",
+    "zmq_ipc": "zmq",
+}
+
+# Detectors the native Windows dependency set can run. Everything else needs
+# Linux-only drivers or runtimes that requirements-windows.txt does not carry.
+WINDOWS_DETECTORS = ("cpu", "onnx", "openvino", "zmq")
+
+# The detector keys that exist upstream but are absent from a native Windows
+# install because their drivers or runtimes do not run there. These are the
+# names a user is most likely to have copied from Linux-targeted docs, so they
+# get a message that says so rather than "unknown detector".
+LINUX_ONLY_DETECTORS = (
+    "axengine",
+    "deepx",
+    "edgetpu",
+    "hailo",
+    "memryx",
+    "rknn",
+    "synaptics",
+    "teflon_tfl",
+    "tensorrt",
+)
+
+
+def _import_failure_reason(detector: str) -> str | None:
+    """Why a detector's runtime is not usable, if its plugin failed to import."""
+    for module, error in failed_plugin_imports.items():
+        if _PLUGIN_MODULE_KEYS.get(module, module) == detector:
+            return error
+
+    return None
+
+
+def _unknown_detector_message(raw: str, detector: str) -> str:
+    """Explain why a device string's detector is not available.
+
+    An unknown detector usually means one of three things, each of which needs
+    a different message: the name is misspelled, the detector's runtime failed
+    to import, or the detector needs Linux-only drivers on a Windows install.
+    """
+    installed = ", ".join(sorted(config_types))
+
+    if IS_WINDOWS and detector in LINUX_ONLY_DETECTORS:
+        return (
+            f"'{raw}' needs drivers or runtimes that are only available on "
+            f"Linux, so it cannot run on native Windows. Detectors available "
+            f"on Windows are {', '.join(WINDOWS_DETECTORS)}. See "
+            "https://docs.frigate.video/frigate/installation"
+        )
+
+    failure = _import_failure_reason(detector)
+
+    if failure is not None:
+        return (
+            f"'{raw}' names the {detector} detector, but its runtime is not "
+            f"usable: {failure}"
+        )
+
+    if IS_WINDOWS:
+        return (
+            f"'{raw}' does not name a known detector. Detectors available on "
+            f"Windows are {', '.join(WINDOWS_DETECTORS)}"
+        )
+
+    return (
+        f"'{raw}' does not name a known detector. Available detectors are {installed}"
+    )
 
 
 @dataclass(frozen=True)
@@ -47,9 +125,7 @@ def parse_device(raw: str) -> DeviceSpec:
     detector, separator, device = raw.partition(":")
 
     if detector not in config_types:
-        raise DeviceParseError(
-            f"'{raw}' does not name a known detector. Available detectors are {', '.join(sorted(config_types))}"
-        )
+        raise DeviceParseError(_unknown_detector_message(raw, detector))
 
     spec = DeviceSpec(raw=raw, detector=detector, device=device if separator else None)
 

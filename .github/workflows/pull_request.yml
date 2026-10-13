@@ -108,6 +108,13 @@ jobs:
           npm ci
           npm run build:native
         working-directory: ./web
+      - name: Lint on Windows
+        # the platform guards are easy to get subtly wrong, and the same
+        # rules on both platforms is where those mistakes surface
+        run: |
+          python -m pip install ruff==0.16.10
+          python -m ruff format --check frigate migrations docker *.py
+          python -m ruff check frigate migrations docker *.py
       - name: Run Windows path, process, hardware, and config smoke tests
         shell: pwsh
         run: |
@@ -122,6 +129,9 @@ jobs:
             frigate.test.test_windows_hwaccel `
             frigate.test.test_ffmpeg_presets `
             frigate.test.test_file `
+            frigate.test.test_bootstrap_windows `
+            frigate.test.test_onnx_directml `
+            frigate.test.test_shm_notice `
             frigate.test.test_builtin `
             frigate.test.test_config.TestConfig.test_windows_cpu_default_uses_a_native_model_path `
             frigate.test.test_config.TestConfig.test_windows_default_cpu_model_download_is_atomic `

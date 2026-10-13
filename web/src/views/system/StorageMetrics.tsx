@@ -120,6 +120,11 @@ export default function StorageMetrics({
     };
   }, [stats, config]);
 
+  // on Windows and macOS shared memory is backed by the page file, so it
+  // grows on demand and there is no fixed size the user can raise
+  const pageFileBacked =
+    stats?.service.storage["/dev/shm"]?.page_file_backed ?? false;
+
   if (!cameraStorage || !stats || !totalStorage || !config) {
     return (
       <div className="flex size-full items-center justify-center">
@@ -182,7 +187,9 @@ export default function StorageMetrics({
         </div>
         <div className="flex-col rounded-lg bg-background_alt p-2.5 md:rounded-2xl">
           <div className="mb-5 flex flex-row items-center justify-between">
-            /dev/shm
+            {pageFileBacked
+              ? t("storage.shm.pageFile")
+              : t("storage.shm.devShm")}
             <div className="flex flex-row items-center gap-2">
               {shmFrameLifetime && (
                 <Popover>
@@ -207,43 +214,44 @@ export default function StorageMetrics({
                   </PopoverContent>
                 </Popover>
               )}
-              {stats.service.storage["/dev/shm"]["total"] <
-                (stats.service.storage["/dev/shm"]["min_shm"] ?? 0) && (
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <button
-                      className="focus:outline-none"
-                      aria-label={t("storage.shm.title")}
-                    >
-                      <FaExclamationTriangle
-                        className="size-5 text-danger"
+              {!pageFileBacked &&
+                stats.service.storage["/dev/shm"]["total"] <
+                  (stats.service.storage["/dev/shm"]["min_shm"] ?? 0) && (
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button
+                        className="focus:outline-none"
                         aria-label={t("storage.shm.title")}
-                      />
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-80">
-                    <div className="space-y-2">
-                      {t("storage.shm.warning", {
-                        total: stats.service.storage["/dev/shm"]["total"],
-                        min_shm: stats.service.storage["/dev/shm"]["min_shm"],
-                      })}
-                      <div className="mt-2 flex items-center text-primary">
-                        <Link
-                          to={getLocaleDocUrl(
-                            "frigate/installation#calculating-required-shm-size",
-                          )}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline"
-                        >
-                          {t("readTheDocumentation", { ns: "common" })}
-                          <LuExternalLink className="ml-2 inline-flex size-3" />
-                        </Link>
+                      >
+                        <FaExclamationTriangle
+                          className="size-5 text-danger"
+                          aria-label={t("storage.shm.title")}
+                        />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-80">
+                      <div className="space-y-2">
+                        {t("storage.shm.warning", {
+                          total: stats.service.storage["/dev/shm"]["total"],
+                          min_shm: stats.service.storage["/dev/shm"]["min_shm"],
+                        })}
+                        <div className="mt-2 flex items-center text-primary">
+                          <Link
+                            to={getLocaleDocUrl(
+                              "frigate/installation#calculating-required-shm-size",
+                            )}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline"
+                          >
+                            {t("readTheDocumentation", { ns: "common" })}
+                            <LuExternalLink className="ml-2 inline-flex size-3" />
+                          </Link>
+                        </div>
                       </div>
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              )}
+                    </PopoverContent>
+                  </Popover>
+                )}
             </div>
           </div>
           <StorageGraph
