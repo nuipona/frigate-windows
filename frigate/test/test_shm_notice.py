@@ -59,6 +59,29 @@ class TestShmNotice(unittest.TestCase):
         self.raise_notice.assert_not_called()
         self.resolve_notice.assert_called_once_with("shm_too_low")
 
+    def test_page_file_backed_memory_is_never_too_small(self):
+        """Windows and macOS back shared memory with the page file.
+
+        There is no fixed size to raise there, so even a total smaller than
+        the camera requirement must not raise the notice.
+        """
+        page_backed = {"total": 64.0, "min_shm": 180, "page_file_backed": True}
+
+        for _ in range(2):
+            self.emitter._update_shm_notice(page_backed)
+
+        self.raise_notice.assert_not_called()
+        self.resolve_notice.assert_called_once_with("shm_too_low")
+
+    def test_flipping_to_page_file_backed_resolves_an_existing_notice(self):
+        self.emitter._update_shm_notice(TOO_SMALL)
+        self.emitter._update_shm_notice(
+            {"total": 64.0, "min_shm": 180, "page_file_backed": True}
+        )
+
+        self.raise_notice.assert_called_once()
+        self.resolve_notice.assert_called_once_with("shm_too_low")
+
 
 if __name__ == "__main__":
     unittest.main()

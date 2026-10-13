@@ -6,6 +6,70 @@ on:
     types: [published]
 
 jobs:
+  windows_bundle:
+    # Ships the web interface prebuilt so a Windows user does not need
+    # Node.js: the bundle plus bootstrap_windows.py covers the whole native
+    # install without a frontend toolchain.
+    name: Windows - Build Bundle
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build the web interface
+        run: |
+          npm ci
+          npm run build:native
+        working-directory: ./web
+      - name: Verify the bootstrap script starts on the runner
+        run: |
+          python bootstrap_windows.py --print-digests
+      - name: Stage the bundle
+        shell: pwsh
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          $version = $env:TAG -replace '^v', ''
+          $stage = Join-Path $env:RUNNER_TEMP "frigate-windows-bundle"
+          New-Item -ItemType Directory -Path $stage | Out-Null
+
+          Copy-Item -Recurse -Path frigate -Destination (Join-Path $stage 'frigate')
+          Copy-Item -Recurse -Path web/dist -Destination (Join-Path $stage 'web/dist')
+          Copy-Item -Path pyproject.toml, bootstrap_windows.py, README.md -Destination $stage
+          New-Item -ItemType Directory -Path (Join-Path $stage 'docker/main') -Force | Out-Null
+          Copy-Item -Path docker/main/requirements-windows.txt -Destination (Join-Path $stage 'docker/main')
+
+          $zip = Join-Path $env:RUNNER_TEMP "frigate-nvr-$version-windows.zip"
+          Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip
+          "BUNDLE_ZIP=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "BUNDLE_NAME=frigate-nvr-$version-windows.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Upload the bundle as a workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-bundle
+          path: ${{ env.BUNDLE_ZIP }}
+          retention-days: 14
+          if-no-files-found: error
+      - name: Attach the bundle to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ github.ref_name }} "$env:BUNDLE_ZIP" --clobber --repo ${{ github.repository }}
+
   release:
     runs-on: ubuntu-latest
 

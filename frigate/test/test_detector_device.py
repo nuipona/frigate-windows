@@ -1,6 +1,7 @@
 """Tests for parsing detection hardware device strings."""
 
 import unittest
+from unittest.mock import patch
 
 from frigate.detectors.detector_config import ModelConfig
 from frigate.detectors.device import (
@@ -34,6 +35,76 @@ class TestParseDevice(unittest.TestCase):
     def test_unknown_detector_is_rejected(self):
         with self.assertRaises(DeviceParseError):
             parse_device("not_a_detector:0")
+
+    def _parse_without_plugins(self, raw: str):
+        """Parse as if no detector plugin module imported.
+
+        This is what a native Windows install looks like for the Linux-only
+        runtimes: their plugin modules fail to import because the drivers and
+        wheels they need do not exist there.
+        """
+        with patch.dict("frigate.detectors.device.config_types", {}, clear=True):
+            return parse_device(raw)
+
+    @patch("frigate.detectors.device.IS_WINDOWS", True)
+    def test_linux_only_detector_is_named_on_windows(self):
+        """A device string copied from Linux docs should say why it cannot run.
+
+        On a native Windows install the Linux-only plugin modules are absent,
+        which used to surface as the same 'unknown detector' message as a
+        typo, pointing nowhere near the actual problem.
+        """
+        with self.assertRaises(DeviceParseError) as raised:
+            self._parse_without_plugins("edgetpu:usb:0")
+
+        self.assertIn("only available on Linux", str(raised.exception))
+        self.assertIn("cpu, onnx, openvino, zmq", str(raised.exception))
+
+    @patch("frigate.detectors.device.IS_WINDOWS", True)
+    def test_windows_detectors_still_parse_on_windows(self):
+        for raw in ("onnx:0", "zmq"):
+            with self.subTest(raw=raw):
+                self.assertEqual(parse_device(raw).detector, raw.partition(":")[0])
+
+    @patch("frigate.detectors.device.IS_WINDOWS", True)
+    def test_unknown_name_on_windows_reports_the_windows_detectors(self):
+        with self.assertRaises(DeviceParseError) as raised:
+            self._parse_without_plugins("not_a_detector:0")
+
+        self.assertIn("Detectors available on Windows", str(raised.exception))
+
+    @patch("frigate.detectors.device.IS_WINDOWS", False)
+    def test_linux_detector_message_is_unchanged_on_linux(self):
+        with self.assertRaises(DeviceParseError) as raised:
+            self._parse_without_plugins("edgetpu:usb:0")
+
+        # the plugin may not even be installed here; either way the message
+        # must not claim Windows
+        self.assertNotIn("Windows", str(raised.exception))
+
+    def test_failed_runtime_import_is_reported(self):
+        """A known detector whose plugin failed to import says why."""
+        with patch.dict(
+            "frigate.detectors.detector_types.failed_plugin_imports",
+            {"fake_det": "No module named 'some_runtime'"},
+        ):
+            with self.assertRaises(DeviceParseError) as raised:
+                self._parse_without_plugins("fake_det:0")
+
+        self.assertIn("runtime is not usable", str(raised.exception))
+        self.assertIn("No module named 'some_runtime'", str(raised.exception))
+
+    @patch("frigate.detectors.device.IS_WINDOWS", True)
+    def test_linux_only_detector_message_wins_over_import_failure_on_windows(self):
+        """The Windows message is more actionable than the import error."""
+        with patch.dict(
+            "frigate.detectors.detector_types.failed_plugin_imports",
+            {"edgetpu_tfl": "No module named 'pycoral'"},
+        ):
+            with self.assertRaises(DeviceParseError) as raised:
+                self._parse_without_plugins("edgetpu:usb:0")
+
+        self.assertIn("only available on Linux", str(raised.exception))
 
     def test_device_that_the_detector_cannot_use_is_rejected(self):
         # tensorrt takes a gpu index

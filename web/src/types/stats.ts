@@ -104,6 +104,9 @@ export type StorageStats = {
   mount_type: string;
   min_shm?: number;
   shm_frame_count?: number;
+  // shared memory backed by the page file (native Windows, macOS) has no
+  // fixed size, so the shm warning does not apply to it
+  page_file_backed?: boolean;
 };
 
 export type StreamStorage = {

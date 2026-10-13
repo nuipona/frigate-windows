@@ -45,6 +45,7 @@ _PROVIDER_LABELS = {
     "TensorrtExecutionProvider": "TensorRT",
     "MIGraphXExecutionProvider": "MIGraphX",
     "OpenVINOExecutionProvider": "OpenVINO",
+    "DmlExecutionProvider": "DirectML",
     "CPUExecutionProvider": "CPU",
     "LighterANE": "Neural Engine",
 }

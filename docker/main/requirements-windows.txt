@@ -60,6 +60,11 @@ scipy == 1.17.*
 # OpenVINO and ONNX Runtime
 openvino == 2025.4.*
 onnxruntime == 1.30.*
+# For GPU inference on AMD, Intel and Nvidia through DirectML, swap the
+# onnxruntime line for onnxruntime-directml (both provide the onnxruntime
+# import). bootstrap_windows.py --directml does the swap; the DirectML
+# package releases lag this pin, so it carries its own version in the
+# windows-directml extra in pyproject.toml.
 
 # Embeddings and generative AI
 transformers == 5.19.*

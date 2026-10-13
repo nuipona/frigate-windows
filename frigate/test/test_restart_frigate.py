@@ -1,13 +1,15 @@
 """Tests for restarting frigate under s6."""
 
+import os
 import signal
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
 import psutil
 
 from frigate.util.platform import IS_WINDOWS
-from frigate.util.services import restart_frigate
+from frigate.util.services import RESTART_MARKER_NAME, restart_frigate
 
 
 class TestRestartFrigate(unittest.TestCase):
@@ -86,3 +88,55 @@ class TestRestartFrigate(unittest.TestCase):
         mock_raise.assert_called_once_with(signal.SIGINT)
         mock_kill.assert_not_called()
         mock_process.assert_not_called()
+
+    @patch("frigate.util.services.get_tmp_dir")
+    @patch("frigate.util.services.IS_WINDOWS", True)
+    @patch("frigate.util.services.signal.raise_signal")
+    def test_windows_restart_writes_the_launcher_marker(self, _mock_raise, mock_tmp):
+        """The launcher restarts Frigate only when the marker is on disk."""
+        with tempfile.TemporaryDirectory() as tmp:
+            mock_tmp.return_value = tmp
+
+            restart_frigate()
+
+            self.assertTrue(
+                os.path.isfile(os.path.join(tmp, RESTART_MARKER_NAME)),
+            )
+
+    @patch("frigate.util.services.get_tmp_dir")
+    @patch("frigate.util.services.IS_WINDOWS", False)
+    @patch("frigate.util.services.os.kill")
+    @patch("frigate.util.services.psutil.Process")
+    def test_posix_restart_does_not_write_the_launcher_marker(
+        self, mock_process, _mock_kill, mock_tmp
+    ):
+        """In the container s6 owns the restart, so no marker is written."""
+        proc = MagicMock()
+        proc.name.return_value = "init"
+        mock_process.return_value = proc
+
+        with tempfile.TemporaryDirectory() as tmp:
+            mock_tmp.return_value = tmp
+
+            restart_frigate()
+
+            self.assertFalse(
+                os.path.isfile(os.path.join(tmp, RESTART_MARKER_NAME)),
+            )
+
+    @patch("frigate.util.services.get_tmp_dir")
+    @patch("frigate.util.services.IS_WINDOWS", True)
+    @patch("frigate.util.services.signal.raise_signal")
+    def test_unwritable_restart_marker_does_not_stop_the_shutdown(
+        self, _mock_raise, mock_tmp
+    ):
+        """A launcher without its marker leaves Frigate stopped, which the
+        user recovers from by hand, so the write failure is not fatal."""
+        with tempfile.TemporaryDirectory() as tmp:
+            mock_tmp.return_value = tmp
+
+            # a directory where the marker file must be created makes the
+            # write fail without needing an unreadable tmp dir
+            os.mkdir(os.path.join(tmp, RESTART_MARKER_NAME))
+
+            restart_frigate()

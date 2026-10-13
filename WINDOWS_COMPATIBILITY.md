@@ -56,13 +56,32 @@ real Windows yet — see [Part 5](#part-5--what-is-still-unverified).
 
 What remains, in rough order of cost to the user:
 
-1. **There is no installer, no service, and no bundled ffmpeg/go2rtc** — the
-   documented install is a 7-step manual PowerShell recipe
-   ([P3-1](#p3-1-no-windows-packaging-or-service-story)).
-2. **Windows CI is still a thin allowlist** of tests rather than the whole
-   suite, so new tests are Linux-only by default and regressions go unseen
+1. ~~**There is no installer, no service, and no bundled ffmpeg/go2rtc**~~ —
+   the bootstrap script (`py -3.12 bootstrap_windows.py`) now covers the whole
+   install and writes a restartable launcher, and releases ship a bundle with
+   the web interface prebuilt. An SCM service and a winget manifest are the
+   remaining pieces ([P3-1](#p3-1-no-windows-packaging-or-service-story)).
+2. ~~**Windows CI is still a thin allowlist**~~ — the whole suite runs on
+   Windows through the denylist job
    ([P3-2](#p3-2-windows-ci-is-a-thin-allowlist)).
-3. **Detector coverage is CPU and Intel only** ([P3-3](#p3-3-detector-coverage-on-windows-is-narrow)).
+3. ~~**Detector coverage is CPU and Intel only**~~ — DirectML now covers
+   AMD, Intel and Nvidia GPU inference from one optional package
+   ([P3-3](#p3-3-detector-coverage-on-windows-is-narrow)).
+
+**Update 3:** the remaining P2 and P3 items are closed or narrowed:
+
+| Finding | Status |
+| --- | --- |
+| [P2-5](#p2-5-filelock-on-windows-needs-a-real-cross-process-test) cross-process `FileLock` | **fixed** — `frigate/test/test_file.py::TestFileLockAcrossProcesses` locks against a genuinely separate `python` process: a held lock is denied to a second process, a released lock is takeable, and a holder killed without releasing does not keep the lock. The same three tests cover `flock` and `msvcrt.locking` |
+| [P2-7](#p2-7-timezone-and-dst-across-a-long-lived-process) DST | **fixed (documented)** — ordinary DST transitions resolve themselves on Windows; the docs now say a *time zone change* while Frigate runs needs a restart, which is the case that actually goes stale |
+| [P2-8](#p2-8-smaller-items) virtual NICs | **fixed** — `get_physical_interfaces()` drops down, loopback, Bluetooth, VPN/tunnel and Hyper-V style adapters and interfaces that are not up, and keeps only configured prefixes |
+| [P2-8](#p2-8-smaller-items) `/dev/shm` label | **fixed** — the storage panel shows "Page file (shared memory)" when the stats say `page_file_backed`, and suppresses the "increase SHM" warning there (there is no size to raise); the backend notice no longer fires for page-file-backed shared memory either |
+| [P3-1](#p3-1-no-windows-packaging-or-service-story)(1)(2) | **done** — `bootstrap_windows.py` (stdlib only) creates the venv, installs the requirements, fetches pinned FFmpeg 8.1.2 and go2rtc 1.9.14 with first-use recorded digests, builds the web UI when Node is present, and writes `run_frigate.ps1` plus a Start Menu shortcut. `release.yml` builds a Windows bundle with the web interface prebuilt and attaches it to releases, so Node is never required |
+| [P3-1](#p3-1-no-windows-packaging-or-service-story)(3) service | **partly** — the launcher + restart marker (`restart.requested` in the tmp dir, written by `restart_frigate()`) gives unattended operation and makes the UI's restart action work; no SCM service yet, so nothing starts Frigate at boot |
+| [P3-3](#p3-3-detector-coverage-on-windows-is-narrow) | **partly** — DirectML: `onnxruntime-directml` is documented as the cross-vendor GPU detector (`bootstrap_windows.py --directml` performs the swap), the provider flows through `get_ort_providers()` untouched, and the runner reports it as "DirectML". Config validation: a device string naming a Linux-only detector now fails at startup with a message naming what Windows can run, and a runtime whose import failed says why instead of "does not name a known detector" |
+
+Still open: an SCM service (boot start, session 0 shutdown) and a winget
+manifest.
 
 **Update 2:** the P1 and P2 findings below have since been fixed, and a
 `windows_native_unit_suite` CI job now runs the whole `frigate/test` discovery
@@ -84,10 +103,9 @@ Linux-only test is visible instead of invisible. Closed in that change:
 | [P2-8](#p2-8-smaller-items) smaller items | **partly** — `find_go2rtc()` suffix check, `hwaccel.py` Windows guard, requirements drift check. Virtual-NIC filtering and the `/dev/shm` label are open |
 | [P3-2](#p3-2-windows-ci-is-a-thin-allowlist) thin Windows CI | **partly** — the whole suite runs on Windows now, with the allowlist inverted into a denylist |
 
-Still open: [P2-5](#p2-5-filelock-on-windows-needs-a-real-cross-process-test)
-(cross-process `FileLock` test), [P2-7](#p2-7-timezone-and-dst-across-a-long-lived-process)
-(DST), and the [P3](#p3-1-no-windows-packaging-or-service-story) packaging,
-service and DirectML work.
+Still open: an SCM service and a winget manifest
+([P3-1](#p3-1-no-windows-packaging-or-service-story)); everything else from
+the P2 and P3 list is fixed, narrowed, or tracked in the table above.
 
 ---
 
@@ -476,6 +494,13 @@ belongs in the install docs.
 
 ### P2-5. `FileLock` on Windows needs a real cross-process test
 
+**Status: fixed.** `frigate/test/test_file.py::TestFileLockAcrossProcesses`
+spawns a separate interpreter for every scenario: a held lock is denied to
+another process, a released lock is takeable by another process, and a holder
+killed without releasing (the crash case) does not keep the lock. Every test
+runs the same way on Linux and Windows, so CI exercises `flock` and
+`msvcrt.locking` through the same three assertions.
+
 `frigate/util/file.py:315-345`
 
 The `msvcrt.locking` fallback is correct in principle, but Windows locking
@@ -525,6 +550,12 @@ ffmpeg:
 
 ### P2-7. Timezone and DST across a long-lived process
 
+**Status: fixed (documented).** The Windows CRT resolves the per-call DST
+status from the zone's rules, so ordinary DST transitions update the offset in
+segment names on their own. What goes stale is a change to the *time zone
+setting* in a long-lived process, and `docs/docs/frigate/installation.md` now
+says to restart Frigate after changing it.
+
 `tzdata` and `tzlocal` are in the Windows requirements, so offset resolution
 works. But `time.tzset()` does not exist on Windows, so a process started
 before a DST transition keeps the old offset for its lifetime.
@@ -545,15 +576,18 @@ former is more correct; the latter is one line of docs.
   positives otherwise. Prefer a suffix check or `shutil.which`.
 - **`get_physical_interfaces()`** (`services.py:245`) returns every adapter
   `psutil` knows about on Windows, including Hyper-V, VPN and loopback
-  pseudo-interfaces. The user-supplied `telemetry.network_interfaces` prefix is
-  the only narrowing; consider filtering out non-up / virtual NICs by default.
+  pseudo-interfaces. **Fixed:** the Windows branch now drops adapters whose
+  name marks them virtual (vEthernet, VPN/tunnel, Bluetooth, WAN Miniport and
+  friends) and adapters that are not up, keeping only the configured prefixes.
 - **`frigate/util/hwaccel.py` has no `IS_WINDOWS` guard** at all. Every read
   funnels through `_read()` and fails soft, so it will not crash — but it will
   do pointless work and return Linux-shaped answers. An early return in
   `hwaccel_options()` is cheap.
 - **`SHM_STATS_KEY = "/dev/shm"`** (`const.py:47`) is deliberately reused as a
-  UI-facing storage key on Windows so the web UI need not care. Reasonable, but
-  the storage panel should say "page file" rather than "shm" on Windows.
+  UI-facing storage key on Windows so the web UI need not care. **Fixed:** the
+  storage panel now labels the tile "Page file (shared memory)" from the
+  stats' `page_file_backed` flag and skips the raise-the-SHM-size warning
+  there, and the backend notice is suppressed for page-file-backed memory.
 - **`requirements-windows.txt` has drifted from `requirements-wheels.txt`** and
   is maintained by hand. A diff of the two shows `opencv-python-headless`,
   `netifaces`, `memray`, `setproctitle`, `mypy`, `types-requests` present only in
@@ -664,11 +698,11 @@ Two cheap wins:
 | ~~6~~ | ~~[P1-2](#p1-2-the-docs-recommend-a-preset-that-does-not-exist-for-decode) preset validator + real Windows decode presets~~ | **done** |
 | ~~7~~ | ~~[P1-1](#p1-1-hwaccel_args-auto-can-never-detect-windows-hardware) fix `auto` on Windows~~ | **done** |
 | ~~8~~ | ~~[P2-1](#p2-1-windows-reserved-device-names-are-valid-camera-names) / [P2-2](#p2-2-path-length) / [P2-3](#p2-3-case-insensitive-filesystem) name + path validators~~ | **done** (path length warns at startup rather than rewriting paths) |
-| 9 | [P3-1](#p3-1-no-windows-packaging-or-service-story)(1)(2) bootstrap + prebuilt web | Biggest adoption win per unit of effort |
+| ~~9~~ | ~~[P3-1](#p3-1-no-windows-packaging-or-service-story)(1)(2) bootstrap + prebuilt web~~ | **done** (`bootstrap_windows.py`, release bundle job) |
 | ~~10~~ | ~~[P1-3](#p1-3-the-hwaccel-recommender-can-emit-invalid-linux-presets-on-windows) Windows hwaccel families~~ | **done** |
-| 11 | [P2-4](#p2-4-antivirus-and-indexing-hold-files-open) / [P2-5](#p2-5-filelock-on-windows-needs-a-real-cross-process-test) / [P2-6](#p2-6-shlexsplitposixtrue-mangles-unquoted-windows-paths) robustness | **P2-4 and P2-6 done**, P2-5 still open |
-| 12 | [P3-1](#p3-1-no-windows-packaging-or-service-story)(3) Windows service | Do after the signal work in P0-4, or it will be built on a broken base |
-| 13 | [P3-3](#p3-3-detector-coverage-on-windows-is-narrow) DirectML | Broadens hardware support |
+| ~~11~~ | ~~[P2-4](#p2-4-antivirus-and-indexing-hold-files-open) / [P2-5](#p2-5-filelock-on-windows-needs-a-real-cross-process-test) / [P2-6](#p2-6-shlexsplitposixtrue-mangles-unquoted-windows-paths) robustness~~ | **done** (P2-5 has cross-process tests on both platforms) |
+| 12 | [P3-1](#p3-1-no-windows-packaging-or-service-story)(3) SCM service + winget | The launcher covers unattended operation; boot start and session 0 shutdown still need a service |
+| 13 | [P3-3](#p3-3-detector-coverage-on-windows-is-narrow) DirectML | **done as an option** (`bootstrap_windows.py --directml`); making it the default needs a Windows run to validate |
 
 ## Part 4 — What is already right, and worth protecting
 
@@ -722,6 +756,16 @@ changes below actually guarantee, and it is worth being precise about it.
   `-f segment`, whether the CPU TFLite model downloads and loads on the
   runner, and whether the first segment lands in `media/recordings` inside the
   180s budget.
+- the bootstrap script end to end: the venv, pip, the pinned FFmpeg/go2rtc
+  download and extraction into `%LOCALAPPDATA%\Frigate\config`, the launcher
+  generation and the Start Menu shortcut. The unit tests cover the digest
+  bookkeeping, extraction, layout and launcher text, but not a real download.
+- the launcher's restart loop against a real restart: that the marker written
+  by `restart_frigate()` is seen and consumed by `run_frigate.ps1`, and that
+  Ctrl+C still ends the loop.
+- DirectML inference on real AMD and Nvidia hardware: the provider pass
+  through is unit tested, but the swap (`--directml`) has not run against a
+  real GPU or driver.
 
 The `windows_native_e2e` job uploads Frigate's log and media on failure, so
 the first red run should be enough to fix any of these.

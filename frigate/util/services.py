@@ -44,6 +44,18 @@ except ImportError:  # pragma: no cover - Windows
 logger = logging.getLogger(__name__)
 
 
+RESTART_MARKER_NAME = "restart.requested"
+"""File Frigate drops in its tmp directory on Windows before exiting for a restart.
+
+Native Windows has no supervisor to intercept the exit and start Frigate
+again, so the launcher the bootstrap script generates watches for this file:
+if it exists when the process exits, the launcher starts Frigate again, and
+otherwise it lets the process stay exited. It is how the UI's restart action
+and the watchdog's restart of a dead detector keep working outside of a
+console that a user restarts by hand.
+"""
+
+
 def _stop_self() -> None:
     """Ask this process to shut down the way Ctrl+C would.
 
@@ -62,10 +74,31 @@ def _stop_self() -> None:
     signal.raise_signal(signal.SIGINT)
 
 
+def _mark_restart_requested() -> None:
+    """Tell the launcher Frigate should be started again after it exits.
+
+    Best effort: a launcher that never sees the marker simply leaves Frigate
+    stopped, which is the behaviour a user can recover from by hand, so a
+    failure to write the file is never worth crashing the shutdown over.
+    """
+    try:
+        path = os.path.join(get_tmp_dir(), RESTART_MARKER_NAME)
+
+        with open(path, "w", encoding="utf-8") as file:
+            file.write("restart")
+
+        logger.debug("Restart marker written to %s", path)
+    except OSError as err:
+        logger.debug("Unable to write the restart marker: %s", err)
+
+
 def restart_frigate():
     if IS_WINDOWS or not hasattr(signal, "SIGINT"):
         # no supervisor outside of the container: exiting is the closest
         # equivalent, and a launcher restarts the application if asked to
+        if IS_WINDOWS:
+            _mark_restart_requested()
+
         _stop_self()
         return
 
@@ -256,17 +289,58 @@ def _process_resident_memory(process: psutil.Process) -> float:
     return int(mem_stats[1]) * os.sysconf("SC_PAGE_SIZE") / 1024
 
 
+# Name fragments Windows gives adapters that do not carry camera traffic:
+# Hyper-V/WSL vEthernet switches, VPN and tunnel adapters, loopback and
+# Bluetooth pseudo interfaces, and the WAN Miniport drivers.
+_WINDOWS_VIRTUAL_NIC_TAGS = (
+    "vethernet",
+    "loopback",
+    "bluetooth",
+    "virtual",
+    "vmware",
+    "virtualbox",
+    "hyper-v",
+    "tap-",
+    "tun-",
+    "wireguard",
+    "openvpn",
+    "wan miniport",
+    "wi-fi direct",
+    "kernel debug",
+    "teredo",
+    "isatap",
+    "local area connection*",
+)
+
+
 def get_physical_interfaces(interfaces) -> list:
     if not interfaces:
         return []
 
     if IS_WINDOWS:
-        # psutil reports the same interface list without /proc/net/dev
-        physical_interfaces = list(psutil.net_if_addrs().keys())
+        # psutil reports the same interface list without /proc/net/dev, but it
+        # includes every adapter Windows knows about, including Hyper-V and
+        # VPN pseudo interfaces that would never carry camera traffic. Only
+        # adapters that are up and not a known virtual kind are monitored.
+        stats = psutil.net_if_stats()
 
-        return [
-            name for name in physical_interfaces if name.startswith(tuple(interfaces))
-        ]
+        physical_interfaces = []
+
+        for name in psutil.net_if_addrs():
+            if not name.startswith(tuple(interfaces)):
+                continue
+
+            lowered = name.lower()
+
+            if any(tag in lowered for tag in _WINDOWS_VIRTUAL_NIC_TAGS):
+                continue
+
+            if name in stats and not stats[name].isup:
+                continue
+
+            physical_interfaces.append(name)
+
+        return physical_interfaces
 
     with open("/proc/net/dev") as file:
         lines = file.readlines()

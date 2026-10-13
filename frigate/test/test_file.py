@@ -1,6 +1,8 @@
+import json
 import os
 import tempfile
 import time
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
@@ -255,3 +257,121 @@ class TestRetryingFileOperations(TestCase):
 
 async def _noop_sleep(*_args, **_kwargs) -> None:
     return
+
+
+class TestFileLockAcrossProcesses(TestCase):
+    """FileLock against a genuinely separate interpreter process.
+
+    In-process locking exercises neither the Windows byte range semantics nor
+    what happens to a lock whose holder died, which is exactly the code that
+    looks fine on Linux and quietly fails to serialize on Windows.
+    """
+
+    holder_script = """
+import json
+import sys
+import time
+
+from frigate.util.file import FileLock
+
+mode, lock_path, result_path = sys.argv[1], sys.argv[2], sys.argv[3]
+lock = FileLock(lock_path, timeout=int(sys.argv[4]), poll_interval=0.05)
+
+if mode == "hold":
+    if lock.acquire():
+        with open(result_path, "w", encoding="utf-8") as out:
+            json.dump("held", out)
+        # the parent kills this process without a release, to check that a
+        # dead holder's lock can be taken by a new process
+        time.sleep(120)
+    sys.exit(1)
+
+acquired = lock.acquire()
+
+with open(result_path, "w", encoding="utf-8") as out:
+    json.dump("acquired" if acquired else "denied", out)
+"""
+
+    def _spawn(self, mode: str, lock_path: str, result_path: str, timeout: int):
+        import subprocess
+        import sys as _sys
+
+        from frigate.util.file import __file__ as file_module_path
+
+        repo_root = str(Path(file_module_path).resolve().parents[2])
+        env = {**os.environ, "PYTHONPATH": repo_root}
+
+        return subprocess.Popen(
+            [
+                _sys.executable,
+                "-c",
+                self.holder_script,
+                mode,
+                lock_path,
+                result_path,
+                str(timeout),
+            ],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    def _read_result(self, result_path: str) -> str:
+        deadline = time.time() + 30
+
+        while time.time() < deadline:
+            try:
+                with open(result_path, encoding="utf-8") as file:
+                    return json.load(file)
+            except (OSError, ValueError):
+                time.sleep(0.05)
+
+        self.fail("the child process never wrote its result")
+
+    def test_a_second_process_cannot_take_a_held_lock(self):
+        from frigate.util.file import FileLock
+
+        with tempfile.TemporaryDirectory() as folder:
+            lock_path = os.path.join(folder, "resource.lock")
+            result_path = os.path.join(folder, "result.json")
+
+            with FileLock(lock_path, timeout=5):
+                child = self._spawn("try", lock_path, result_path, 1)
+                try:
+                    self.assertEqual(self._read_result(result_path), "denied")
+                finally:
+                    child.wait(timeout=30)
+
+    def test_a_lock_is_takeable_once_its_holder_exits(self):
+        from frigate.util.file import FileLock
+
+        with tempfile.TemporaryDirectory() as folder:
+            lock_path = os.path.join(folder, "resource.lock")
+            result_path = os.path.join(folder, "result.json")
+
+            holder = self._spawn("hold", lock_path, result_path, 5)
+            try:
+                self.assertEqual(self._read_result(result_path), "held")
+            finally:
+                # a hard kill, the way a crashed process dies: no release()
+                holder.kill()
+                holder.wait(timeout=30)
+
+            with FileLock(lock_path, timeout=10):
+                pass
+
+    def test_a_released_lock_can_be_taken_by_another_process(self):
+        from frigate.util.file import FileLock
+
+        with tempfile.TemporaryDirectory() as folder:
+            lock_path = os.path.join(folder, "resource.lock")
+            result_path = os.path.join(folder, "result.json")
+
+            with FileLock(lock_path, timeout=5):
+                pass
+
+            child = self._spawn("try", lock_path, result_path, 10)
+            try:
+                self.assertEqual(self._read_result(result_path), "acquired")
+            finally:
+                child.wait(timeout=30)

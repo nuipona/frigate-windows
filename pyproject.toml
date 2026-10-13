@@ -7,6 +7,13 @@ name = "frigate-nvr"
 version = "0.19.0"
 requires-python = ">=3.11"
 
+[project.optional-dependencies]
+# onnxruntime and onnxruntime-directml both provide the onnxruntime import,
+# so this extra replaces the requirements-windows.txt package instead of
+# adding to it: pip install --editable . --no-deps --group ... is not used,
+# bootstrap_windows.py --directml performs the swap.
+windows-directml = ["onnxruntime-directml == 1.24.*"]
+
 [tool.setuptools.packages.find]
 include = ["frigate*"]
 
