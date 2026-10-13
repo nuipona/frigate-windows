@@ -357,7 +357,7 @@ def get_web_port(internal_port: int) -> int:
     """
     override = os.environ.get(WEB_PORT_VAR, "").strip()
 
-    if override.isdigit():
+    if override.isdigit() and 1 <= int(override) <= 65535:
         return int(override)
 
     return internal_port
@@ -948,8 +948,11 @@ def ipc_endpoint(name: str) -> str:
         if name in IPC_ENDPOINTS:
             offset = IPC_ENDPOINTS.index(name)
         else:
-            # stable across runs, unlike hash()
-            offset = zlib.crc32(name.encode()) % 100
+            # stable across runs, unlike hash(). Unknown names are kept out
+            # of the range the known endpoints (and the birdseye listener,
+            # 20 ports above the default base) use, so a new endpoint can
+            # never silently land on a port another socket already owns
+            offset = 100 + zlib.crc32(name.encode()) % 100
 
         return f"tcp://127.0.0.1:{base + offset}"
 
@@ -982,6 +985,19 @@ def to_media_url_path(path: str | None) -> str | None:
         return None
 
     normalized = str(path).replace("\\", "/")
+
+    # a path under a runtime directory keeps its whole relative path, so a
+    # camera named like a media component (a camera called "clips", say)
+    # cannot truncate the URL the way a search for the last matching
+    # component would
+    for base, prefix in (
+        (get_media_dir(), ""),
+        (get_cache_dir(), f"/{CACHE_URL_COMPONENT}"),
+    ):
+        base_normalized = str(base).replace("\\", "/").rstrip("/")
+
+        if normalized.startswith(f"{base_normalized}/"):
+            return f"{prefix}{normalized[len(base_normalized) :]}"
 
     for component in MEDIA_URL_COMPONENTS:
         index = normalized.rfind(f"/{component}/")
@@ -1016,13 +1032,18 @@ def resolve_media_url_path(url_path: str) -> str | None:
     remainder = parts[1:]
 
     if component in MEDIA_URL_COMPONENTS:
+        # media URLs keep the component: <media>/clips/...
         base = get_media_dir()
+        parts = (component, *remainder)
     elif component == CACHE_URL_COMPONENT:
+        # cache URLs do not: the cache directory is itself the URL root,
+        # the same mapping the native server's /cache mount uses
         base = get_cache_dir()
+        parts = tuple(remainder)
     else:
         return None
 
-    candidate = os.path.abspath(os.path.join(base, component, *remainder))
+    candidate = os.path.abspath(os.path.join(base, *parts))
     root = os.path.abspath(base)
 
     if not is_subpath(candidate, root):
@@ -1064,7 +1085,10 @@ def get_fs_type(path: str) -> str:
         if not mountpoint:
             continue
 
-        if path.startswith(mountpoint) and len(best_match) < len(mountpoint):
+        # a plain prefix match would report the filesystem of "/media" for
+        # a path under "/media2", so the mountpoint has to contain the path
+        # on a component boundary
+        if is_subpath(path, mountpoint) and len(best_match) < len(mountpoint):
             fs_type = part.fstype
             best_match = mountpoint
 

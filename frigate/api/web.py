@@ -62,7 +62,9 @@ JSMEPEG_URL = "http://127.0.0.1:8082"
 GO2RTC_URL = "http://127.0.0.1:1984"
 
 # prefixes nginx runs auth_request for. Everything else, in particular the web
-# app shell, is public.
+# app shell, is public. The go2rtc proxy is included even though nginx has no
+# equivalent route: it forwards to go2rtc's own API, which reports the camera
+# URLs (credentials included), so it must never answer anonymously.
 PROTECTED_PREFIXES = (
     "/api/",
     "/vod/",
@@ -71,6 +73,7 @@ PROTECTED_PREFIXES = (
     "/exports/",
     "/cache/",
     "/live/",
+    "/go2rtc/",
 )
 
 PROTECTED_EXACT = ("/api", "/ws")
@@ -96,11 +99,14 @@ FORWARDED_REQUEST_HEADERS = (
 
 def needs_auth(path: str) -> bool:
     """Whether nginx would run the auth subrequest for a path."""
-    if path in PROTECTED_EXACT or path.startswith(PROTECTED_EXACT):
-        return True
-
+    # the login flow has to work before a session exists, so the exemptions
+    # are checked first: every exempt path also starts with a protected
+    # prefix, and checking the prefixes first would make them unreachable
     if path in AUTH_EXEMPT:
         return False
+
+    if path in PROTECTED_EXACT or path.startswith(PROTECTED_EXACT):
+        return True
 
     return path.startswith(PROTECTED_PREFIXES)
 

@@ -1,18 +1,25 @@
 """Platform helper tests for Windows command and path handling."""
 
+import os
 import unittest
 from unittest.mock import MagicMock, patch
 
 from frigate.util.builtin import get_ffmpeg_arg_list
 from frigate.util.platform import (
+    IPC_ENDPOINTS,
     MAX_PATH_LIMIT,
     ffmpeg_concat_file_line,
     ffmpeg_stdin_input,
+    get_fs_type,
     get_process_priority_class,
+    get_web_port,
+    ipc_endpoint,
     long_path_warning,
     longest_recording_path,
     quote_ffmpeg_arg,
+    resolve_media_url_path,
     split_ffmpeg_command,
+    to_media_url_path,
 )
 
 
@@ -183,6 +190,110 @@ class TestWindowsLongPaths(unittest.TestCase):
     def test_no_warning_off_windows(self):
         with patch("frigate.util.platform.IS_WINDOWS", False):
             self.assertIsNone(long_path_warning(["driveway"]))
+
+
+class TestWebPort(unittest.TestCase):
+    def test_out_of_range_ports_fall_back_to_the_internal_port(self):
+        """A port outside 1-65535 cannot be bound, so it is not a port."""
+        for value in ("0", "65536", "99999"):
+            with (
+                self.subTest(value=value),
+                patch.dict(os.environ, {"FRIGATE_WEB_PORT": value}),
+            ):
+                self.assertEqual(get_web_port(5000), 5000)
+
+    def test_a_valid_port_is_used(self):
+        with patch.dict(os.environ, {"FRIGATE_WEB_PORT": "8971"}):
+            self.assertEqual(get_web_port(5000), 8971)
+
+    def test_a_non_numeric_port_falls_back(self):
+        with patch.dict(os.environ, {"FRIGATE_WEB_PORT": "https"}):
+            self.assertEqual(get_web_port(5000), 5000)
+
+
+class TestIpcEndpoints(unittest.TestCase):
+    def test_unknown_names_do_not_collide_with_known_endpoints(self):
+        """An unknown endpoint must not share a known endpoint's port.
+
+        A hash of the name used to be able to land on any of the known
+        ports (the name ``a`` hashes onto the zmq detector endpoint), and
+        on the birdseye listener 20 ports above the base, so two sockets
+        would fight over one loopback port.
+        """
+        with patch("frigate.util.platform.IS_WINDOWS", True):
+            known = {ipc_endpoint(name) for name in IPC_ENDPOINTS}
+            birdseye = "tcp://127.0.0.1:5620"
+
+            for name in ("a", "foo", "bar", "detector2", "new_socket"):
+                with self.subTest(name=name):
+                    endpoint = ipc_endpoint(name)
+                    self.assertNotIn(endpoint, known)
+                    self.assertNotEqual(endpoint, birdseye)
+
+    def test_unknown_names_are_stable(self):
+        with patch("frigate.util.platform.IS_WINDOWS", True):
+            self.assertEqual(ipc_endpoint("future_socket"), ipc_endpoint("future_socket"))
+
+
+class TestMediaUrlPaths(unittest.TestCase):
+    def test_cache_urls_resolve_into_the_cache_dir(self):
+        """The cache dir is the /cache URL root, not a directory inside it."""
+        with (
+            patch(
+                "frigate.util.platform.get_media_dir", return_value="/media/frigate"
+            ),
+            patch("frigate.util.platform.get_cache_dir", return_value="/tmp/cache"),
+        ):
+            self.assertEqual(
+                resolve_media_url_path("/cache/previews/front_door/1.jpg"),
+                "/tmp/cache/previews/front_door/1.jpg",
+            )
+            self.assertEqual(
+                to_media_url_path("/tmp/cache/previews/front_door/1.jpg"),
+                "/cache/previews/front_door/1.jpg",
+            )
+
+    def test_media_paths_round_trip(self):
+        with (
+            patch(
+                "frigate.util.platform.get_media_dir", return_value="/media/frigate"
+            ),
+            patch("frigate.util.platform.get_cache_dir", return_value="/tmp/cache"),
+        ):
+            path = "/media/frigate/recordings/2024-01-01/10/front_door/00.00.mp4"
+            self.assertEqual(
+                to_media_url_path(path),
+                "/recordings/2024-01-01/10/front_door/00.00.mp4",
+            )
+            self.assertEqual(
+                resolve_media_url_path(to_media_url_path(path)), path
+            )
+
+    def test_a_camera_named_like_a_component_keeps_its_path(self):
+        with (
+            patch(
+                "frigate.util.platform.get_media_dir", return_value="/media/frigate"
+            ),
+            patch("frigate.util.platform.get_cache_dir", return_value="/tmp/cache"),
+        ):
+            self.assertEqual(
+                to_media_url_path(
+                    "/media/frigate/recordings/2024-01-01/10/clips/00.00.mp4"
+                ),
+                "/recordings/2024-01-01/10/clips/00.00.mp4",
+            )
+
+
+class TestFsType(unittest.TestCase):
+    def test_a_mountpoint_prefix_is_not_a_match(self):
+        """``/media2`` is not on the filesystem mounted at ``/media``."""
+        partition = MagicMock()
+        partition.mountpoint = "/media"
+        partition.fstype = "ext4"
+
+        with patch("psutil.disk_partitions", return_value=[partition]):
+            self.assertEqual(get_fs_type("/media2/recordings"), "")
+            self.assertEqual(get_fs_type("/media/recordings"), "ext4")
 
 
 if __name__ == "__main__":
