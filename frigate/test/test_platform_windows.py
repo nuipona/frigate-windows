@@ -232,16 +232,16 @@ class TestIpcEndpoints(unittest.TestCase):
 
     def test_unknown_names_are_stable(self):
         with patch("frigate.util.platform.IS_WINDOWS", True):
-            self.assertEqual(ipc_endpoint("future_socket"), ipc_endpoint("future_socket"))
+            self.assertEqual(
+                ipc_endpoint("future_socket"), ipc_endpoint("future_socket")
+            )
 
 
 class TestMediaUrlPaths(unittest.TestCase):
     def test_cache_urls_resolve_into_the_cache_dir(self):
         """The cache dir is the /cache URL root, not a directory inside it."""
         with (
-            patch(
-                "frigate.util.platform.get_media_dir", return_value="/media/frigate"
-            ),
+            patch("frigate.util.platform.get_media_dir", return_value="/media/frigate"),
             patch("frigate.util.platform.get_cache_dir", return_value="/tmp/cache"),
         ):
             self.assertEqual(
@@ -255,9 +255,7 @@ class TestMediaUrlPaths(unittest.TestCase):
 
     def test_media_paths_round_trip(self):
         with (
-            patch(
-                "frigate.util.platform.get_media_dir", return_value="/media/frigate"
-            ),
+            patch("frigate.util.platform.get_media_dir", return_value="/media/frigate"),
             patch("frigate.util.platform.get_cache_dir", return_value="/tmp/cache"),
         ):
             path = "/media/frigate/recordings/2024-01-01/10/front_door/00.00.mp4"
@@ -265,15 +263,11 @@ class TestMediaUrlPaths(unittest.TestCase):
                 to_media_url_path(path),
                 "/recordings/2024-01-01/10/front_door/00.00.mp4",
             )
-            self.assertEqual(
-                resolve_media_url_path(to_media_url_path(path)), path
-            )
+            self.assertEqual(resolve_media_url_path(to_media_url_path(path)), path)
 
     def test_a_camera_named_like_a_component_keeps_its_path(self):
         with (
-            patch(
-                "frigate.util.platform.get_media_dir", return_value="/media/frigate"
-            ),
+            patch("frigate.util.platform.get_media_dir", return_value="/media/frigate"),
             patch("frigate.util.platform.get_cache_dir", return_value="/tmp/cache"),
         ):
             self.assertEqual(

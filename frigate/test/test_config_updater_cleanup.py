@@ -22,7 +22,9 @@ from frigate.comms.config_updater import (
 def _ensure_bindable() -> None:
     """A publisher binds a unix socket, whose directory has to exist."""
     if SOCKET_PUB_SUB.startswith("ipc://"):
-        os.makedirs(os.path.dirname(SOCKET_PUB_SUB.removeprefix("ipc://")), exist_ok=True)
+        os.makedirs(
+            os.path.dirname(SOCKET_PUB_SUB.removeprefix("ipc://")), exist_ok=True
+        )
 
 
 class TestConfigSocketCleanup(unittest.TestCase):
