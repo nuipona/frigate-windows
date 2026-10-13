@@ -79,14 +79,26 @@ def capture_frames(
         frame_name = f"{config.name}_frame{frame_index}"
         frame_buffer = frame_manager.write(frame_name)
         try:
-            if ffmpeg_process.stdout.readinto(frame_buffer) != frame_size:
-                raise EOFError("incomplete frame")
-        except Exception:
+            if frame_buffer is None:
+                # the segment was unlinked while it was still being written to
+                raise EOFError("the shared memory frame is not available")
+
+            # exactly one frame: a segment is mapped page aligned on Windows,
+            # so the buffer can be larger than the frame written to it, and
+            # readinto would take the start of the next frame with it and
+            # desynchronize every frame after that
+            read = ffmpeg_process.stdout.readinto(frame_buffer[:frame_size])
+
+            if read != frame_size:
+                raise EOFError(f"incomplete frame: {read} of {frame_size} bytes")
+        except Exception as err:
             # shutdown has been initiated
             if stop_event.is_set():
                 break
 
-            logger.error(f"{config.name}: Unable to read frames from ffmpeg process.")
+            logger.error(
+                f"{config.name}: Unable to read frames from ffmpeg process: {err!r}"
+            )
 
             if ffmpeg_process.poll() is not None:
                 logger.error(

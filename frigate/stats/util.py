@@ -23,7 +23,7 @@ from frigate.util.services import (
     get_bandwidth_stats,
     get_fs_type,
 )
-from frigate.version import VERSION
+from frigate.util.version import VERSION
 
 if TYPE_CHECKING:
     from frigate.storage import StorageMaintainer

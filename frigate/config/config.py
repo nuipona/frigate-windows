@@ -1537,6 +1537,34 @@ class FrigateConfig(FrigateBaseModel):
                 raise ValueError("Zones cannot share names with cameras")
         return v
 
+    @field_validator("cameras")
+    @classmethod
+    def ensure_camera_names_are_unique_on_windows(cls, v: dict[str, CameraConfig]):
+        """Reject names NTFS would resolve to the same directory.
+
+        Windows compares paths case insensitively, so cameras named
+        ``Driveway`` and ``driveway`` share one recording directory and one
+        cache file per timestamp. The second camera silently overwrites the
+        first camera's segments instead of failing.
+        """
+        if not IS_WINDOWS:
+            return v
+
+        seen: dict[str, str] = {}
+
+        for name in v:
+            lowered = name.lower()
+
+            if lowered in seen:
+                raise ValueError(
+                    f"Camera names '{seen[lowered]}' and '{name}' differ only by "
+                    "case, which is the same directory on Windows"
+                )
+
+            seen[lowered] = name
+
+        return v
+
     @classmethod
     def load(cls, **kwargs):
         """Loads the Frigate config file, runs migrations, and creates the config object."""

@@ -1,8 +1,9 @@
 from enum import Enum
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from frigate.const import MAX_PRE_CAPTURE, STREAM_TYPE_SUB
+from frigate.ffmpeg_presets import PRESETS_HW_ACCEL_DECODE, validate_ffmpeg_args
 from frigate.review.types import SeverityEnum
 
 from ..base import FrigateBaseModel
@@ -99,6 +100,13 @@ class RecordExportConfig(FrigateBaseModel):
         title="Export hwaccel args",
         description="Hardware acceleration args to use for export/transcode operations.",
     )
+
+    @field_validator("hwaccel_args")
+    @classmethod
+    def validate_hwaccel_args(cls, v):
+        validate_ffmpeg_args(v, "ffmpeg.hwaccel_args", PRESETS_HW_ACCEL_DECODE)
+        return v
+
     max_concurrent: int = Field(
         default=3,
         ge=1,

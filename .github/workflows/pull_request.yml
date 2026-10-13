@@ -102,28 +102,73 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r docker/main/requirements-windows.txt
-          python -m pip install --editable --no-deps .
+          python -m pip install --editable . --no-deps
       - name: Build the native Windows web interface
         run: |
           npm ci
           npm run build:native
         working-directory: ./web
       - name: Run Windows path, process, hardware, and config smoke tests
+        shell: pwsh
         run: |
           python -m unittest `
             frigate.test.test_platform_windows `
+            frigate.test.test_native_web_app `
+            frigate.test.test_shared_memory_frame_manager `
+            frigate.test.test_capture_frames `
+            frigate.test.test_maintainer `
             frigate.test.test_ffmpeg_progress `
             frigate.test.test_sqlitevecq_windows `
-            frigate.test.test_ffmpeg_presets.TestFfmpegPresets.test_encode_preset_preserves_windows_paths_with_spaces `
+            frigate.test.test_windows_hwaccel `
+            frigate.test.test_ffmpeg_presets `
+            frigate.test.test_file `
+            frigate.test.test_builtin `
             frigate.test.test_config.TestConfig.test_windows_cpu_default_uses_a_native_model_path `
             frigate.test.test_config.TestConfig.test_windows_default_cpu_model_download_is_atomic `
-            frigate.test.test_detector_hardware.TestWindowsOpenVINODevices
+            frigate.test.test_config.TestConfig.test_windows_hwaccel_preset_is_accepted `
+            frigate.test.test_config.TestConfig.test_reserved_camera_name_is_rejected_on_windows `
+            frigate.test.test_config.TestConfig.test_camera_names_that_differ_only_by_case_are_rejected_on_windows `
+            frigate.test.test_detector_hardware.TestWindowsOpenVINODevices *> smoke.log
+          if ($LASTEXITCODE -ne 0) {
+            Write-Output "::error title=smoke-exit::unittest exited $LASTEXITCODE"
+            Select-String -Path smoke.log -Pattern '^(ERROR|FAIL): |Error: |Ran [0-9]+ tests' |
+              Select-Object -First 20 | ForEach-Object {
+                $msg = ($_.Line -replace "`r", '' -replace "`n", ' ')
+                Write-Output "::error title=smoke::$msg"
+              }
+            Get-Content smoke.log -Tail 12 | ForEach-Object {
+              Write-Output ("::error title=smoke-tail::{0}" -f ($_ -replace "`r", '' -replace "`n", ' '))
+            }
+            exit 1
+          }
+      - name: Check the Windows requirements can install and cover every import
+        run: python testing-scripts/check_windows_requirements.py
       - name: Run process lifecycle tests
+        shell: pwsh
         run: |
           python -m unittest `
             frigate.test.test_ffmpeg_stop `
             frigate.test.test_job_object `
-            frigate.test.test_restart_frigate
+            frigate.test.test_restart_frigate *> lifecycle.log
+          $lifecycleCode = $LASTEXITCODE
+          if ($lifecycleCode -ne 0) {
+            Select-String -Path lifecycle.log -Pattern '^(ERROR|FAIL): ' |
+              Select-Object -First 4 | ForEach-Object {
+                Write-Output ("::error title=lifecycle::{0}" -f ($_.Line -replace "`r", '' -replace "`n", ' '))
+              }
+            Select-String -Path lifecycle.log -Pattern '^Ran [0-9]+ tests|^FAILED' |
+              ForEach-Object {
+                Write-Output ("::error title=lifecycle-summary::{0}" -f $_.Line)
+              }
+          }
+          exit $lifecycleCode
+      - name: Report the lifecycle log
+        if: failure()
+        shell: pwsh
+        run: |
+          . .\testing-scripts\publish-log-annotations.ps1
+          Publish-Log -Path 'lifecycle.log' -Prefix 'lifecycle-log' -Keep '^(ERROR|FAIL): |^Traceback|^AssertionError|^Ran |^FAILED|^OK'
+
       - name: Validate first-run native configuration
         run: |
           $env:FRIGATE_BASE_DIR = Join-Path $env:RUNNER_TEMP "frigate-native-smoke"
@@ -153,7 +198,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r docker/main/requirements-windows.txt
-          python -m pip install --editable --no-deps .
+          python -m pip install --editable . --no-deps
       - name: Build the native Windows web interface
         run: |
           npm ci
@@ -181,14 +226,108 @@ jobs:
         env:
           FRIGATE_E2E: "1"
           FRIGATE_E2E_DIR: ${{ runner.temp }}\frigate-e2e
+        shell: pwsh
         run: |
-          python -m unittest frigate.test.test_native_e2e
+          python -m unittest frigate.test.test_native_e2e *> e2e.log
+          $e2eCode = $LASTEXITCODE
+          if ($e2eCode -ne 0) {
+            Select-String -Path e2e.log -Pattern '^FAIL: |AssertionError' |
+              Select-Object -First 2 | ForEach-Object {
+                Write-Output ("::error title=e2e::{0}" -f ($_.Line -replace "`r", '' -replace "`n", ' '))
+              }
+          }
+          exit $e2eCode
+      - name: Report the end to end failure
+        if: failure()
+        shell: pwsh
+        env:
+          FRIGATE_E2E_DIR: ${{ runner.temp }}\frigate-e2e
+        run: |
+          . .\testing-scripts\publish-log-annotations.ps1
+          Publish-Log -Path 'e2e.log' -Prefix 'e2e-log'
+          # the start of Frigate's own log: the config it started with, the
+          # ffmpeg command lines, and what ffmpeg said on the way in
+          Publish-Log -Path (Join-Path $env:FRIGATE_E2E_DIR 'frigate-run.log') `
+            -Prefix 'frigate-head' -Drop @('Unable to read frames') -Head 40 -Tail 20
+          # everything ffmpeg or the recording maintainer complains about,
+          # without the frame reader's retry storm drowning it out
+          Publish-Log -Path (Join-Path $env:FRIGATE_E2E_DIR 'frigate-run.log') `
+            -Prefix 'frigate-said' `
+            -Drop @('Unable to read frames', 'peewee_migrate', 'Migrate ') `
+            -Keep 'ffmpeg|lavfi|Invalid|No such|Conversion|Error|error|Unable|discard|segment'
+          # the frame read failures repeat hundreds of times, so only the
+          # first and the last few are worth looking at
+          Publish-Log -Path (Join-Path $env:FRIGATE_E2E_DIR 'frigate-run.log') `
+            -Prefix 'frigate-frames' -Keep 'Unable to read frames' -Head 5 -Tail 5
+
       - name: Upload Frigate's log and media
         if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: frigate-native-e2e
           path: ${{ runner.temp }}\frigate-e2e
+          retention-days: 7
+          if-no-files-found: warn
+
+  windows_native_unit_suite:
+    # The whole suite, not a hand picked subset: every test is a Windows test
+    # unless it is listed in frigate/test/windows_suite_denylist.txt. Reported
+    # rather than blocking until that list covers the tests that cannot work
+    # without Linux, at which point continue-on-error should be dropped.
+    name: Windows Native Unit Suite (reporting)
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: docker/main/requirements-windows.txt
+      - name: Install native Windows Python requirements
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r docker/main/requirements-windows.txt
+          python -m pip install --editable . --no-deps
+      - name: Run the unit suite
+        shell: pwsh
+        env:
+          FRIGATE_BASE_DIR: ${{ runner.temp }}\frigate-unit
+        run: |
+          # -u so the progress and the failure list are in the log even if
+          # the run ends in a native crash rather than a test failure
+          python -u testing-scripts/run_windows_unit_suite.py *> suite.log
+          $suiteCode = $LASTEXITCODE
+          Select-String -Path suite.log -Pattern '^(ran [0-9]+|\d+ tests fail|Every test|Skipping )' |
+            ForEach-Object { Write-Output ("::error title=suite-summary::{0}" -f $_.Line) }
+          Select-String -Path suite.log -Pattern '^frigate\.test\.[A-Za-z0-9_.]+ ' |
+            Select-Object -First 30 | ForEach-Object {
+              Write-Output ("::error title=suite-fail::{0}" -f ($_.Line -replace ' .*$', ''))
+            }
+          exit $suiteCode
+      - name: Report the unit suite failures
+        if: failure()
+        shell: pwsh
+        run: |
+          . .\testing-scripts\publish-log-annotations.ps1
+          Publish-Log -Path 'suite.log' -Prefix 'suite-summary' `
+            -Keep '^(ran |Ran |Running |Skipping |[0-9]+ tests fail|Every test|FAILED|OK)'
+          Publish-Log -Path 'suite.log' -Prefix 'suite-failures' `
+            -Keep '^(FAIL|ERROR): |^Traceback|^[A-Za-z]+Error|^Ran |^ran '
+          # the tail carries the failing test ids, which are printed above
+          # each traceback by the runner
+          Publish-Log -Path 'suite.log' -Prefix 'suite-tail' -Tail 200 `
+            -Drop @('peewee_migrate|transformers|PyTorch')
+      - name: Upload the test report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-unit-suite
+          path: ${{ runner.temp }}\frigate-unit
           retention-days: 7
           if-no-files-found: warn
 

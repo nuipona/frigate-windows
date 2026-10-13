@@ -20,6 +20,12 @@ from frigate.const import (
     FFMPEG_HWACCEL_VAAPI,
 )
 from frigate.detectors.hardware import hardware_prober
+from frigate.util.platform import (
+    IS_WINDOWS,
+    get_cpu_brand,
+    get_display_adapter_vendors,
+    get_display_adapters,
+)
 from frigate.util.services import enumerate_drm_devices
 
 logger = logging.getLogger(__name__)
@@ -27,6 +33,10 @@ logger = logging.getLogger(__name__)
 # roots the /proc and /sys reads use, so tests can point them at a fixture tree
 PROC_ROOT = "/proc"
 SYS_ROOT = "/sys"
+
+#: hardware key for a GPU Windows itself reports being driven, which is how
+#: AMD and Intel GPUs are found without /sys or a vendor runtime
+WINDOWS_DISPLAY_ADAPTER = "windows:display"
 
 ANY_CODEC = "any"
 
@@ -61,6 +71,7 @@ DECODE_HARDWARE = (
     "onnx:amd",
     LIGHTER_MEDIA,
     RASPBERRY_PI,
+    WINDOWS_DISPLAY_ADAPTER,
 )
 
 
@@ -111,6 +122,20 @@ FAMILY_APPLE = HwaccelFamily(
     presets={"h264": "preset-apple-silicon-h264", "h265": "preset-apple-silicon-h265"},
 )
 
+# Windows decodes through the platform APIs rather than libva, so it needs its
+# own families. Every Windows GPU supports D3D11VA, which is why it is the
+# fallback the other two are ordered ahead of.
+FAMILY_WINDOWS_NVENC = HwaccelFamily(
+    key="windows-nvenc", presets={ANY_CODEC: "preset-windows-nvenc"}
+)
+FAMILY_WINDOWS_QSV = HwaccelFamily(
+    key="windows-qsv",
+    presets={"h264": "preset-windows-qsv-h264", "h265": "preset-windows-qsv-h265"},
+)
+FAMILY_WINDOWS_D3D11VA = HwaccelFamily(
+    key="windows-d3d11va", presets={ANY_CODEC: "preset-windows-d3d11va"}
+)
+
 
 def _read(path: str) -> str | None:
     """Read a small file, returning None if it cannot be read."""
@@ -123,6 +148,12 @@ def _read(path: str) -> str | None:
 
 def _intel_generation() -> int | None:
     """The Intel platform generation, or None when it cannot be determined."""
+    if IS_WINDOWS:
+        # no /proc/cpuinfo and no DRM devices: the registry reports the same
+        # marketing name, and a Windows GPU driver is never the Linux one that
+        # the xe check looks for
+        return _generation_of(get_cpu_brand())
+
     # the xe driver only binds to the newest platforms (Arc and later iGPUs)
     if "xe" in enumerate_drm_devices().values():
         return INTEL_GEN_LATEST
@@ -133,25 +164,39 @@ def _intel_generation() -> int | None:
         if not line.startswith("model name"):
             continue
 
-        match = INTEL_GEN_PATTERN.search(line)
+        return _generation_of(line)
 
-        if match:
-            return int(match.group(1))
+    return None
 
-        if INTEL_ULTRA_PATTERN.search(line):
-            return INTEL_GEN_LATEST
 
-        break
+def _generation_of(name: str) -> int | None:
+    """The Intel generation a processor marketing name implies."""
+    if not name:
+        return None
+
+    match = INTEL_GEN_PATTERN.search(name)
+
+    if match:
+        return int(match.group(1))
+
+    if INTEL_ULTRA_PATTERN.search(name):
+        return INTEL_GEN_LATEST
 
     return None
 
 
 def _is_raspberry_pi() -> bool:
+    if IS_WINDOWS:
+        return False
+
     compatible = _read(f"{PROC_ROOT}/device-tree/compatible") or ""
     return "raspberrypi" in compatible
 
 
 def _has_lighter_media() -> bool:
+    if IS_WINDOWS:
+        return False
+
     video = f"{SYS_ROOT}/class/video4linux"
 
     try:
@@ -176,8 +221,38 @@ def _intel_families(generation: int | None) -> list[HwaccelFamily]:
     return [FAMILY_VAAPI, FAMILY_QSV]
 
 
+def _windows_intel_families(generation: int | None) -> list[HwaccelFamily]:
+    """Intel families on Windows, where decode goes through QSV or D3D11VA.
+
+    QSV needs a driver and an ffmpeg build that both support it, so it is only
+    offered ahead of D3D11VA when the installed hardware is new enough for it
+    to be certain. D3D11VA decodes on every Intel GPU.
+    """
+    if generation is not None and generation >= INTEL_QSV_SUPPORTED_GEN:
+        return [FAMILY_WINDOWS_QSV, FAMILY_WINDOWS_D3D11VA]
+
+    return [FAMILY_WINDOWS_D3D11VA, FAMILY_WINDOWS_QSV]
+
+
+def _windows_families(key: str) -> list[HwaccelFamily]:
+    """Every Windows family that can decode on this hardware, best first."""
+    if key == "onnx:nvidia":
+        return [FAMILY_WINDOWS_NVENC, FAMILY_WINDOWS_D3D11VA]
+
+    if key == "openvino:GPU":
+        return _windows_intel_families(_intel_generation())
+
+    if key == WINDOWS_DISPLAY_ADAPTER:
+        return [FAMILY_WINDOWS_D3D11VA]
+
+    return []
+
+
 def _families(key: str, generation: int | None) -> list[HwaccelFamily]:
     """Every family that can decode on this hardware, best first."""
+    if IS_WINDOWS:
+        return _windows_families(key)
+
     if key == "onnx:nvidia":
         return [FAMILY_NVIDIA]
 
@@ -222,11 +297,18 @@ def _decode_hardware(detector_key: str | None) -> list[str]:
     """
     present = {found.key for found in hardware_prober.probe()}
 
-    if _has_lighter_media():
-        present.add(LIGHTER_MEDIA)
+    if IS_WINDOWS:
+        # the prober finds Nvidia through NVML and Intel through OpenVINO, but
+        # an AMD or an Intel GPU whose OpenVINO runtime is missing would go
+        # unseen, and every GPU Windows drives can decode through D3D11VA
+        if get_display_adapters():
+            present.add(WINDOWS_DISPLAY_ADAPTER)
+    else:
+        if _has_lighter_media():
+            present.add(LIGHTER_MEDIA)
 
-    if _is_raspberry_pi():
-        present.add(RASPBERRY_PI)
+        if _is_raspberry_pi():
+            present.add(RASPBERRY_PI)
 
     # an Intel NPU decodes through the iGPU next to it
     if detector_key == "openvino:NPU":
@@ -303,3 +385,71 @@ def recommend_hwaccel(
         The key of the family that fits, or an empty string when none does
     """
     return hwaccel_options(detector_key, codecs)[0]
+
+
+# ---------------------------------------------------------------------------
+# auto detection
+# ---------------------------------------------------------------------------
+
+
+def windows_hwaccel_preset(
+    go2rtc_sources: list[dict[str, str]] | None = None,
+) -> str:
+    """The Windows decode preset to use for ``ffmpeg.hwaccel_args: auto``.
+
+    go2rtc reports which accelerators its own ffmpeg build can open, which is
+    the best evidence available when it is running. On a native Windows start
+    it never is: Frigate resolves ``auto`` while loading the config, and starts
+    go2rtc afterwards. The GPUs Windows reports are therefore used as the
+    fallback, which is what makes ``auto`` work on a fresh install instead of
+    always falling back to software decoding.
+
+    Args:
+        go2rtc_sources: The ``sources`` list from go2rtc's
+            ``/api/ffmpeg/hardware``, when it could be reached
+
+    Returns:
+        A ``preset-windows-*`` name, or an empty string when nothing was found
+    """
+    # go2rtc only reports the accelerators it managed to open, so trust it
+    # first and in order of how specific each one is
+    accelerators: set[str] = set()
+
+    for source in go2rtc_sources or []:
+        if source.get("name") != "OK":
+            continue
+
+        url = source.get("url", "")
+
+        for accelerator in ("cuda", "qsv", "d3d11va", "dxva2"):
+            if accelerator in url:
+                accelerators.add(accelerator)
+
+    if "cuda" in accelerators:
+        return "preset-windows-nvenc"
+
+    if "qsv" in accelerators:
+        return "preset-windows-qsv"
+
+    if "d3d11va" in accelerators:
+        return "preset-windows-d3d11va"
+
+    if "dxva2" in accelerators:
+        return "preset-windows-dxva2"
+
+    adapters = get_display_adapters()
+
+    if not adapters:
+        return ""
+
+    vendors = get_display_adapter_vendors()
+
+    if "nvidia" in vendors:
+        return "preset-windows-nvenc"
+
+    if "intel" in vendors:
+        return "preset-windows-qsv"
+
+    # every Windows GPU decodes through D3D11VA, including the AMD and Intel
+    # ones no vendor runtime reported
+    return "preset-windows-d3d11va"

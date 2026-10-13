@@ -11,7 +11,7 @@ import requests
 from pydantic import ValidationError
 from ruamel.yaml.constructor import DuplicateKeyError
 
-from frigate.config import BirdseyeModeEnum, FrigateConfig, RetainModeEnum
+from frigate.config import BirdseyeModeEnum, CameraConfig, FrigateConfig, RetainModeEnum
 from frigate.config.config import (
     WINDOWS_DEFAULT_MODEL_URL,
     _ensure_windows_default_cpu_model,
@@ -115,6 +115,100 @@ class TestConfig(unittest.TestCase):
             config = {"models": [{"devices": devices}]}
             frigate_config = FrigateConfig(**(deep_merge(config, self.minimal)))
             assert frigate_config.primary_model.path == expected
+
+    @patch("frigate.config.camera.camera.IS_WINDOWS", True)
+    def test_reserved_camera_name_is_rejected_on_windows(self):
+        """A device name is not a file name, so the path layer will not use it."""
+        inputs = [{"path": "rtsp://10.0.0.1:554/video", "roles": ["detect"]}]
+
+        for name in ("con", "CON", "nul", "com1", "lpt9"):
+            with self.subTest(name=name):
+                with self.assertRaises(ValidationError) as raised:
+                    CameraConfig.model_validate(
+                        {"name": name, "ffmpeg": {"inputs": inputs}}
+                    )
+
+                self.assertIn("reserved device name", str(raised.exception))
+
+    @patch("frigate.config.camera.camera.IS_WINDOWS", False)
+    def test_reserved_camera_name_is_allowed_elsewhere(self):
+        inputs = [{"path": "rtsp://10.0.0.1:554/video", "roles": ["detect"]}]
+        config = CameraConfig.model_validate(
+            {"name": "con", "ffmpeg": {"inputs": inputs}}
+        )
+        self.assertEqual(config.name, "con")
+
+    @patch("frigate.config.config.IS_WINDOWS", True)
+    def test_camera_names_that_differ_only_by_case_are_rejected_on_windows(self):
+        """NTFS resolves both names to the same directory and cache files."""
+        config = deepcopy(self.minimal)
+        config["cameras"]["BACK"] = deepcopy(config["cameras"]["back"])
+
+        with self.assertRaises(ValidationError) as raised:
+            FrigateConfig(**config)
+
+        self.assertIn("differ only by case", str(raised.exception))
+
+    @patch("frigate.detectors.detector_config.load_labels")
+    def test_camera_names_that_differ_only_by_case_are_allowed_elsewhere(
+        self, mock_labels
+    ):
+        mock_labels.return_value = {}
+        config = deepcopy(self.minimal)
+        config["cameras"]["BACK"] = deepcopy(config["cameras"]["back"])
+
+        frigate_config = FrigateConfig(**config)
+
+        self.assertEqual(sorted(frigate_config.cameras), ["BACK", "back"])
+
+    @patch("frigate.detectors.detector_config.load_labels")
+    def test_unknown_hwaccel_preset_is_rejected(self, mock_labels):
+        mock_labels.return_value = {}
+        config = deepcopy(self.minimal)
+        config["cameras"]["back"]["ffmpeg"]["hwaccel_args"] = "preset-windows-nope"
+
+        with self.assertRaises(ValidationError) as raised:
+            FrigateConfig(**config)
+
+        self.assertIn("not a known preset", str(raised.exception))
+
+    @patch("frigate.detectors.detector_config.load_labels")
+    def test_linux_only_hwaccel_preset_is_rejected_on_windows(self, mock_labels):
+        mock_labels.return_value = {}
+        config = deepcopy(self.minimal)
+        config["cameras"]["back"]["ffmpeg"]["hwaccel_args"] = "preset-vaapi"
+
+        with patch("frigate.ffmpeg_presets.IS_WINDOWS", True):
+            with self.assertRaises(ValidationError) as raised:
+                FrigateConfig(**config)
+
+        self.assertIn("preset-windows-d3d11va", str(raised.exception))
+
+    @patch("frigate.detectors.detector_config.load_labels")
+    def test_windows_hwaccel_preset_is_accepted(self, mock_labels):
+        mock_labels.return_value = {}
+        config = deepcopy(self.minimal)
+        config["cameras"]["back"]["ffmpeg"]["hwaccel_args"] = "preset-windows-d3d11va"
+
+        frigate_config = FrigateConfig(**config)
+
+        self.assertEqual(
+            frigate_config.cameras["back"].ffmpeg.hwaccel_args,
+            "preset-windows-d3d11va",
+        )
+
+    @patch("frigate.detectors.detector_config.load_labels")
+    def test_unknown_record_output_preset_is_rejected(self, mock_labels):
+        mock_labels.return_value = {}
+        config = deepcopy(self.minimal)
+        config["cameras"]["back"]["ffmpeg"]["output_args"] = {
+            "record": "preset-record-nope"
+        }
+
+        with self.assertRaises(ValidationError) as raised:
+            FrigateConfig(**config)
+
+        self.assertIn("not a known preset", str(raised.exception))
 
     @patch("frigate.detectors.detector_config.load_labels")
     @patch("frigate.config.config._ensure_windows_default_cpu_model")

@@ -1,13 +1,14 @@
 import os
 from enum import Enum
 
-from pydantic import Field, PrivateAttr, model_validator
+from pydantic import Field, PrivateAttr, field_validator, model_validator
 
 from frigate.const import (
     CACHE_DIR,
     CACHE_SEGMENT_FORMAT,
     REGEX_CAMERA_NAME,
     SUB_CACHE_TAG,
+    WINDOWS_RESERVED_NAMES,
 )
 from frigate.ffmpeg_presets import (
     parse_preset_hardware_acceleration_decode,
@@ -20,6 +21,7 @@ from frigate.util.builtin import (
     generate_color_palette,
     get_ffmpeg_arg_list,
 )
+from frigate.util.platform import IS_WINDOWS
 
 from ..base import FrigateBaseModel
 from ..classification import (
@@ -61,6 +63,23 @@ class CameraConfig(FrigateBaseModel):
         description="Camera name is required",
         pattern=REGEX_CAMERA_NAME,
     )
+
+    @field_validator("name")
+    @classmethod
+    def validate_name_is_usable_on_windows(cls, v: str | None) -> str | None:
+        """Reject names Windows cannot use as a file or directory name.
+
+        The name is used to build every path the camera owns, and Windows
+        resolves a reserved device name to a device rather than to a file no
+        matter where it appears or what extension follows it.
+        """
+        if v is not None and IS_WINDOWS and v.lower() in WINDOWS_RESERVED_NAMES:
+            raise ValueError(
+                f"Camera name '{v}' is a reserved device name on Windows and "
+                "cannot be used for a directory or file, rename the camera"
+            )
+
+        return v
 
     friendly_name: str | None = Field(
         None,

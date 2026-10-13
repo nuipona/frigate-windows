@@ -18,6 +18,7 @@ from frigate.util.platform import (
     ensure_runtime_dirs,
     get_mp_start_method,
     install_signal_handlers,
+    long_path_warning,
     supports_forkserver,
 )
 
@@ -125,6 +126,13 @@ def main() -> None:
         except ValidationError:
             print("Unable to start Frigate in safe mode.")
             sys.exit(1)
+    # A path that approaches MAX_PATH fails when a segment is written, long
+    # after startup succeeded, so say so now while it can still be changed.
+    path_warning = long_path_warning(config.cameras.keys())
+
+    if path_warning:
+        logger.warning("%s", path_warning)
+
     if args.validate_config:
         print("*************************************************************")
         print("*** Your config file is valid.                            ***")

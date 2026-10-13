@@ -15,7 +15,12 @@ import os
 import platform
 import subprocess as sp
 
-from frigate.util.platform import find_executable, get_install_dir, get_service_log_path
+from frigate.util.platform import (
+    IS_WINDOWS,
+    find_executable,
+    get_install_dir,
+    get_service_log_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +49,13 @@ def find_go2rtc(config_dir: str | None = None) -> str | None:
             if candidate.endswith("go2rtc"):
                 candidate = executable_name(candidate)
 
-            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            if not os.path.isfile(candidate):
+                continue
+
+            # os.access with X_OK is derived from the file extension on
+            # Windows, so a go2rtc.exe is executable by definition there and
+            # only the POSIX permission bit is worth checking
+            if IS_WINDOWS or os.access(candidate, os.X_OK):
                 return candidate
 
     return find_executable("go2rtc")

@@ -7,7 +7,6 @@ import math
 import multiprocessing.queues
 import queue
 import re
-import shlex
 import struct
 import time
 import urllib.parse
@@ -26,6 +25,7 @@ from frigate.const import (
     STREAM_TYPE_MAIN,
     STREAM_TYPE_SUB,
 )
+from frigate.util.platform import split_ffmpeg_command
 
 if TYPE_CHECKING:
     from frigate.config import CameraConfig
@@ -137,8 +137,13 @@ def escape_special_characters(path: str) -> str:
 
 
 def get_ffmpeg_arg_list(arg: Any) -> list:
-    """Use arg if list or convert to list format."""
-    return arg if isinstance(arg, list) else shlex.split(arg)
+    """Use arg if list or convert to list format.
+
+    A string is split with the platform's quoting rules, so an unquoted
+    Windows path such as ``-i D:\\videos\\cam.mp4`` keeps its separators
+    instead of losing them to POSIX escape handling.
+    """
+    return arg if isinstance(arg, list) else split_ffmpeg_command(arg)
 
 
 # all built-in record presets use this segment_time

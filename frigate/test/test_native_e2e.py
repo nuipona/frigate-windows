@@ -19,6 +19,7 @@ Every failure dumps the tail of Frigate's own log, so a broken run on CI says
 what went wrong rather than just timing out.
 """
 
+import json
 import logging
 import os
 import shutil
@@ -40,6 +41,11 @@ REPO_ROOT = str(Path(__file__).resolve().parents[2])
 #: a single camera on a synthetic source, recording only. Detection is off so
 #: the test does not depend on a real model, and hardware acceleration is off
 #: so it does not depend on a GPU or on go2rtc being reachable.
+#:
+#: `-re` is what makes the synthetic source behave like a camera. lavfi has no
+#: clock: without it ffmpeg decodes as fast as it can, which is hundreds of
+#: frames a second written into the detect pipe that Frigate reads at the
+#: camera's frame rate, and the frames that do get through are torn.
 CONFIG_TEMPLATE = """\
 mqtt:
   enabled: false
@@ -56,7 +62,7 @@ cameras:
     ffmpeg:
       inputs:
         - path: "testsrc=size=320x240:rate=10"
-          input_args: "-f lavfi"
+          input_args: "-f lavfi -re"
           roles:
             - record
       output_args:
@@ -71,7 +77,9 @@ cameras:
       fps: 10
     record:
       enabled: true
-      retain:
+      continuous:
+        days: 1
+      motion:
         days: 1
     snapshots:
       enabled: false
@@ -237,6 +245,50 @@ class TestNativeEndToEnd(unittest.TestCase):
         except ValueError:
             return False
 
+    def _cache_listing(self) -> str:
+        """What ffmpeg has written so far, and therefore where to look next.
+
+        Segments are written into the cache first and only moved into
+        recordings afterwards, so an empty recordings directory means
+        something very different depending on what the cache holds: nothing at
+        all means ffmpeg never wrote a segment, a pile of mp4 files means the
+        mover never picked them up.
+        """
+        cache = Path(self.base) / "cache"
+        if not cache.is_dir():
+            return f"there is no cache directory at {cache}\n"
+
+        segments = sorted(path.name for path in cache.rglob("*.mp4"))
+        if not segments:
+            return f"there are no segments in {cache}\n"
+
+        return (
+            f"{len(segments)} segments are sitting in the cache: "
+            f"{', '.join(segments[:8])}\n"
+        )
+
+    def _camera_stats(self) -> str:
+        """The counters that say whether any frame moved at all.
+
+        Nothing downstream of the capture process can be trusted if these
+        are zero, and the recording maintainer keeps the cache empty by
+        discarding segments it has no processed frame for.
+        """
+        try:
+            with urllib.request.urlopen(self._url("/api/stats"), timeout=5) as resp:
+                stats = json.load(resp)
+        except (urllib.error.URLError, OSError, ValueError) as err:
+            return f"could not read /api/stats: {err}\n"
+
+        camera = stats.get("cameras", {}).get("e2e", {})
+        counters = ("camera_fps", "process_fps", "detection_fps", "skipped_fps")
+
+        return (
+            "e2e camera: "
+            + ", ".join(f"{name}={camera.get(name)}" for name in counters)
+            + "\n"
+        )
+
     def _snapshot_children(self) -> None:
         """Remember the ffmpeg processes that were already running.
 
@@ -288,6 +340,8 @@ class TestNativeEndToEnd(unittest.TestCase):
         self.assertTrue(
             recorded,
             "No recording segments appeared under media/recordings.\n"
+            + self._cache_listing()
+            + self._camera_stats()
             + self._log_tail(),
         )
 

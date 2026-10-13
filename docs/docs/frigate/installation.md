@@ -619,12 +619,13 @@ Frigate can run natively on Windows without Docker or WSL. The API, media endpoi
 Run these commands from PowerShell in the directory where you want the Frigate checkout. The frontend build is required for the native server to serve the UI.
 
 ```powershell
-git clone https://github.com/blakeblackshear/frigate.git
-cd frigate
+# native Windows support lives in the frigate-windows fork
+git clone https://github.com/nuipona/frigate-windows.git
+cd frigate-windows
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -r docker/main/requirements-windows.txt
-.\.venv\Scripts\python.exe -m pip install --editable --no-deps .
+.\.venv\Scripts\python.exe -m pip install --editable . --no-deps
 Push-Location web
 npm ci
 npm run build:native
@@ -686,7 +687,9 @@ Without `FRIGATE_WEB_PORT`, the interface uses the unauthenticated internal port
 
 ### Hardware acceleration
 
-ffmpeg hardware acceleration is available through Direct3D 11 (`preset-windows-d3d11va`), DirectX Video Acceleration (`preset-windows-dxva2`), Intel Quick Sync (`preset-windows-qsv-h264`, `preset-windows-qsv-h265`) and Nvidia NVENC (`preset-windows-nvenc`):
+`ffmpeg.hwaccel_args: auto` detects the hardware on a native Windows install. It asks go2rtc which decoders its ffmpeg build can open, and when go2rtc is not up yet, which is always the case on a first start, it falls back to the display adapters Windows reports. Detection picks `preset-windows-nvenc`, `preset-windows-qsv` or `preset-windows-d3d11va`; a machine with no usable GPU stays on software decoding and logs a warning. A preset set in the config always wins over detection.
+
+ffmpeg hardware acceleration is available through Direct3D 11 (`preset-windows-d3d11va`), DirectX Video Acceleration (`preset-windows-dxva2`), Intel Quick Sync (`preset-windows-qsv`, `preset-windows-qsv-h264`, `preset-windows-qsv-h265`) and Nvidia NVENC (`preset-windows-nvenc`):
 
 ```yaml
 ffmpeg:
@@ -702,6 +705,25 @@ models:
 ```
 
 Intel OpenVINO devices can be selected with `openvino:CPU`, `openvino:GPU`, or `openvino:NPU` when the installed driver and OpenVINO runtime support them. The starter config uses the CPU TFLite model; OpenVINO requires a compatible model of its own, so the container-only `/openvino-model` assets are not available in a native install. Coral, Hailo, and other accelerators that require Linux-only drivers/runtimes are not supported by this native Windows dependency set. FFmpeg decode/encode acceleration is separate from detector inference and also requires a compatible Windows FFmpeg build.
+
+### Tuning Windows for Frigate
+
+Windows Defender scans every recording segment as it appears, and the search indexer opens the same files, which can make Frigate's move of a segment from the cache to `media\recordings` fail or wait. Excluding the Frigate base directory is the single highest-impact change for a native Windows install:
+
+```powershell
+Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\Frigate"
+# or, when FRIGATE_BASE_DIR moves the install to another drive
+Add-MpPreference -ExclusionPath "D:\Frigate"
+```
+
+Frigate retries a move or delete for a couple of seconds when Windows reports a sharing violation, so a scanner holding a file open briefly is fine, but a permanent exclusion avoids the delay entirely.
+
+Windows limits paths to 260 characters unless long paths are enabled, and recordings nest as `media\recordings\<date>\<hour>\<camera>\<time>.mp4`. Frigate warns at startup when the base directory plus the longest camera name can overrun that limit. Either shorten the base directory or the camera names, or allow long paths:
+
+```powershell
+New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
+  -Name LongPathsEnabled -Value 1 -PropertyType DWORD -Force
+```
 
 ### Notes
 

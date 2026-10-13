@@ -6,6 +6,7 @@ in-process cache (e.g. TrackedObjectProcessor) still holds a ref to
 the old, smaller segment.
 """
 
+import os
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -13,6 +14,7 @@ from unittest.mock import patch
 import numpy as np
 
 from frigate.util.image import SharedMemoryFrameManager
+from frigate.util.platform import IS_WINDOWS
 
 
 def _fake_shm(size: int) -> SimpleNamespace:
@@ -39,6 +41,11 @@ class TestSharedMemoryFrameManagerGet(unittest.TestCase):
         self.assertEqual(arr.shape, (50, 50))
         self.assertIs(manager.shm_store["cam_frame0"], current)
 
+    @unittest.skipIf(
+        IS_WINDOWS,
+        "Windows reports a page aligned size for an opened segment, so a "
+        "larger cached ref cannot be told apart from the current one",
+    )
     def test_get_reopens_when_cached_segment_is_larger_than_shape(self) -> None:
         """Symmetric to the smaller-cache case: when detect resolution drops,
         the SHM is unlinked and recreated at a smaller size. A cached ref to
@@ -129,6 +136,53 @@ class TestSharedMemoryFrameManagerGet(unittest.TestCase):
 
         self.assertIsNotNone(arr)
         self.assertEqual(arr.shape, (1620, 1920))
+
+
+class TestSharedMemoryFrameManagerAcrossManagers(unittest.TestCase):
+    """A frame another manager wrote has to be readable.
+
+    Every camera process has its own frame manager, so this is the case the
+    shared memory exists for. Windows broke it: opening a segment another
+    process created reports the size of the mapped region, which is the
+    requested size rounded up to a page, and the exact size check refused
+    every frame. Recording segments were still written to the cache, but no
+    frame ever reached detection, so nothing was ever moved into recordings.
+    """
+
+    def setUp(self) -> None:
+        self.name = f"frigate-test-frame-{os.getpid()}-{self._testMethodName}"
+        self.shape = (360, 320)
+        self.writer = SharedMemoryFrameManager()
+        self.reader = SharedMemoryFrameManager()
+
+    def tearDown(self) -> None:
+        # cleanup closes and unlinks whatever each manager still holds
+        self.reader.cleanup()
+        self.writer.cleanup()
+
+    def test_frame_written_through_one_manager_is_readable_through_another(
+        self,
+    ) -> None:
+        size = int(np.prod(self.shape))
+        buffer = self.writer.create(self.name, size)
+        expected = ((np.arange(size, dtype=np.int64) * 7) % 251).astype(np.uint8)
+        np.frombuffer(buffer, dtype=np.uint8)[:] = expected
+
+        frame = self.reader.get(self.name, self.shape)
+
+        self.assertIsNotNone(
+            frame,
+            "a frame written through one manager must be readable through "
+            "another one, the way a camera process reads what the maintainer "
+            "wrote",
+        )
+        np.testing.assert_array_equal(frame, expected.reshape(self.shape))
+
+    def test_a_segment_that_is_too_small_is_still_refused(self) -> None:
+        size = int(np.prod(self.shape))
+        self.writer.create(self.name, size // 2)
+
+        self.assertIsNone(self.reader.get(self.name, self.shape))
 
 
 class TestSharedMemoryFrameManagerGetRecreatesLargerSegment(unittest.TestCase):

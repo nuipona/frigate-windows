@@ -1,13 +1,20 @@
 import unittest
+from unittest.mock import patch
 
 from frigate.config import FrigateConfig
 from frigate.config.camera.ffmpeg import FFMPEG_INPUT_ARGS_DEFAULT
 from frigate.ffmpeg_presets import (
+    PRESETS_HW_ACCEL_DECODE,
+    PRESETS_INPUT,
+    PRESETS_RECORD_OUTPUT,
     EncodeTypeEnum,
+    parse_preset_hardware_acceleration_decode,
     parse_preset_hardware_acceleration_encode,
     parse_preset_input,
+    validate_ffmpeg_args,
+    windows_decode_presets,
 )
-from frigate.util.platform import quote_ffmpeg_arg, split_ffmpeg_command
+from frigate.util.platform import IS_WINDOWS, quote_ffmpeg_arg, split_ffmpeg_command
 
 
 class TestFfmpegPresets(unittest.TestCase):
@@ -61,6 +68,9 @@ class TestFfmpegPresets(unittest.TestCase):
     def test_default_ffmpeg(self):
         FrigateConfig(**self.default_ffmpeg)
 
+    @unittest.skipIf(
+        IS_WINDOWS, "preset-rpi-64-h264 decodes through the Raspberry Pi v4l2m2m API"
+    )
     def test_ffmpeg_hwaccel_preset(self):
         self.default_ffmpeg["cameras"]["back"]["ffmpeg"]["hwaccel_args"] = (
             "preset-rpi-64-h264"
@@ -73,6 +83,9 @@ class TestFfmpegPresets(unittest.TestCase):
             " ".join(frigate_config.cameras["back"].ffmpeg_cmds[0]["cmd"])
         )
 
+    @unittest.skipIf(
+        IS_WINDOWS, "preset-apple-silicon-h265 needs the Apple media engine"
+    )
     def test_ffmpeg_hwaccel_apple_preset_decodes_every_stream(self):
         self.default_ffmpeg["cameras"]["back"]["ffmpeg"]["hwaccel_args"] = (
             "preset-apple-silicon-h265"
@@ -92,6 +105,9 @@ class TestFfmpegPresets(unittest.TestCase):
             " ".join(frigate_config.cameras["back"].ffmpeg_cmds[0]["cmd"])
         )
 
+    @unittest.skipIf(
+        IS_WINDOWS, "preset-nvidia-h264 carries a Linux DRM device argument"
+    )
     def test_ffmpeg_hwaccel_scale_preset(self):
         self.default_ffmpeg["cameras"]["back"]["ffmpeg"]["hwaccel_args"] = (
             "preset-nvidia-h264"
@@ -172,6 +188,133 @@ class TestFfmpegPresets(unittest.TestCase):
         assert "-some output" in (
             " ".join(frigate_config.cameras["back"].ffmpeg_cmds[0]["cmd"])
         )
+
+
+class TestPresetValidation(unittest.TestCase):
+    """An unusable preset has to be a config error, not a broken ffmpeg run.
+
+    A value starting with ``preset-`` that is not in the relevant map used to
+    be passed to ffmpeg untouched, so a typo or a Linux only preset produced a
+    camera that never started with an error pointing nowhere near the config.
+    """
+
+    def test_known_presets_are_accepted(self):
+        validate_ffmpeg_args(
+            "preset-windows-d3d11va", "ffmpeg.hwaccel_args", PRESETS_HW_ACCEL_DECODE
+        )
+        validate_ffmpeg_args(
+            ["preset-rtsp-generic"], "ffmpeg.input_args", PRESETS_INPUT
+        )
+        validate_ffmpeg_args(
+            "preset-record-generic", "ffmpeg.output_args.record", PRESETS_RECORD_OUTPUT
+        )
+
+    def test_raw_arguments_are_not_validated_as_presets(self):
+        validate_ffmpeg_args(
+            "-hwaccel cuda -hwaccel_output_format cuda",
+            "ffmpeg.hwaccel_args",
+            PRESETS_HW_ACCEL_DECODE,
+        )
+        validate_ffmpeg_args(
+            ["-threads", "2"], "ffmpeg.hwaccel_args", PRESETS_HW_ACCEL_DECODE
+        )
+
+    def test_unknown_preset_is_rejected(self):
+        with self.assertRaises(ValueError) as raised:
+            validate_ffmpeg_args(
+                "preset-windows-not-a-thing",
+                "ffmpeg.hwaccel_args",
+                PRESETS_HW_ACCEL_DECODE,
+            )
+
+        self.assertIn("not a known preset", str(raised.exception))
+
+    def test_windows_preset_is_listed_for_windows(self):
+        with patch("frigate.ffmpeg_presets.IS_WINDOWS", True):
+            with self.assertRaises(ValueError) as raised:
+                validate_ffmpeg_args(
+                    "preset-bogus", "ffmpeg.hwaccel_args", PRESETS_HW_ACCEL_DECODE
+                )
+
+        self.assertIn("preset-windows-d3d11va", str(raised.exception))
+        self.assertNotIn("preset-rkmpp", str(raised.exception))
+
+    def test_linux_only_presets_are_rejected_on_windows(self):
+        cases = {
+            "preset-vaapi": "preset-windows-d3d11va",
+            "preset-intel-qsv-h264": "preset-windows-qsv-h264",
+            "preset-intel-qsv-h265": "preset-windows-qsv-h265",
+            "preset-nvidia": "preset-windows-nvenc",
+            "preset-nvidia-h264": "preset-windows-nvenc",
+        }
+
+        with patch("frigate.ffmpeg_presets.IS_WINDOWS", True):
+            for preset, replacement in cases.items():
+                with self.subTest(preset=preset):
+                    with self.assertRaises(ValueError) as raised:
+                        validate_ffmpeg_args(
+                            preset, "ffmpeg.hwaccel_args", PRESETS_HW_ACCEL_DECODE
+                        )
+
+                    self.assertIn(replacement, str(raised.exception))
+
+    @unittest.skipIf(
+        IS_WINDOWS, "the config validator rejects Linux decode presets on Windows"
+    )
+    def test_linux_only_presets_still_work_on_linux(self):
+        for preset in ("preset-vaapi", "preset-nvidia", "preset-intel-qsv-h264"):
+            with self.subTest(preset=preset):
+                validate_ffmpeg_args(
+                    preset, "ffmpeg.hwaccel_args", PRESETS_HW_ACCEL_DECODE
+                )
+
+    def test_other_platform_presets_are_rejected_on_windows(self):
+        with patch("frigate.ffmpeg_presets.IS_WINDOWS", True):
+            for preset in ("preset-rpi-64-h264", "preset-jetson-h265"):
+                with self.subTest(preset=preset):
+                    with self.assertRaises(ValueError):
+                        validate_ffmpeg_args(
+                            preset, "ffmpeg.hwaccel_args", PRESETS_HW_ACCEL_DECODE
+                        )
+
+    def test_cross_platform_presets_are_allowed_on_windows(self):
+        with patch("frigate.ffmpeg_presets.IS_WINDOWS", True):
+            for preset in ("preset-amd-amf", "preset-vulkan", "preset-windows-dxva2"):
+                with self.subTest(preset=preset):
+                    validate_ffmpeg_args(
+                        preset, "ffmpeg.hwaccel_args", PRESETS_HW_ACCEL_DECODE
+                    )
+
+
+class TestWindowsDecodePresets(unittest.TestCase):
+    def test_documented_windows_presets_exist_for_decode(self):
+        # the installation docs tell users to set each of these
+        for preset in (
+            "preset-windows-d3d11va",
+            "preset-windows-dxva2",
+            "preset-windows-qsv-h264",
+            "preset-windows-qsv-h265",
+            "preset-windows-nvenc",
+        ):
+            with self.subTest(preset=preset):
+                self.assertIn(preset, PRESETS_HW_ACCEL_DECODE)
+
+    def test_windows_presets_never_reference_a_linux_device(self):
+        for preset in windows_decode_presets():
+            args = parse_preset_hardware_acceleration_decode(preset, 5, 1920, 1080, 0)
+
+            self.assertIsNotNone(args)
+            self.assertNotIn("qsv_device", args)
+            self.assertNotIn("-hwaccel_device", args)
+            self.assertNotIn("/dev/dri", args)
+            self.assertNotIn("vaapi", " ".join(args))
+
+    def test_nvenc_preset_decodes_through_cuda(self):
+        args = parse_preset_hardware_acceleration_decode(
+            "preset-windows-nvenc", 5, 1920, 1080, 0
+        )
+
+        self.assertEqual(args, ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"])
 
 
 if __name__ == "__main__":

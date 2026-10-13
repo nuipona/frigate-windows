@@ -1,5 +1,3 @@
-import fcntl
-import resource
 import selectors
 import socket
 import time
@@ -10,6 +8,13 @@ import paho.mqtt.client as mqtt
 from paho.mqtt.enums import CallbackAPIVersion
 
 from frigate.comms.mqtt import MqttClient
+
+try:  # POSIX only: Windows has no file descriptor limit and no F_DUPFD
+    import fcntl
+    import resource
+except ImportError:  # pragma: no cover - Windows
+    fcntl = None  # type: ignore[assignment]
+    resource = None  # type: ignore[assignment]
 
 
 class TestMqttNetworkLoop(unittest.TestCase):
@@ -31,6 +36,10 @@ class TestMqttNetworkLoop(unittest.TestCase):
         self.addCleanup(self.transport._wake_send.close)
         self.client.socket.return_value = self.sock
 
+    @unittest.skipIf(
+        fcntl is None or resource is None,
+        "needs POSIX file descriptor limits, which Windows does not have",
+    )
     def test_high_fd_handles_connack_suback_publish_and_puback(self) -> None:
         """Process real MQTT packets on a socket beyond select()'s FD limit."""
         if selectors.DefaultSelector is selectors.SelectSelector:
