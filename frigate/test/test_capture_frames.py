@@ -21,6 +21,8 @@ from multiprocessing import Event as MpEvent
 from multiprocessing import Value
 from unittest.mock import MagicMock
 
+import numpy as np
+
 from frigate.video.ffmpeg import capture_frames
 
 #: 320x240 in yuv420p, the shape the end to end camera uses
@@ -61,6 +63,9 @@ class _Pipe:
 class _FrameManager:
     """Shared memory whose segments are longer than the frames in them."""
 
+    #: the capture thread is handed this many ring slots
+    RING_SLOTS = 10
+
     def __init__(self, frame_size: int, slack: int) -> None:
         self._frame_size = frame_size
         self._slack = slack
@@ -72,6 +77,20 @@ class _FrameManager:
             name, bytearray(self._frame_size + self._slack)
         )
         return memoryview(segment)
+
+    def frame_times(self, camera: str) -> np.ndarray:
+        """The per-slot write ledger, backed the way the real manager backs it.
+
+        ``camera/maintainer`` creates this segment at one float64 per ring
+        slot, so unlike a frame slot it is not frame sized and carries no page
+        slack. Capture zeroes a slot before it waits on the pipe and stamps it
+        once the frame is whole, which is what tells a reader a lapped slot
+        from a frame that is still being read.
+        """
+        segment = self.segments.setdefault(
+            f"{camera}_frame_times", bytearray(self.RING_SLOTS * 8)
+        )
+        return np.ndarray((len(segment) // 8,), dtype=np.float64, buffer=segment)
 
     def close(self, name: str) -> None:
         self.closed.append(name)

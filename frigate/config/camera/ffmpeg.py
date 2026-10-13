@@ -9,9 +9,9 @@ from frigate.ffmpeg_presets import (
     validate_ffmpeg_args,
 )
 from frigate.util.config import resolve_ffmpeg_path
+from frigate.util.env import EnvString
 
 from ..base import FrigateBaseModel
-from ..env import EnvString
 
 __all__ = [
     "CameraFfmpegConfig",
