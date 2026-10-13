@@ -46,9 +46,7 @@ class ConfigPublisher:
 
     def stop(self) -> None:
         self.stop_event.set()
-        _close_context(
-            getattr(self, "socket", None), getattr(self, "context", None)
-        )
+        _close_context(getattr(self, "socket", None), getattr(self, "context", None))
 
     def __del__(self) -> None:
         try:
@@ -84,9 +82,7 @@ class ConfigSubscriber:
             return (None, None)
 
     def stop(self) -> None:
-        _close_context(
-            getattr(self, "socket", None), getattr(self, "context", None)
-        )
+        _close_context(getattr(self, "socket", None), getattr(self, "context", None))
 
     def __del__(self) -> None:
         try:

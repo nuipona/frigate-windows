@@ -5,6 +5,41 @@ with no Docker and no WSL. Line references are against the current tree.
 
 ---
 
+## Upstream parity
+
+This fork tracks `blakeblackshear/frigate` `dev`. **Last synced to upstream
+`e61ad52b` (2026-10-12)**, which brought in two commits this fork was missing:
+
+| Upstream commit | What it changes here |
+| --- | --- |
+| `ff9eb8f1` Keep frame shared memory mapped (#24644) | `FrameManager` grows `frame_times()` / `close_camera()` and `get()` takes a `frame_time`, so a reader can tell a lapped ring slot from a frame still being read. Merged on top of this fork's Windows fix in `capture_frames`, which slices `frame_buffer[:frame_size]` because a Windows segment is mapped page aligned. |
+| `e61ad52b` move env helpers out of the config package (#24648) | `frigate/config/env.py` → `frigate/util/env.py`. This fork had already moved the go2rtc config generator into `frigate/util/go2rtc_config.py`, so the import moved there rather than in `create_config.py`. |
+
+The Windows port deliberately *adapts* rather than removes upstream behaviour.
+Everything it swaps out was checked to produce byte-identical results on Linux:
+the `frigate/const.py` directory constants, all eight ZeroMQ `ipc://` endpoints
+(now built by `platform.ipc_endpoint()`), the `service.storage` stat keys the
+web UI reads (now built by `platform.storage_stat_key()`),
+`resolve_ffmpeg_path()` against the image's `DEFAULT_FFMPEG_VERSION` /
+`INCLUDED_FFMPEG_VERSIONS`, the `/labelmap.txt` default, and the
+`openvino:CPU` first-run detector default.
+
+The remaining gaps are hardware probes with no Windows equivalent
+(`frigate/util/services.py`: libva, DRM sysfs, Rockchip, Jetson, Hailo, Axiom),
+which return empty on Windows and are tracked under
+[P3-3](#p3-3-detector-coverage-on-windows-is-narrow).
+
+To re-check parity after an upstream merge, diff this tree against upstream
+`dev` and confirm every remaining difference is an `IS_WINDOWS` branch or a
+file this fork adds:
+
+```
+git fetch https://github.com/blakeblackshear/frigate.git dev
+git diff --stat FETCH_HEAD -- .
+```
+
+---
+
 ## TL;DR
 
 The hard architectural work was **already done and done well**. This is not a

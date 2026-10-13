@@ -281,7 +281,6 @@ const PRESET_FAMILIES: [string, HwaccelFamilyKey][] = [
   ["preset-nvidia", "nvidia"],
   ["preset-vaapi", "vaapi"],
   ["preset-intel-qsv", "intel-qsv"],
-  ["preset-amd-amf", "windows-d3d11va"],
   ["preset-rk", "rkmpp"],
   ["preset-jetson", "jetson"],
   ["preset-rpi", "rpi"],

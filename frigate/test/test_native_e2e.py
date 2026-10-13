@@ -396,7 +396,7 @@ class TestNativeEndToEnd(unittest.TestCase):
 
         # anything still on disk has to be a complete file
         broken = [
-            path
+            str(path)
             for path in Path(self.base).rglob("*.mp4")
             if not self._probe_ok(str(path))
         ]
