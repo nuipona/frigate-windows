@@ -80,7 +80,16 @@ def _is_valid_host(host: str) -> bool:
 
 @router.get("/go2rtc/streams", dependencies=[Depends(allow_any_authenticated())])
 async def go2rtc_streams(request: Request):
-    r = await asyncio.to_thread(requests.get, "http://127.0.0.1:1984/api/streams")
+    try:
+        r = await asyncio.to_thread(
+            requests.get, "http://127.0.0.1:1984/api/streams", timeout=10
+        )
+    except requests.RequestException as e:
+        logger.error(f"Error communicating with go2rtc: {e}")
+        return JSONResponse(
+            content=({"success": False, "message": "Error fetching stream data"}),
+            status_code=500,
+        )
     if not r.ok:
         logger.error("Failed to fetch streams from go2rtc")
         return JSONResponse(
@@ -117,15 +126,23 @@ async def go2rtc_streams(request: Request):
     dependencies=[Depends(require_go2rtc_stream_access)],
 )
 def go2rtc_camera_stream(request: Request, stream_name: str):
-    r = requests.get(
-        "http://127.0.0.1:1984/api/streams",
-        params={
-            "src": stream_name,
-            "video": "all",
-            "audio": "all",
-            "microphone": "",
-        },
-    )
+    try:
+        r = requests.get(
+            "http://127.0.0.1:1984/api/streams",
+            params={
+                "src": stream_name,
+                "video": "all",
+                "audio": "all",
+                "microphone": "",
+            },
+            timeout=10,
+        )
+    except requests.RequestException as e:
+        logger.error(f"Error communicating with go2rtc: {e}")
+        return JSONResponse(
+            content=({"success": False, "message": "Error fetching stream data"}),
+            status_code=500,
+        )
     if not r.ok:
         camera_config = request.app.frigate_config.cameras.get(stream_name)
 

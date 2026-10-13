@@ -12,6 +12,24 @@ from frigate.util.platform import ipc_endpoint
 SOCKET_PUB_SUB = ipc_endpoint("config")
 
 
+def _close_context(socket: Any, context: Any) -> None:
+    """Close a socket and its context, tolerating work already done.
+
+    A zmq context that is garbage collected while its socket is still open
+    terminates the context in ``__del__``, which blocks until the socket is
+    closed, so a publisher or subscriber that is dropped without ``stop()``
+    can hang the whole process at an arbitrary later collection. Closing
+    with ``linger=0`` first is what keeps that from happening, and the
+    guards make the close safe to run more than once (an explicit
+    ``stop()`` followed by collection, for example).
+    """
+    if socket is not None and not socket.closed:
+        socket.close(linger=0)
+
+    if context is not None and not context.closed:
+        context.destroy(linger=0)
+
+
 class ConfigPublisher:
     """Publishes config changes to different processes."""
 
@@ -28,8 +46,17 @@ class ConfigPublisher:
 
     def stop(self) -> None:
         self.stop_event.set()
-        self.socket.close(linger=0)
-        self.context.destroy(linger=0)
+        _close_context(
+            getattr(self, "socket", None), getattr(self, "context", None)
+        )
+
+    def __del__(self) -> None:
+        try:
+            self.stop()
+        except Exception:
+            # a partially built publisher, or interpreter shutdown, must
+            # never raise out of a destructor
+            pass
 
 
 class ConfigSubscriber:
@@ -57,5 +84,14 @@ class ConfigSubscriber:
             return (None, None)
 
     def stop(self) -> None:
-        self.socket.close(linger=0)
-        self.context.destroy(linger=0)
+        _close_context(
+            getattr(self, "socket", None), getattr(self, "context", None)
+        )
+
+    def __del__(self) -> None:
+        try:
+            self.stop()
+        except Exception:
+            # a partially built subscriber, or interpreter shutdown, must
+            # never raise out of a destructor
+            pass
