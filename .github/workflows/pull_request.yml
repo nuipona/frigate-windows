@@ -292,6 +292,22 @@ jobs:
           # first and the last few are worth looking at
           Publish-Log -Path (Join-Path $env:FRIGATE_E2E_DIR 'frigate-run.log') `
             -Prefix 'frigate-frames' -Keep 'Unable to read frames' -Head 5 -Tail 5
+          # the recording role encodes with libx264, so when no segment shows
+          # up, prove the runner can encode one at all: without this a broken
+          # ffmpeg on the runner looks exactly like a broken Frigate
+          $probe = Join-Path $env:RUNNER_TEMP 'ffmpeg-segment-probe'
+          New-Item -ItemType Directory -Force -Path $probe | Out-Null
+          ffmpeg -hide_banner -y -f lavfi -re -i "testsrc=size=320x240:rate=10" `
+            -t 12 -f segment -segment_time 5 -segment_format mp4 -reset_timestamps 1 `
+            -strftime 1 -c:v libx264 -preset ultrafast -g 25 -an `
+            (Join-Path $probe 'probe-%Y%m%d%H%M%S.mp4') *> probe.log
+          Write-Output ("::error title=ffmpeg-probe::exit {0}" -f $LASTEXITCODE)
+          Get-ChildItem $probe -Filter *.mp4 | ForEach-Object {
+            Write-Output ("::error title=ffmpeg-probe::wrote {0}: {1} bytes" -f $_.Name, $_.Length)
+          }
+          Get-Content probe.log -Tail 12 | ForEach-Object {
+            Write-Output ("::error title=ffmpeg-probe-log::{0}" -f ($_ -replace "`r", '' -replace "`n", ' '))
+          }
 
       - name: Upload Frigate's log and media
         if: failure()

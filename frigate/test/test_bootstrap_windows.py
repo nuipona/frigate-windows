@@ -211,7 +211,9 @@ class TestLauncher(unittest.TestCase):
             venv = Path(tmp) / "venv3"
             script = bootstrap.build_launcher_script(venv, bootstrap.BaseLayout())
 
-        self.assertIn(str(venv), script)
+        # the launcher resolves the interpreter it embeds, and resolving on
+        # Windows expands the 8.3 form of the temporary directory it came from
+        self.assertIn(str(venv.resolve()), script)
 
 
 class TestInstallArtifact(unittest.TestCase):
