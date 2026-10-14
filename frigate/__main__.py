@@ -17,6 +17,7 @@ from frigate.util.platform import (
     describe,
     ensure_runtime_dirs,
     get_mp_start_method,
+    install_service_stop_watcher,
     install_signal_handlers,
     long_path_warning,
     supports_forkserver,
@@ -41,6 +42,10 @@ def main() -> None:
 
     # Ctrl+C and, where the platform has them, SIGTERM and SIGBREAK stop the app
     install_signal_handlers(stop_event, sys.exit)
+
+    # A Windows service cannot deliver a console signal to this process, so it
+    # asks through a named event instead (see frigate/util/platform.py)
+    install_service_stop_watcher(stop_event)
 
     # Create the config, media, cache and log directories a native install needs
     ensure_runtime_dirs()

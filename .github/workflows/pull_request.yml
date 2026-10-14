@@ -78,6 +78,29 @@ jobs:
             web/playwright-report/
           retention-days: 7
 
+  upstream_parity:
+    # This fork replaces Linux-only code instead of dropping upstream
+    # behaviour, so every difference from upstream has to be a recorded,
+    # reviewed one. The baseline is where each replacement is justified, and
+    # this fails when upstream adds a file, when upstream edits code this fork
+    # replaces, or when a divergence appears without a reason. Run
+    # testing-scripts/check_upstream_parity.py --update after reviewing.
+    name: Upstream Parity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Python ${{ env.DEFAULT_PYTHON }}
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: ${{ env.DEFAULT_PYTHON }}
+      - name: Check the tree against the commit the baseline was verified on
+        # --fetch pulls the baseline's upstream commit, not the branch tip, so
+        # the result does not depend on when the job runs
+        run: python3 testing-scripts/check_upstream_parity.py --fetch
+
   windows_native_smoke:
     name: Windows Native Compatibility
     runs-on: windows-latest
@@ -238,7 +261,10 @@ jobs:
           FRIGATE_E2E_DIR: ${{ runner.temp }}\frigate-e2e
         shell: pwsh
         run: |
-          python -m unittest frigate.test.test_native_e2e *> e2e.log
+          # -v so every line ends in a newline: unittest's progress output
+          # is buffered otherwise, and a killed process can take the rest
+          # of the run's output with it
+          python -m unittest -v frigate.test.test_native_e2e *> e2e.log
           $e2eCode = $LASTEXITCODE
           if ($e2eCode -ne 0) {
             Select-String -Path e2e.log -Pattern '^FAIL: |AssertionError' |
@@ -265,10 +291,26 @@ jobs:
             -Prefix 'frigate-said' `
             -Drop @('Unable to read frames', 'peewee_migrate', 'Migrate ') `
             -Keep 'ffmpeg|lavfi|Invalid|No such|Conversion|Error|error|Unable|discard|segment'
-          # the frame read failures repeat hundreds of times, so only the
-          # first and the last few are worth looking at
+          # the end of Frigate's own log: how the stop went, which is what
+          # the clean stop assertions are about
           Publish-Log -Path (Join-Path $env:FRIGATE_E2E_DIR 'frigate-run.log') `
-            -Prefix 'frigate-frames' -Keep 'Unable to read frames' -Head 5 -Tail 5
+            -Prefix 'frigate-tail' -Head 1 -Tail 40
+          # the recording role encodes with libx264, so when no segment shows
+          # up, prove the runner can encode one at all: without this a broken
+          # ffmpeg on the runner looks exactly like a broken Frigate
+          $probe = Join-Path $env:RUNNER_TEMP 'ffmpeg-segment-probe'
+          New-Item -ItemType Directory -Force -Path $probe | Out-Null
+          ffmpeg -hide_banner -y -f lavfi -re -i "testsrc=size=320x240:rate=10" `
+            -t 12 -f segment -segment_time 5 -segment_format mp4 -reset_timestamps 1 `
+            -strftime 1 -c:v libx264 -preset ultrafast -g 25 -an `
+            (Join-Path $probe 'probe-%Y%m%d%H%M%S.mp4') *> probe.log
+          Write-Output ("::error title=ffmpeg-probe::exit {0}" -f $LASTEXITCODE)
+          Get-ChildItem $probe -Filter *.mp4 | ForEach-Object {
+            Write-Output ("::error title=ffmpeg-probe::wrote {0}: {1} bytes" -f $_.Name, $_.Length)
+          }
+          Get-Content probe.log -Tail 12 | ForEach-Object {
+            Write-Output ("::error title=ffmpeg-probe-log::{0}" -f ($_ -replace "`r", '' -replace "`n", ' '))
+          }
 
       - name: Upload Frigate's log and media
         if: failure()

@@ -92,6 +92,32 @@ def _mark_restart_requested() -> None:
         logger.debug("Unable to write the restart marker: %s", err)
 
 
+def consume_restart_request() -> bool:
+    """Take Frigate's restart marker and say whether a restart was requested.
+
+    Frigate writes the marker just before it exits when it wants to be started
+    again: the UI's restart action, a restart after a config save, a detector
+    watchdog restart. Its supervisor consumes the marker exactly once and
+    starts Frigate again, which is also what keeps a stop that follows a
+    restart from starting a second Frigate.
+
+    Returns whether the marker was there. A marker that exists but cannot be
+    removed is still a request, so it is honoured rather than swallowed.
+    """
+    path = os.path.join(get_tmp_dir(), RESTART_MARKER_NAME)
+
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        return False
+    except OSError as err:
+        logger.debug("Unable to clear the restart marker %s: %s", path, err)
+        return True
+
+    logger.debug("Consumed the restart marker %s", path)
+    return True
+
+
 def restart_frigate():
     if IS_WINDOWS or not hasattr(signal, "SIGINT"):
         # no supervisor outside of the container: exiting is the closest

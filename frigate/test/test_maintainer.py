@@ -1,7 +1,10 @@
 import datetime
 import sys
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import psutil
 
 # Mock complex imports before importing maintainer, saving originals so we can
 # restore them after import and avoid polluting sys.modules for other tests.
@@ -17,7 +20,10 @@ for name in _MOCKED_MODULES:
 
 # Now import the class under test
 from frigate.config import FrigateConfig, RetainModeEnum  # noqa: E402
-from frigate.record.maintainer import RecordingMaintainer  # noqa: E402
+from frigate.record.maintainer import (  # noqa: E402
+    RecordingMaintainer,
+    cache_files_in_use,
+)
 
 # Restore original modules (or remove mock if there was no original)
 for name, orig in _originals.items():
@@ -288,6 +294,56 @@ class TestMaintainer(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             maintainer.audio_recordings_info["absent_cam"], [(recent, 0, [])]
         )
+
+
+class TestCacheFilesInUse(unittest.TestCase):
+    """The segment ffmpeg is still writing must not look like a finished one.
+
+    A segment that has not been closed yet has no moov atom, so it probes as a
+    file with no video stream. If the maintainer cannot tell that ffmpeg still
+    has it open, it discards the segment that is still being written, which is
+    what makes Windows recordings disappear.
+    """
+
+    def _process(self, name: str, paths: list[str]) -> MagicMock:
+        process = MagicMock()
+        process.name.return_value = name
+        process.open_files.return_value = [SimpleNamespace(path=path) for path in paths]
+        return process
+
+    def _in_use(self, cache_dir: str, processes: list[MagicMock]) -> set[str]:
+        with patch(
+            "frigate.record.maintainer.psutil.process_iter", return_value=processes
+        ):
+            return cache_files_in_use(cache_dir)
+
+    def test_a_windows_ffmpeg_is_recognised(self):
+        process = self._process("ffmpeg.exe", [r"C:\cache\e2e@20260101000000+0000.mp4"])
+
+        self.assertEqual(
+            self._in_use(r"C:\cache", [process]), {"e2e@20260101000000+0000.mp4"}
+        )
+
+    def test_a_posix_ffmpeg_is_recognised(self):
+        process = self._process("ffmpeg", ["/tmp/cache/e2e@20260101000000+0000.mp4"])
+
+        self.assertEqual(
+            self._in_use("/tmp/cache", [process]), {"e2e@20260101000000+0000.mp4"}
+        )
+
+    def test_other_processes_and_other_files_are_ignored(self):
+        processes = [
+            self._process("python.exe", [r"C:\cache\e2e@1.mp4"]),
+            self._process("ffmpeg.exe", [r"C:\config\config.yml"]),
+        ]
+
+        self.assertEqual(self._in_use(r"C:\cache", processes), set())
+
+    def test_a_process_that_cannot_be_inspected_is_skipped(self):
+        process = MagicMock()
+        process.name.side_effect = psutil.AccessDenied()
+
+        self.assertEqual(self._in_use("/tmp/cache", [process]), set())
 
 
 if __name__ == "__main__":

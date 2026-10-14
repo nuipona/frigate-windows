@@ -14,8 +14,29 @@ from frigate.util.platform import IS_WINDOWS, get_process_priority_class
 #: how long to wait for ffmpeg after asking it to stop before killing it
 FFMPEG_STOP_TIMEOUT = 30
 
-#: how long ffmpeg gets to close the file it is writing after a quit command
-FFMPEG_QUIT_GRACE = 10.0
+#: how long ffmpeg gets to notice a quit command before a console event or
+#: terminate() takes over. ffmpeg's keyboard reader on Windows is console-only
+#: (kbhit/getchar over stdin as a terminal), so a command written into a pipe
+#: usually goes unnoticed, and the wait is short for exactly that reason: this
+#: is a cheap chance for a build that does read the pipe, not a deadline worth
+#: ten seconds of every stop.
+FFMPEG_QUIT_POLL = 1.0
+
+
+def ffmpeg_popen_kwargs() -> dict[str, Any]:
+    """Popen arguments that make an ffmpeg process stoppable, not just killable.
+
+    On POSIX that is a new session, which keeps ffmpeg out of the terminal's
+    process group. On Windows it is ``CREATE_NEW_PROCESS_GROUP``: a console
+    control event can only be aimed at a process *group*, so ffmpeg has to be
+    a group leader for ``CTRL_BREAK_EVENT`` to reach it and give it the chance
+    to close the file it is writing. ``start_new_session`` is a POSIX-only
+    argument and does nothing on Windows.
+    """
+    if IS_WINDOWS:
+        return {"creationflags": sp.CREATE_NEW_PROCESS_GROUP}
+
+    return {"start_new_session": True}
 
 
 def request_ffmpeg_stop(ffmpeg_process: sp.Popen[Any], logger: logging.Logger) -> None:
@@ -28,11 +49,11 @@ def request_ffmpeg_stop(ffmpeg_process: sp.Popen[Any], logger: logging.Logger) -
     has not been closed yet is left without a moov atom and cannot be played.
     Windows therefore gets the two mechanisms that let ffmpeg exit by itself:
 
-    1. the ``q`` command on stdin, which ffmpeg reads even when stdin is a
-       pipe rather than a terminal
-    2. a ``CTRL_BREAK_EVENT`` into the process group ``start_new_session``
-       created, which ffmpeg's console handler responds to by shutting down
-       cleanly
+    1. the ``q`` command on stdin, which ffmpeg only reads where stdin is a
+       terminal
+    2. a ``CTRL_BREAK_EVENT`` into the process group ``ffmpeg_popen_kwargs()``
+       created, which is why ffmpeg has to be started as a group leader: the
+       event is addressed to a group id, not to a process
 
     Both are best effort. Anything that goes wrong leaves ``terminate()`` as
     the fallback, so the worst case is what already happens today.
@@ -41,7 +62,10 @@ def request_ffmpeg_stop(ffmpeg_process: sp.Popen[Any], logger: logging.Logger) -
         ffmpeg_process.terminate()
         return
 
-    # 1. quit command on stdin
+    # 1. quit command on stdin, which ffmpeg only reads where stdin is a
+    #    terminal (its Windows reader is kbhit/getchar based). Still worth the
+    #    write: where it is read, it is the only mechanism that works without
+    #    a console
     if ffmpeg_process.stdin is not None:
         try:
             ffmpeg_process.stdin.write(b"q")
@@ -50,7 +74,7 @@ def request_ffmpeg_stop(ffmpeg_process: sp.Popen[Any], logger: logging.Logger) -
             logger.debug("Could not send ffmpeg the quit command: %s", err)
         else:
             try:
-                ffmpeg_process.wait(timeout=FFMPEG_QUIT_GRACE)
+                ffmpeg_process.wait(timeout=FFMPEG_QUIT_POLL)
                 return
             except sp.TimeoutExpired:
                 logger.debug("ffmpeg is still running after the quit command")
@@ -123,7 +147,7 @@ def start_or_restart_ffmpeg(
             stdout=sp.DEVNULL,
             stderr=logpipe,
             stdin=sp.PIPE,
-            start_new_session=True,
+            **ffmpeg_popen_kwargs(),
         )
     else:
         process = sp.Popen(
@@ -132,7 +156,7 @@ def start_or_restart_ffmpeg(
             stderr=logpipe,
             stdin=sp.PIPE,
             bufsize=frame_size * 10,
-            start_new_session=True,
+            **ffmpeg_popen_kwargs(),
         )
     return process
 

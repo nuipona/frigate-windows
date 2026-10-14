@@ -9,7 +9,11 @@ from unittest.mock import MagicMock, patch
 import psutil
 
 from frigate.util.platform import IS_WINDOWS
-from frigate.util.services import RESTART_MARKER_NAME, restart_frigate
+from frigate.util.services import (
+    RESTART_MARKER_NAME,
+    consume_restart_request,
+    restart_frigate,
+)
 
 
 class TestRestartFrigate(unittest.TestCase):
@@ -140,3 +144,42 @@ class TestRestartFrigate(unittest.TestCase):
             os.mkdir(os.path.join(tmp, RESTART_MARKER_NAME))
 
             restart_frigate()
+
+
+class TestConsumeRestartRequest(unittest.TestCase):
+    """The marker is the only thing that says Frigate wants to come back."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.marker = os.path.join(self._tmp.name, RESTART_MARKER_NAME)
+
+    def _consume(self) -> bool:
+        with patch("frigate.util.services.get_tmp_dir", return_value=self._tmp.name):
+            return consume_restart_request()
+
+    def test_no_marker_means_no_restart(self):
+        self.assertFalse(self._consume())
+
+    def test_a_marker_is_consumed_exactly_once(self):
+        with open(self.marker, "w", encoding="utf-8") as file:
+            file.write("restart")
+
+        self.assertTrue(self._consume())
+        self.assertFalse(os.path.exists(self.marker))
+
+        # a stop that follows a restart must not start Frigate again
+        self.assertFalse(self._consume())
+
+    @patch("frigate.util.services.os.remove")
+    def test_a_marker_that_cannot_be_cleared_still_asks_for_a_restart(
+        self, mock_remove
+    ):
+        """The marker is the request, so failing to clear it is not a no."""
+        mock_remove.side_effect = PermissionError("in use by another process")
+
+        self.assertTrue(self._consume())
+
+
+if __name__ == "__main__":
+    unittest.main()

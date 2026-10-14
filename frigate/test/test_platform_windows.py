@@ -1,18 +1,24 @@
 """Platform helper tests for Windows command and path handling."""
 
 import os
+import tempfile
+import threading
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from frigate.util.builtin import get_ffmpeg_arg_list
 from frigate.util.platform import (
     IPC_ENDPOINTS,
+    IS_WINDOWS,
     MAX_PATH_LIMIT,
+    SERVICE_STOP_EVENT_VAR,
     ffmpeg_concat_file_line,
     ffmpeg_stdin_input,
     get_fs_type,
     get_process_priority_class,
     get_web_port,
+    install_service_stop_watcher,
     ipc_endpoint,
     long_path_warning,
     longest_recording_path,
@@ -240,25 +246,35 @@ class TestIpcEndpoints(unittest.TestCase):
 class TestMediaUrlPaths(unittest.TestCase):
     def test_cache_urls_resolve_into_the_cache_dir(self):
         """The cache dir is the /cache URL root, not a directory inside it."""
+        # a resolved path is a real path on this platform, so the expected
+        # value is built with the same separators the platform uses
+        cache_dir = str(Path(tempfile.gettempdir()) / "frigate-cache")
+
         with (
             patch("frigate.util.platform.get_media_dir", return_value="/media/frigate"),
-            patch("frigate.util.platform.get_cache_dir", return_value="/tmp/cache"),
+            patch("frigate.util.platform.get_cache_dir", return_value=cache_dir),
         ):
             self.assertEqual(
                 resolve_media_url_path("/cache/previews/front_door/1.jpg"),
-                "/tmp/cache/previews/front_door/1.jpg",
+                os.path.join(cache_dir, "previews", "front_door", "1.jpg"),
             )
             self.assertEqual(
-                to_media_url_path("/tmp/cache/previews/front_door/1.jpg"),
+                to_media_url_path(
+                    os.path.join(cache_dir, "previews", "front_door", "1.jpg")
+                ),
                 "/cache/previews/front_door/1.jpg",
             )
 
     def test_media_paths_round_trip(self):
+        media_dir = str(Path(tempfile.gettempdir()) / "frigate-media")
+
         with (
-            patch("frigate.util.platform.get_media_dir", return_value="/media/frigate"),
+            patch("frigate.util.platform.get_media_dir", return_value=media_dir),
             patch("frigate.util.platform.get_cache_dir", return_value="/tmp/cache"),
         ):
-            path = "/media/frigate/recordings/2024-01-01/10/front_door/00.00.mp4"
+            path = os.path.join(
+                media_dir, "recordings", "2024-01-01", "10", "front_door", "00.00.mp4"
+            )
             self.assertEqual(
                 to_media_url_path(path),
                 "/recordings/2024-01-01/10/front_door/00.00.mp4",
@@ -288,6 +304,53 @@ class TestFsType(unittest.TestCase):
         with patch("psutil.disk_partitions", return_value=[partition]):
             self.assertEqual(get_fs_type("/media2/recordings"), "")
             self.assertEqual(get_fs_type("/media/recordings"), "ext4")
+
+
+class TestServiceStopWatcher(unittest.TestCase):
+    """A service cannot signal its child, so it sets a named event instead."""
+
+    def test_nothing_happens_without_the_event_variable(self):
+        """Frigate started by hand, or by the launcher, must gain no watcher."""
+        with patch.dict(os.environ, {SERVICE_STOP_EVENT_VAR: ""}):
+            self.assertFalse(install_service_stop_watcher(threading.Event()))
+
+    def test_no_watcher_when_pywin32_is_missing(self):
+        """Service mode on a checkout without pywin32 degrades, not crashes."""
+        with patch("frigate.util.platform.IS_WINDOWS", True):
+            with patch.dict(os.environ, {SERVICE_STOP_EVENT_VAR: "FrigateTestStop"}):
+                with patch.dict("sys.modules", {"win32event": None}):
+                    self.assertFalse(install_service_stop_watcher(threading.Event()))
+
+    def test_no_watcher_off_windows(self):
+        if IS_WINDOWS:  # pragma: no cover - the Windows path is tested below
+            self.skipTest("this is the non Windows path")
+
+        with patch.dict(os.environ, {SERVICE_STOP_EVENT_VAR: "FrigateTestStop"}):
+            self.assertFalse(install_service_stop_watcher(threading.Event()))
+
+    @unittest.skipUnless(IS_WINDOWS, "a named event is a Windows mechanism")
+    def test_setting_the_event_stops_frigate(self):
+        """The whole contract: the service sets it, Frigate's stop_event is set."""
+        import win32event
+
+        name = f"FrigateTestStop-{os.getpid()}"
+        handle = win32event.CreateEvent(None, 1, 0, name)
+        self.addCleanup(handle.Close)
+
+        stop_event = threading.Event()
+
+        with patch.dict(os.environ, {SERVICE_STOP_EVENT_VAR: name}):
+            self.assertTrue(install_service_stop_watcher(stop_event))
+
+            # nothing stops before the service asks
+            self.assertFalse(stop_event.wait(1))
+
+            win32event.SetEvent(handle)
+
+            self.assertTrue(
+                stop_event.wait(30),
+                "the watcher did not stop Frigate when the service signalled",
+            )
 
 
 if __name__ == "__main__":
