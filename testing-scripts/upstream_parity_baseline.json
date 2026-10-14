@@ -227,7 +227,7 @@
       "fork_only_lines": 39,
       "missing_digest": "sha256:86559d02c67226d50591372fa499eb7cdd3a8dbf93d2d55bb74d6f8655318bd8",
       "missing_lines": 9,
-      "reason": "robust_remove/robust_move so a scanner holding a file does not fail retention"
+      "reason": "robust_remove/robust_move so a scanner holding a file does not fail retention. The in-use check matches ffmpeg.exe and Windows paths, so the segment ffmpeg is still writing is skipped instead of being probed, called invalid and discarded"
     },
     "frigate/service_manager/multiprocessing.py": {
       "fork_only_lines": 20,

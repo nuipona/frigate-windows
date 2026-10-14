@@ -107,6 +107,34 @@ def format_segment_details(cache_path: str, segment_info: dict[str, Any]) -> str
     return ", ".join(details)
 
 
+def cache_files_in_use(cache_dir: str) -> set[str]:
+    """The cache files ffmpeg still has open, which are still being written.
+
+    A segment ffmpeg has not closed yet has no moov atom, so probing it reads
+    as a file with no video stream: the maintainer would discard the segment it
+    is still writing. Windows reports the process as ``ffmpeg.exe`` and spells
+    its paths with backslashes, so the name and the path have to be matched the
+    way the platform writes them.
+    """
+    in_use: set[str] = set()
+
+    for process in psutil.process_iter():
+        try:
+            # the process is ffmpeg.exe on Windows and ffmpeg everywhere else
+            if os.path.splitext(process.name())[0].lower() != "ffmpeg":
+                continue
+
+            for opened in process.open_files():
+                if opened.path.startswith(cache_dir):
+                    # the path is spelled with backslashes on Windows, and a
+                    # POSIX basename would return all of it
+                    in_use.add(os.path.basename(opened.path.replace("\\", "/")))
+        except psutil.Error:
+            continue
+
+    return in_use
+
+
 def segment_path_time(cache_path: str) -> datetime.datetime | None:
     """Timestamp a segment's recording path is built from, or None if unparsable.
 
@@ -353,18 +381,7 @@ class RecordingMaintainer(threading.Thread):
                         RecordingsDataTypeEnum.latest.value,
                     )
 
-        files_in_use = []
-        for process in psutil.process_iter():
-            try:
-                if process.name() != "ffmpeg":
-                    continue
-                file_list = process.open_files()
-                if file_list:
-                    for nt in file_list:
-                        if nt.path.startswith(CACHE_DIR):
-                            files_in_use.append(nt.path.split("/")[-1])
-            except psutil.Error:
-                continue
+        files_in_use = cache_files_in_use(CACHE_DIR)
 
         # group recordings by camera and stream type (skip in-use for validation/moving)
         grouped_recordings: defaultdict[tuple[str, str], list[dict[str, Any]]] = (
