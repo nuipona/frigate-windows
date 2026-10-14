@@ -9,7 +9,7 @@ from typing import Any
 
 from frigate.config import CameraConfig, FfmpegConfig, FrigateConfig
 from frigate.output.ws_auth import ws_has_camera_access
-from frigate.util.ffmpeg import stop_ffmpeg
+from frigate.util.ffmpeg import ffmpeg_popen_kwargs, stop_ffmpeg
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,9 @@ class FFMpegConverter(threading.Thread):
         self.camera = camera
         self.input_queue = input_queue
         self.stop_event = stop_event
+        # ffmpeg closing its read end is how a stop looks from here; it is not
+        # an error, and it must not raise out of this thread
+        self.input_closed = False
 
         ffmpeg_cmd = [
             ffmpeg.ffmpeg_path,
@@ -64,12 +67,20 @@ class FFMpegConverter(threading.Thread):
             stdout=sp.PIPE,
             stderr=sp.DEVNULL,
             stdin=sp.PIPE,
-            start_new_session=True,
+            **ffmpeg_popen_kwargs(),
         )
 
     def __write(self, b: bytes) -> None:
         assert self.process.stdin is not None
-        self.process.stdin.write(b)
+
+        if self.input_closed:
+            return
+
+        try:
+            self.process.stdin.write(b)
+        except (BrokenPipeError, OSError, ValueError) as err:
+            self.input_closed = True
+            logger.debug("ffmpeg is no longer reading frames: %s", err)
 
     def read(self, length: int) -> Any:
         try:

@@ -10,9 +10,9 @@ This script turns the reviewed result of that reading into a checked-in
 baseline (``upstream_parity_baseline.json``, next to this file) and fails when
 the trees diverge in a way the baseline does not describe:
 
-* a file upstream has that this fork does not have at all — always a failure,
-  there is no legitimate reason to drop an upstream module, and it is the
-  shape a lost feature takes;
+* a file upstream has that this fork does not have at all, unless the baseline
+  records why it was dropped — an unrecorded removal is the shape a lost
+  feature takes, and the reason is where the reviewer says it was deliberate;
 * a file that diverges without an entry in the baseline, or with an entry
   whose reason is still empty — a new port needs a reviewer, and the reason is
   where the review is recorded;
@@ -323,19 +323,30 @@ def compare(state: State, baseline: dict[str, Any]) -> Verdict:
     recorded_files: dict[str, str] = baseline.get("fork_only_files") or {}
     recorded_diverged: dict[str, dict[str, Any]] = baseline.get("diverged_files") or {}
 
-    if state.upstream_only_files:
+    recorded_removed: dict[str, str] = baseline.get("removed_upstream_files") or {}
+    unreviewed_removals = [
+        path
+        for path in state.upstream_only_files
+        if not (recorded_removed.get(path) or "").strip()
+    ]
+
+    if unreviewed_removals:
         verdict.problems.append(
             Problem(
-                f"upstream has {len(state.upstream_only_files)} file(s) this fork does not have",
+                f"upstream has {len(unreviewed_removals)} file(s) this fork does not have",
                 [
                     f"  {path} is missing here; upstream features live in it"
-                    for path in state.upstream_only_files[:SAMPLE_LINES]
+                    for path in unreviewed_removals[:SAMPLE_LINES]
                 ]
                 + (
-                    [f"  ... and {len(state.upstream_only_files) - SAMPLE_LINES} more"]
-                    if len(state.upstream_only_files) > SAMPLE_LINES
+                    [f"  ... and {len(unreviewed_removals) - SAMPLE_LINES} more"]
+                    if len(unreviewed_removals) > SAMPLE_LINES
                     else []
-                ),
+                )
+                + [
+                    "  record why it was removed in removed_upstream_files with "
+                    "--update, or restore it"
+                ],
             )
         )
 
@@ -424,6 +435,7 @@ def baseline_from(state: State, previous: dict[str, Any]) -> dict[str, Any]:
     """Build the new baseline, keeping reviewed reasons and flagging new files."""
     previous_files: dict[str, str] = previous.get("fork_only_files") or {}
     previous_diverged: dict[str, dict[str, Any]] = previous.get("diverged_files") or {}
+    previous_removed: dict[str, str] = previous.get("removed_upstream_files") or {}
 
     return {
         "comment": (
@@ -445,6 +457,9 @@ def baseline_from(state: State, previous: dict[str, Any]) -> dict[str, Any]:
                 "fork_only_lines": diverged.fork_only_lines,
             }
             for path, diverged in sorted(state.diverged.items())
+        },
+        "removed_upstream_files": {
+            path: previous_removed.get(path, "") for path in state.upstream_only_files
         },
     }
 
@@ -657,15 +672,23 @@ def main(argv: list[str] | None = None) -> int:
         args.baseline.write_text(
             json.dumps(updated, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
-        empty = [
-            path
-            for path, reason in updated["fork_only_files"].items()
-            if not reason.strip()
-        ] + [
-            path
-            for path, entry in updated["diverged_files"].items()
-            if not (entry.get("reason") or "").strip()
-        ]
+        empty = (
+            [
+                path
+                for path, reason in updated["fork_only_files"].items()
+                if not reason.strip()
+            ]
+            + [
+                path
+                for path, entry in updated["diverged_files"].items()
+                if not (entry.get("reason") or "").strip()
+            ]
+            + [
+                path
+                for path, reason in updated["removed_upstream_files"].items()
+                if not reason.strip()
+            ]
+        )
         print(
             f"wrote {args.baseline} against upstream {state.upstream_commit[:12]} "
             f"({len(updated['fork_only_files'])} fork-only, "

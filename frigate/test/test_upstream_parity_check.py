@@ -179,7 +179,7 @@ class TestDivergence(ParityTestCase):
 
 
 class TestCompare(ParityTestCase):
-    def test_upstream_only_file_is_always_a_failure(self):
+    def test_upstream_only_file_is_a_failure_until_its_removal_is_recorded(self):
         self.make_fork()
         self.delete_upstream_module()
         state = self.state(self.repo.sha("HEAD"))
@@ -200,6 +200,31 @@ class TestCompare(ParityTestCase):
         self.assertFalse(verdict.ok)
         self.assertIn("does not have", summaries)
         self.assertIn("linux_only.py", details)
+        self.assertIn("record why it was removed", details)
+
+        # a deliberate removal is recorded with its reason, like any other;
+        # the stale diverged entry goes with it, since the file is not in the
+        # fork at all any more
+        del baseline["diverged_files"]["linux_only.py"]
+        baseline["removed_upstream_files"] = {
+            "linux_only.py": "everything in it moved behind the platform layer"
+        }
+
+        self.assertTrue(parity.compare(state, baseline).ok, "a recorded removal passes")
+
+    def test_a_removal_whose_reason_is_empty_is_still_a_failure(self):
+        self.make_fork()
+        self.delete_upstream_module()
+        state = self.state(self.repo.sha("HEAD"))
+        baseline = self.full_baseline(state)
+        baseline["removed_upstream_files"] = {"linux_only.py": "  "}
+
+        verdict = parity.compare(state, baseline)
+
+        self.assertFalse(verdict.ok)
+        self.assertIn(
+            "does not have", " ".join(problem.summary for problem in verdict.problems)
+        )
 
     def test_reviewed_baseline_passes(self):
         state = self.state(self.make_fork())

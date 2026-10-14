@@ -2,7 +2,7 @@
   "comment": "Reviewed record of how this fork differs from upstream. Regenerate with testing-scripts/check_upstream_parity.py --update after auditing, and write a reason for every entry: the checker fails on an empty reason on purpose.",
   "diverged_files": {
     ".github/workflows/pull_request.yml": {
-      "fork_only_lines": 286,
+      "fork_only_lines": 305,
       "missing_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "missing_lines": 0,
       "reason": "adds the Windows CI jobs and drops the container matrix this fork does not run"
@@ -224,9 +224,9 @@
       "reason": "export paths, ffmpeg resolution and concat input for Windows"
     },
     "frigate/record/maintainer.py": {
-      "fork_only_lines": 39,
-      "missing_digest": "sha256:86559d02c67226d50591372fa499eb7cdd3a8dbf93d2d55bb74d6f8655318bd8",
-      "missing_lines": 9,
+      "fork_only_lines": 68,
+      "missing_digest": "sha256:4e79ce1891da9f0fd075926013d41c83e0529954ec141e66d0f1817b59533b78",
+      "missing_lines": 21,
       "reason": "robust_remove/robust_move so a scanner holding a file does not fail retention. The in-use check matches ffmpeg.exe and Windows paths, so the segment ffmpeg is still writing is skipped instead of being probed, called invalid and discarded"
     },
     "frigate/service_manager/multiprocessing.py": {
@@ -302,9 +302,9 @@
       "reason": "msvcrt file locking instead of fcntl"
     },
     "frigate/test/test_maintainer.py": {
-      "fork_only_lines": 50,
-      "missing_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "missing_lines": 0,
+      "fork_only_lines": 107,
+      "missing_digest": "sha256:0815c6a542d0dab8a9b5fb7fafd76a933da291cd3f87cdae7fce0ad7faac1d6f",
+      "missing_lines": 1,
       "reason": "robust remove and move retries"
     },
     "frigate/test/test_mqtt_network_loop.py": {
@@ -493,6 +493,9 @@
     "testing-scripts/run_windows_unit_suite.py": "runs the whole unit suite on Windows minus the denylist; upstream's CI is Linux containers",
     "testing-scripts/upstream_parity_baseline.json": "the reviewed record of every deliberate divergence from upstream",
     "winget-manifest/Frigate.FrigateWindows.yaml": "winget package manifest for the native install (still needs a signed installer URL)"
+  },
+  "removed_upstream_files": {
+    ".github/pull_request_template.md": "deleted on dev: this fork does not carry upstream's pull request template, the fork's own CI checks the description instead"
   },
   "upstream_commit": "b79e0439769ab7f7b03805295d0c12e2f0a89032",
   "upstream_repo": "https://github.com/blakeblackshear/frigate.git"

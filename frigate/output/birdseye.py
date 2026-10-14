@@ -23,7 +23,7 @@ from frigate.const import BASE_DIR, INSTALL_DIR, UPDATE_BIRDSEYE_LAYOUT
 from frigate.output.ws_auth import ws_has_camera_access
 from frigate.review.types import SeverityEnum
 from frigate.util.birdseye_pipe import BirdseyePipe, create_birdseye_pipe
-from frigate.util.ffmpeg import stop_ffmpeg
+from frigate.util.ffmpeg import ffmpeg_popen_kwargs, stop_ffmpeg
 from frigate.util.image import (
     SharedMemoryFrameManager,
     copy_yuv_to_position,
@@ -149,6 +149,9 @@ class FFMpegConverter(threading.Thread):
         self.stop_event = stop_event
         self.restream = birdseye_rtsp
         self.reading_birdseye = False
+        # ffmpeg closing its read end is how a stop looks from here; it is not
+        # an error, and it must not raise out of this thread
+        self.ffmpeg_input_closed = False
         self.bd_pipe: BirdseyePipe = create_birdseye_pipe()
 
         if birdseye_rtsp:
@@ -186,7 +189,7 @@ class FFMpegConverter(threading.Thread):
             stdout=sp.PIPE,
             stderr=sp.DEVNULL,
             stdin=sp.PIPE,
-            start_new_session=True,
+            **ffmpeg_popen_kwargs(),
         )
 
     def recreate_birdseye_pipe(self) -> None:
@@ -196,7 +199,13 @@ class FFMpegConverter(threading.Thread):
 
     def __write(self, b: bytes) -> None:
         assert self.process.stdin is not None
-        self.process.stdin.write(b)
+
+        if not self.ffmpeg_input_closed:
+            try:
+                self.process.stdin.write(b)
+            except (BrokenPipeError, OSError, ValueError) as err:
+                self.ffmpeg_input_closed = True
+                logger.debug("ffmpeg is no longer reading frames: %s", err)
 
         if not self.restream:
             return

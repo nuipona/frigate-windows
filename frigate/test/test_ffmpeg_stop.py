@@ -48,7 +48,7 @@ class TestRequestFfmpegStop(unittest.TestCase):
 
         stdin.write.assert_called_once_with(b"q")
         stdin.flush.assert_called_once()
-        process.wait.assert_called_once_with(timeout=ffmpeg_util.FFMPEG_QUIT_GRACE)
+        process.wait.assert_called_once_with(timeout=ffmpeg_util.FFMPEG_QUIT_POLL)
         process.terminate.assert_not_called()
         mock_kill.assert_not_called()
 
@@ -116,6 +116,27 @@ class TestRequestFfmpegStop(unittest.TestCase):
 
         mock_kill.assert_called_once_with(4242, 21)
         process.terminate.assert_not_called()
+
+
+class TestFfmpegPopenKwargs(unittest.TestCase):
+    """ffmpeg has to be started as a group leader to be stoppable.
+
+    ``CTRL_BREAK_EVENT`` is addressed to a process *group*, so on Windows
+    ffmpeg needs ``CREATE_NEW_PROCESS_GROUP``; without it the break event can
+    never reach it and every stop falls back to ``TerminateProcess``, which is
+    what leaves the MP4 being written without its moov atom.
+    """
+
+    @patch.object(ffmpeg_util, "IS_WINDOWS", True)
+    def test_windows_starts_ffmpeg_in_its_own_process_group(self):
+        with patch.object(ffmpeg_util.sp, "CREATE_NEW_PROCESS_GROUP", 512, create=True):
+            kwargs = ffmpeg_util.ffmpeg_popen_kwargs()
+
+        self.assertEqual(kwargs, {"creationflags": 512})
+
+    @patch.object(ffmpeg_util, "IS_WINDOWS", False)
+    def test_posix_starts_ffmpeg_in_its_own_session(self):
+        self.assertEqual(ffmpeg_util.ffmpeg_popen_kwargs(), {"start_new_session": True})
 
 
 class TestStopFfmpeg(unittest.TestCase):
