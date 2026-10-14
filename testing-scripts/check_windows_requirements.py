@@ -56,6 +56,11 @@ IMPORT_TO_DISTRIBUTION = {
     "onvif": "onvif-zeep-async",
     "pydantic_settings": "pydantic-settings",
     "tensorflow": "tensorflow-cpu",
+    # the pywin32 package provides the SCM modules the Windows service imports
+    "servicemanager": "pywin32",
+    "win32event": "pywin32",
+    "win32service": "pywin32",
+    "win32serviceutil": "pywin32",
 }
 
 #: packages that publish only a source distribution. They are pure Python, so

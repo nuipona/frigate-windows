@@ -1,8 +1,9 @@
 """Basic Windows SCM service wrapper for Frigate using pywin32.
 
-Requires: pip install pywin32
-Usage (install): python -m pywin32_framework install --name Frigate --display "Frigate NVR"
-Usage (run):    python -m frigate.util.windows_service
+pywin32 is part of docker/main/requirements-windows.txt, so a native install
+already has the SCM modules this imports.
+Install: scripts/install_frigate_service.ps1 -Action Install
+Run:     python -m frigate.util.windows_service
 
 This is a minimal service framework. It installs signal handlers that work
 in session 0 (no console events available) and delegates to Frigate's main
@@ -19,13 +20,13 @@ from pathlib import Path
 IS_SERVICE = False
 
 try:
-    import win32serviceutil
-    import win32service
-    import win32event
     import servicemanager
+    import win32event
+    import win32service
+    import win32serviceutil
 
     IS_SERVICE = True
-except ImportError:  # pragma: no cover - pywin32 is optional
+except ImportError:  # pragma: no cover - a Linux checkout has no pywin32
     pass
 
 
@@ -34,7 +35,9 @@ class FrigateService(win32serviceutil.ServiceFramework):
 
     _svc_name_ = "Frigate"
     _svc_display_name_ = "Frigate NVR (Windows Native)"
-    _svc_description_ = "Realtime object detection NVR for IP cameras — native Windows port."
+    _svc_description_ = (
+        "Realtime object detection NVR for IP cameras — native Windows port."
+    )
 
     def __init__(self, args: list[str]) -> None:
         super().__init__(args)
@@ -52,11 +55,10 @@ class FrigateService(win32serviceutil.ServiceFramework):
         win32event.SetEvent(self.hWaitStop)
 
     def SvcDoRun(self) -> None:
-        import signal
-        import os
-        import subprocess
         import logging
-        from frigate.util.services import restart_frigate
+        import os
+        import signal
+        import subprocess
 
         # Session 0 has no console: SIGINT / SIGBREAK do not exist.
         # Register only the signals that can actually arrive.
@@ -65,10 +67,9 @@ class FrigateService(win32serviceutil.ServiceFramework):
         except (ValueError, OSError):
             pass
 
-        # Use the launcher script so all Windows-specific setup (PATH, venv)
-        # is reused rather than re-implemented here.
-        launcher = Path(__file__).resolve().parent.parent.parent / "run_frigate.ps1"
-        # Alternatively, run python -m frigate directly:
+        # Frigate's own entry point rather than the launcher: a .ps1 cannot be
+        # started by Popen, and the service already runs in the venv the
+        # launcher would have activated.
         cmd = [sys.executable, "-m", "frigate"]
         env = os.environ.copy()
         env["FRIGATE_SERVICE_MODE"] = "1"
@@ -86,9 +87,7 @@ class FrigateService(win32serviceutil.ServiceFramework):
 
         # Wait for SCM stop event or process exit.
         while not self.stop_requested:
-            result = win32event.WaitForSingleObject(
-                self.hWaitStop, 500
-            )  # 500ms polling
+            win32event.WaitForSingleObject(self.hWaitStop, 500)  # 500ms polling
             ret = process.poll()
             if ret is not None:
                 logger.info("Frigate process exited with code %d", ret)
@@ -114,11 +113,21 @@ class FrigateService(win32serviceutil.ServiceFramework):
 
 
 if __name__ == "__main__":
-    if IS_SERVICE:
-        win32serviceutil.HandleCommandLine(FrigateService)
-    else:
-        print("pywin32 is not installed. To use this service:")
-        print("    pip install pywin32")
-        print("Then install with:")
-        print("    python -c \"import frigate.util.windows_service; from frigate.util.windows_service import FrigateService; import win32serviceutil; win32serviceutil.InstallService(FrigateService)\"")
+    if not IS_SERVICE:
+        print("pywin32 is not installed, so the SCM service cannot run.")
+        print("It is part of the native Windows requirements:")
+        print("    pip install -r docker/main/requirements-windows.txt")
+        print("Then install the service with:")
+        print("    scripts/install_frigate_service.ps1 -Action Install")
         sys.exit(1)
+
+    if len(sys.argv) == 1:
+        # started by the service control manager: the dispatcher is what tells
+        # the SCM that this process is the service it launched. Without it a
+        # service start gets an argument-less command line parser instead.
+        servicemanager.Initialize()
+        servicemanager.PrepareToHostSingle(FrigateService)
+        servicemanager.StartServiceCtrlDispatcher()
+    else:
+        # install, update, remove or debug from a command line
+        win32serviceutil.HandleCommandLine(FrigateService)

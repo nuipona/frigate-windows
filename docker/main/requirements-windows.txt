@@ -76,6 +76,13 @@ openai == 3.26.*
 py-vapid == 1.9.4
 pywebpush == 2.5.*
 
+# Windows service (SCM) support: frigate/util/windows_service.py imports
+# servicemanager, win32event, win32service and win32serviceutil, and
+# scripts/install_frigate_service.ps1 drives the install through them. pywin32
+# ships those as compiled extension modules in its cp312 win_amd64 wheel, so
+# `bootstrap_windows.py --install-service` has nothing left to fetch.
+pywin32 == 312
+
 # ALPR and hardware helpers
 pyclipper == 1.4.*
 shapely == 2.2.*

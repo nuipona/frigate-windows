@@ -4,7 +4,9 @@
 
 .DESCRIPTION
     Uses pywin32 to register FrigateService (frigate.util.windows_service)
-    with the Windows Service Control Manager. Requires pywin32.
+    with the Windows Service Control Manager. pywin32 is part of
+    docker/main/requirements-windows.txt, so a bootstrap install already has
+    it; this checks and installs it if the script is run on its own.
 
 .PARAMETER Action
     Install, Start, Stop, Remove, Status
@@ -30,7 +32,9 @@ function Test-PyWin32 {
         Write-Error "Python not found in PATH."
         return $false
     }
-    $result = & $python.Source -c "import pywin32; print('ok')" 2>$null
+    # probe the modules the service imports: pywin32 is a distribution name,
+    # there is no top-level `pywin32` module to import
+    $result = & $python.Source -c "import servicemanager, win32event, win32service, win32serviceutil; print('ok')" 2>$null
     return ($result -eq "ok")
 }
 
@@ -53,8 +57,8 @@ function Invoke-ServiceAction {
         }
         "Install" {
             if (-not (Test-PyWin32)) {
-                Write-Host "Installing pywin32..."
-                & python -m pip install pywin32
+                Write-Host "pywin32 is missing; installing it (it is part of docker/main/requirements-windows.txt)..."
+                & python -m pip install -r (Join-Path $repoRoot "docker/main/requirements-windows.txt")
             }
             $env:PYTHONPATH = "$repoRoot;$env:PYTHONPATH"
             & python -c "

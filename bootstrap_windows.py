@@ -585,7 +585,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--install-service",
         action="store_true",
-        help="install the Frigate SCM service (requires pywin32 and admin privileges)",
+        help="install the Frigate SCM service (requires admin privileges)",
     )
     parser.add_argument(
         "--print-digests",
@@ -633,9 +633,12 @@ def main(argv: list[str] | None = None) -> int:
                 subprocess.run(
                     [
                         "powershell",
-                        "-ExecutionPolicy", "Bypass",
-                        "-File", str(service_script),
-                        "-Action", "Install",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-File",
+                        str(service_script),
+                        "-Action",
+                        "Install",
                     ],
                     check=False,
                 )
