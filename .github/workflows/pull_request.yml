@@ -261,7 +261,10 @@ jobs:
           FRIGATE_E2E_DIR: ${{ runner.temp }}\frigate-e2e
         shell: pwsh
         run: |
-          python -m unittest frigate.test.test_native_e2e *> e2e.log
+          # -v so every line ends in a newline: unittest's progress output
+          # is buffered otherwise, and a killed process can take the rest
+          # of the run's output with it
+          python -m unittest -v frigate.test.test_native_e2e *> e2e.log
           $e2eCode = $LASTEXITCODE
           if ($e2eCode -ne 0) {
             Select-String -Path e2e.log -Pattern '^FAIL: |AssertionError' |
@@ -288,10 +291,10 @@ jobs:
             -Prefix 'frigate-said' `
             -Drop @('Unable to read frames', 'peewee_migrate', 'Migrate ') `
             -Keep 'ffmpeg|lavfi|Invalid|No such|Conversion|Error|error|Unable|discard|segment'
-          # the frame read failures repeat hundreds of times, so only the
-          # first and the last few are worth looking at
+          # the end of Frigate's own log: how the stop went, which is what
+          # the clean stop assertions are about
           Publish-Log -Path (Join-Path $env:FRIGATE_E2E_DIR 'frigate-run.log') `
-            -Prefix 'frigate-frames' -Keep 'Unable to read frames' -Head 5 -Tail 5
+            -Prefix 'frigate-tail' -Head 1 -Tail 40
           # the recording role encodes with libx264, so when no segment shows
           # up, prove the runner can encode one at all: without this a broken
           # ffmpeg on the runner looks exactly like a broken Frigate
