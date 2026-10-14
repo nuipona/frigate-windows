@@ -568,7 +568,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--directml",
         action="store_true",
-        help="use onnxruntime-directml for GPU inference on AMD, Intel and Nvidia",
+        default=True,
+        help="use onnxruntime-directml for GPU inference on AMD, Intel and Nvidia (default)",
+    )
+    parser.add_argument(
+        "--no-directml",
+        action="store_false",
+        dest="directml",
+        help="use CPU-only onnxruntime instead of DirectML",
     )
     parser.add_argument(
         "--add-defender-exclusion",
