@@ -194,16 +194,16 @@
       "reason": "no os.register_at_fork on Windows; std streams are reopened for spawn"
     },
     "frigate/output/birdseye.py": {
-      "fork_only_lines": 29,
-      "missing_digest": "sha256:45166c712dcf715b95ad9fd7ee943adcac9fe7f32c44e5abe3532ddbd26b04bf",
-      "missing_lines": 35,
-      "reason": "writes frames to the birdseye named pipe instead of creating one with os.mkfifo"
+      "fork_only_lines": 39,
+      "missing_digest": "sha256:195bcf75ae229fd84010115a15ea69c6a41a0ceffaa0d652eb0dfcc36933c15b",
+      "missing_lines": 36,
+      "reason": "frames go through frigate.util.birdseye_pipe (the upstream FIFO on POSIX, a loopback listener on Windows) with the converter still recreating it once when a reader goes away; ffmpeg is started with ffmpeg_popen_kwargs() and stopped with stop_ffmpeg(), and a converter write to an ffmpeg that already exited is logged instead of raising out of the thread"
     },
     "frigate/output/camera.py": {
-      "fork_only_lines": 4,
-      "missing_digest": "sha256:e6afe48aae10e4b392dc967693b47342942605d26e2ccbec1a34999e20c5a574",
-      "missing_lines": 7,
-      "reason": "process stop path for Windows, which has no SIGKILL semantics"
+      "fork_only_lines": 17,
+      "missing_digest": "sha256:be695be870bdd1d6d9cd9106ab1f0eeb769455c869449cde2565160e0fdc0870",
+      "missing_lines": 9,
+      "reason": "ffmpeg is started with ffmpeg_popen_kwargs() (a new session on POSIX, a new process group on Windows) and stopped with stop_ffmpeg() instead of terminate(), which is TerminateProcess on Windows; a write to an ffmpeg that already exited is logged instead of raising out of the converter thread"
     },
     "frigate/output/output.py": {
       "fork_only_lines": 7,
@@ -362,10 +362,10 @@
       "reason": "reads the secrets file as explicit utf-8"
     },
     "frigate/util/ffmpeg.py": {
-      "fork_only_lines": 83,
-      "missing_digest": "sha256:dbb95ca76e89d536eddf6e6f224c417fa4538d4dc3e46ecd765d8278af66005a",
-      "missing_lines": 10,
-      "reason": "request_ffmpeg_stop quits ffmpeg cleanly on Windows so the file being written is finalized"
+      "fork_only_lines": 109,
+      "missing_digest": "sha256:ed26d0265d1cf0c189b538fa2e347f0d408b5641e3dc024503e8ba1a00219c10",
+      "missing_lines": 12,
+      "reason": "request_ffmpeg_stop() quits ffmpeg cleanly on Windows (quit command, then a break event into the process group ffmpeg_popen_kwargs() creates, then terminate()) so the file being written is finalized, and is terminate() on POSIX with the same 30 second wait and kill fallback as upstream stop_ffmpeg(); capture processes get a stdin pipe for that quit command instead of /dev/null, low priority concat uses nice on POSIX and a process priority class on Windows, and progress output is decoded as UTF-8 rather than ASCII (ASCII input decodes identically)"
     },
     "frigate/util/file.py": {
       "fork_only_lines": 168,
@@ -465,6 +465,7 @@
     "docker/main/requirements-windows.txt": "pip requirements for the native install; upstream's set is container-only",
     "frigate/api/vod_native.py": "video-on-demand for the native server, which has no nginx to serve recordings",
     "frigate/api/web.py": "serves the built web interface from the native server; upstream leaves that to nginx",
+    "frigate/test/test_birdseye_pipe.py": "tests for the birdseye pipe contract: frames reach a reader, frames with no reader are discarded, and a reader going away is reported to the caller instead of recreating the pipe",
     "frigate/test/test_bootstrap_windows.py": "tests for bootstrap_windows.py (digests, layout, launcher)",
     "frigate/test/test_capture_frames.py": "tests for reading one frame out of a page-aligned Windows mapping",
     "frigate/test/test_config_updater_cleanup.py": "tests for the config updater's ZMQ shutdown path",

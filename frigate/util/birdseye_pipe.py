@@ -97,13 +97,10 @@ class FifoBirdseyePipe(BirdseyePipe):
         try:
             os.write(self.fd, data)
         except BrokenPipeError:
-            if self.reading:
-                # a reader was attached and stopped reading part way through a
-                # frame, so the pipe has to be recreated to drop the partial
-                # frame rather than let it corrupt the stream
-                logger.debug("Birdseye pipe reader went away, recreating the pipe")
-                self.recreate()
-
+            # the caller owns recreation, exactly as it does upstream: it is
+            # the one that knows whether a reader was ever attached, and
+            # recreating here as well would tear down and rebuild the FIFO
+            # twice for one reader going away
             self.reading = False
             return False
 
