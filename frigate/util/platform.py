@@ -39,6 +39,7 @@ import os
 import shlex
 import shutil
 import sys
+import threading
 import zlib
 from collections.abc import Iterable
 from pathlib import Path
@@ -59,6 +60,7 @@ CONFIG_DIR_VAR = "FRIGATE_CONFIG_DIR"
 MEDIA_DIR_VAR = "FRIGATE_MEDIA_DIR"
 CACHE_DIR_VAR = "FRIGATE_CACHE_DIR"
 TMP_DIR_VAR = "FRIGATE_TMP_DIR"
+SERVICE_STOP_EVENT_VAR = "FRIGATE_SERVICE_STOP_EVENT"
 WEB_DIR_VAR = "FRIGATE_WEB_DIR"
 BIRDSEYE_PORT_VAR = "FRIGATE_BIRDSEYE_PORT"
 FFMPEG_DIR_VAR = "FRIGATE_FFMPEG_DIR"
@@ -890,6 +892,71 @@ def install_signal_handlers(stop_event, exit_callback) -> None:
         signal.signal(signal.SIGTERM, lambda sig, frame: exit_callback())
     except (ValueError, OSError):  # pragma: no cover - not the main thread
         pass
+
+
+def install_service_stop_watcher(stop_event) -> bool:
+    """Stop Frigate when the Windows service that started it asks it to.
+
+    The service cannot ask with a signal. In session 0 there is no console, so
+    no console control event can be delivered, and on Windows every other
+    signal is handed to ``TerminateProcess``, which would kill the process
+    without finalizing the recording segment it is writing. A named event is
+    the one mechanism that crosses the process boundary, so the service creates
+    one and passes its name in ``FRIGATE_SERVICE_STOP_EVENT``. This waits on
+    that event in a daemon thread and sets the same ``stop_event`` that Ctrl+C
+    sets, which means the shutdown is the one Frigate already performs.
+
+    Returns whether a watcher was started. Nothing happens on POSIX, or when
+    Frigate was not started by the service, so this can be called
+    unconditionally at startup.
+    """
+    if not IS_WINDOWS:
+        return False
+
+    name = os.environ.get(SERVICE_STOP_EVENT_VAR)
+
+    if not name:
+        return False
+
+    try:
+        import win32event
+    except ImportError:  # pragma: no cover - the service itself needs pywin32
+        logger.warning("Ignoring %s: pywin32 is not installed", SERVICE_STOP_EVENT_VAR)
+        return False
+
+    threading.Thread(
+        target=_wait_for_service_stop,
+        args=(win32event, name, stop_event),
+        name="service-stop",
+        daemon=True,
+    ).start()
+
+    logger.debug("Watching the service stop event %s", name)
+    return True
+
+
+def _wait_for_service_stop(win32event, name: str, stop_event) -> None:
+    """Block until the service signals its stop event, then stop Frigate."""
+    #: SYNCHRONIZE, spelled out because win32event does not export it
+    synchronize = 0x00100000
+
+    try:
+        handle = win32event.OpenEvent(synchronize, False, name)
+    except Exception as err:  # pragma: no cover - the service creates it first
+        logger.warning("Unable to open the service stop event %s: %s", name, err)
+        return
+
+    if not handle:  # pragma: no cover - the service creates it first
+        logger.warning("The service stop event %s does not exist", name)
+        return
+
+    try:
+        win32event.WaitForSingleObject(handle, win32event.INFINITE)
+    finally:
+        win32event.CloseHandle(handle)
+
+    logger.info("The Windows service asked Frigate to stop")
+    stop_event.set()
 
 
 # ---------------------------------------------------------------------------

@@ -175,9 +175,20 @@ class TestNativeEndToEnd(unittest.TestCase):
         except OSError:
             return "<no log>"
 
-    def _start_frigate(self) -> None:
+    def _start_frigate(self, service_stop_event: str | None = None) -> None:
         env = dict(os.environ)
         env["FRIGATE_BASE_DIR"] = self.base
+
+        if service_stop_event is not None:
+            # exactly what the SCM service passes to the Frigate it starts: the
+            # service mode flag, and the named event it will set to ask for a
+            # clean stop
+            env["FRIGATE_SERVICE_MODE"] = "1"
+            env["FRIGATE_SERVICE_STOP_EVENT"] = service_stop_event
+        else:
+            env.pop("FRIGATE_SERVICE_MODE", None)
+            env.pop("FRIGATE_SERVICE_STOP_EVENT", None)
+
         for name in (
             "FRIGATE_CONFIG_DIR",
             "FRIGATE_MEDIA_DIR",
@@ -363,6 +374,62 @@ class TestNativeEndToEnd(unittest.TestCase):
             self.proc.kill()
             self.fail("Frigate did not exit after /api/restart.\n" + self._log_tail())
 
+        self._assert_stopped_cleanly(exit_code)
+
+    @unittest.skipUnless(os.name == "nt", "a named event is a Windows mechanism")
+    def test_service_stop_event_shuts_down_cleanly(self) -> None:
+        """The service stops Frigate by setting a named event.
+
+        A service cannot deliver a console control event to its child in
+        session 0, and terminating the process would leave the segment being
+        written without a moov atom, so the service asks through an event
+        instead. This starts Frigate the way the service does and then does
+        what the service does, so the whole stop path is exercised the way the
+        SCM will exercise it.
+        """
+        try:
+            import win32event
+        except ImportError:  # pragma: no cover - pywin32 is a Windows requirement
+            self.skipTest("pywin32 is required to signal the stop event")
+
+        name = f"FrigateE2EStop-{os.getpid()}"
+        handle = win32event.CreateEvent(None, 1, 0, name)
+        self.addCleanup(win32event.CloseHandle, handle)
+
+        self._start_frigate(service_stop_event=name)
+
+        ready = _wait_until(self._api_ready, timeout=120)
+        self.assertTrue(
+            ready,
+            "Frigate never answered /api/version with a service stop event.\n"
+            + self._log_tail(),
+        )
+
+        recorded = _wait_until(lambda: len(self._segments()) >= 1, timeout=180)
+        self.assertTrue(
+            recorded,
+            "No recording segments appeared before the stop.\n"
+            + self._cache_listing()
+            + self._camera_stats()
+            + self._log_tail(),
+        )
+
+        # what the SCM asks the service to do on stop
+        win32event.SetEvent(handle)
+
+        try:
+            exit_code = self.proc.wait(timeout=120)
+        except sp.TimeoutExpired:
+            self.proc.kill()
+            self.fail(
+                "Frigate did not exit after its stop event was set.\n"
+                + self._log_tail()
+            )
+
+        self._assert_stopped_cleanly(exit_code)
+
+    def _assert_stopped_cleanly(self, exit_code: int | None) -> None:
+        """Everything that has to be true of a shutdown rather than a death."""
         self.log_file.flush()
 
         # FrigateApp.stop() writes this before doing anything else. A process
