@@ -568,12 +568,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--directml",
         action="store_true",
-        help="use onnxruntime-directml for GPU inference on AMD, Intel and Nvidia",
+        default=True,
+        help="use onnxruntime-directml for GPU inference on AMD, Intel and Nvidia (default)",
+    )
+    parser.add_argument(
+        "--no-directml",
+        action="store_false",
+        dest="directml",
+        help="use CPU-only onnxruntime instead of DirectML",
     )
     parser.add_argument(
         "--add-defender-exclusion",
         action="store_true",
         help="exclude the Frigate base directory from Microsoft Defender",
+    )
+    parser.add_argument(
+        "--install-service",
+        action="store_true",
+        help="install the Frigate SCM service (requires pywin32 and admin privileges)",
     )
     parser.add_argument(
         "--print-digests",
@@ -613,6 +625,22 @@ def main(argv: list[str] | None = None) -> int:
 
         if not args.skip_shortcut:
             install_start_menu_shortcut(launcher)
+
+        if args.install_service:
+            logger.info("Installing SCM service (requires admin privileges)...")
+            service_script = REPO_ROOT / "scripts" / "install_frigate_service.ps1"
+            if service_script.exists():
+                subprocess.run(
+                    [
+                        "powershell",
+                        "-ExecutionPolicy", "Bypass",
+                        "-File", str(service_script),
+                        "-Action", "Install",
+                    ],
+                    check=False,
+                )
+            else:
+                logger.error("Service install script not found: %s", service_script)
 
         if args.add_defender_exclusion:
             add_defender_exclusion(layout)

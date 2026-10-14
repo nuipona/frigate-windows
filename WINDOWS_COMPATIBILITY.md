@@ -8,12 +8,13 @@ with no Docker and no WSL. Line references are against the current tree.
 ## Upstream parity
 
 This fork tracks `blakeblackshear/frigate` `dev`. **Last synced to upstream
-`e61ad52b` (2026-10-12)**, which brought in two commits this fork was missing:
+`e61ad52b` (2026-10-12)**, which brought in two commits this fork was missing. **Updated: upstream `b79e043` (Reduce idle CPU from thread pools, #24652) merged on `arena/3d44d5f3-frigate-windows` (2026-10-13)** — `get_ort_session_options()` now accepts the `cpu` provider flag and disables `session.intra_op.allow_spinning` for CPU enrichment sessions; `frigate/embeddings/__init__.py` and `frigate/output/output.py` set `cv2.setNumThreads(1)`.
 
 | Upstream commit | What it changes here |
 | --- | --- |
 | `ff9eb8f1` Keep frame shared memory mapped (#24644) | `FrameManager` grows `frame_times()` / `close_camera()` and `get()` takes a `frame_time`, so a reader can tell a lapped ring slot from a frame still being read. Merged on top of this fork's Windows fix in `capture_frames`, which slices `frame_buffer[:frame_size]` because a Windows segment is mapped page aligned. |
 | `e61ad52b` move env helpers out of the config package (#24648) | `frigate/config/env.py` → `frigate/util/env.py`. This fork had already moved the go2rtc config generator into `frigate/util/go2rtc_config.py`, so the import moved there rather than in `create_config.py`. |
+| `b79e043` Reduce idle CPU from thread pools (#24652) | `get_ort_session_options()` gains `cpu: bool`; CPU enrichment disables `intra_op.allow_spinning`; embeddings/output processes set `cv2.setNumThreads(1)`. Merged directly — no Windows branch conflicts. |
 
 The Windows port deliberately *adapts* rather than removes upstream behaviour.
 Everything it swaps out was checked to produce byte-identical results on Linux:
@@ -77,11 +78,14 @@ What remains, in rough order of cost to the user:
 | [P2-8](#p2-8-smaller-items) virtual NICs | **fixed** — `get_physical_interfaces()` drops down, loopback, Bluetooth, VPN/tunnel and Hyper-V style adapters and interfaces that are not up, and keeps only configured prefixes |
 | [P2-8](#p2-8-smaller-items) `/dev/shm` label | **fixed** — the storage panel shows "Page file (shared memory)" when the stats say `page_file_backed`, and suppresses the "increase SHM" warning there (there is no size to raise); the backend notice no longer fires for page-file-backed shared memory either |
 | [P3-1](#p3-1-no-windows-packaging-or-service-story)(1)(2) | **done** — `bootstrap_windows.py` (stdlib only) creates the venv, installs the requirements, fetches pinned FFmpeg 8.1.2 and go2rtc 1.9.14 with first-use recorded digests, builds the web UI when Node is present, and writes `run_frigate.ps1` plus a Start Menu shortcut. `release.yml` builds a Windows bundle with the web interface prebuilt and attaches it to releases, so Node is never required |
-| [P3-1](#p3-1-no-windows-packaging-or-service-story)(3) service | **partly** — the launcher + restart marker (`restart.requested` in the tmp dir, written by `restart_frigate()`) gives unattended operation and makes the UI's restart action work; no SCM service yet, so nothing starts Frigate at boot |
+| [P3-1](#p3-1-no-windows-packaging-or-service-story)(3) service | **implemented** — `frigate/util/windows_service.py` (pywin32 ServiceFramework), `scripts/install_frigate_service.ps1` (install/start/stop/remove), `bootstrap_windows.py --install-service`, and a service-aware `install_signal_handlers()` branch that skips console-only signals in session 0. Needs a real Windows service-mode end-to-end run. |
 | [P3-3](#p3-3-detector-coverage-on-windows-is-narrow) | **partly** — DirectML: `onnxruntime-directml` is documented as the cross-vendor GPU detector (`bootstrap_windows.py --directml` performs the swap), the provider flows through `get_ort_providers()` untouched, and the runner reports it as "DirectML". Config validation: a device string naming a Linux-only detector now fails at startup with a message naming what Windows can run, and a runtime whose import failed says why instead of "does not name a known detector" |
 
-Still open: an SCM service (boot start, session 0 shutdown) and a winget
-manifest.
+SCM service framework implemented (`windows_service.py`, install script,
+signal branch, bootstrap option) — needs real service-mode end-to-end
+validation. A basic winget manifest (`winget-manifest/Frigate.FrigateWindows.yaml`)
+has been added but needs validation and a signed installer URL before
+submission.
 
 **Update 2:** the P1 and P2 findings below have since been fixed, and a
 `windows_native_unit_suite` CI job now runs the whole `frigate/test` discovery
@@ -103,7 +107,9 @@ Linux-only test is visible instead of invisible. Closed in that change:
 | [P2-8](#p2-8-smaller-items) smaller items | **partly** — `find_go2rtc()` suffix check, `hwaccel.py` Windows guard, requirements drift check. Virtual-NIC filtering and the `/dev/shm` label are open |
 | [P3-2](#p3-2-windows-ci-is-a-thin-allowlist) thin Windows CI | **partly** — the whole suite runs on Windows now, with the allowlist inverted into a denylist |
 
-Still open: an SCM service and a winget manifest
+SCM service framework implemented — needs real service-mode end-to-end
+validation. A basic winget manifest has been added but needs validation
+and a signed installer URL.
 ([P3-1](#p3-1-no-windows-packaging-or-service-story)); everything else from
 the P2 and P3 list is fixed, narrowed, or tracked in the table above.
 
@@ -701,8 +707,8 @@ Two cheap wins:
 | ~~9~~ | ~~[P3-1](#p3-1-no-windows-packaging-or-service-story)(1)(2) bootstrap + prebuilt web~~ | **done** (`bootstrap_windows.py`, release bundle job) |
 | ~~10~~ | ~~[P1-3](#p1-3-the-hwaccel-recommender-can-emit-invalid-linux-presets-on-windows) Windows hwaccel families~~ | **done** |
 | ~~11~~ | ~~[P2-4](#p2-4-antivirus-and-indexing-hold-files-open) / [P2-5](#p2-5-filelock-on-windows-needs-a-real-cross-process-test) / [P2-6](#p2-6-shlexsplitposixtrue-mangles-unquoted-windows-paths) robustness~~ | **done** (P2-5 has cross-process tests on both platforms) |
-| 12 | [P3-1](#p3-1-no-windows-packaging-or-service-story)(3) SCM service + winget | The launcher covers unattended operation; boot start and session 0 shutdown still need a service |
-| 13 | [P3-3](#p3-3-detector-coverage-on-windows-is-narrow) DirectML | **done as an option** (`bootstrap_windows.py --directml`); making it the default needs a Windows run to validate |
+| 12 | [P3-1](#p3-1-no-windows-packaging-or-service-story)(3) SCM service + winget | The launcher covers unattended operation; boot start and session 0 shutdown still need a service. **Winget manifest added** (`winget-manifest/Frigate.FrigateWindows.yaml`) as a starter. |
+| 13 | [P3-3](#p3-3-detector-coverage-on-windows-is-narrow) DirectML | **Default enabled**: `bootstrap_windows.py` now defaults `--directml` to `True` with `--no-directml` to opt out. Making DirectML the recommended default needs a real Windows GPU validation run. |
 
 ## Part 4 — What is already right, and worth protecting
 

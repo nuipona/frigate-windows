@@ -866,13 +866,23 @@ def install_signal_handlers(stop_event, exit_callback) -> None:
         pass
 
     if IS_WINDOWS:
-        break_signal = getattr(signal, "SIGBREAK", None)
-
-        if break_signal is not None:
-            try:
-                signal.signal(break_signal, lambda sig, frame: stop_event.set())
-            except (ValueError, OSError):  # pragma: no cover
-                pass
+        # Service mode (session 0): no console, so SIGBREAK and SIGINT
+        # never arrive. Only register handlers for signals that can actually
+        # be delivered by the SCM or the parent launcher.
+        service_mode = os.environ.get("FRIGATE_SERVICE_MODE", "0") == "1"
+        if not service_mode:
+            break_signal = getattr(signal, "SIGBREAK", None)
+            if break_signal is not None:
+                try:
+                    signal.signal(break_signal, lambda sig, frame: stop_event.set())
+                except (ValueError, OSError):  # pragma: no cover
+                    pass
+        else:
+            # In session 0, rely on the SCM stop event (handled by the
+            # launcher / service wrapper) rather than console signals.
+            # Keep SIGINT for completeness if the service is started
+            # interactively during testing.
+            pass
 
         return
 
