@@ -583,6 +583,11 @@ def main(argv: list[str] | None = None) -> int:
         help="exclude the Frigate base directory from Microsoft Defender",
     )
     parser.add_argument(
+        "--install-service",
+        action="store_true",
+        help="install the Frigate SCM service (requires pywin32 and admin privileges)",
+    )
+    parser.add_argument(
         "--print-digests",
         action="store_true",
         help="print the recorded artifact digests and exit",
@@ -620,6 +625,22 @@ def main(argv: list[str] | None = None) -> int:
 
         if not args.skip_shortcut:
             install_start_menu_shortcut(launcher)
+
+        if args.install_service:
+            logger.info("Installing SCM service (requires admin privileges)...")
+            service_script = REPO_ROOT / "scripts" / "install_frigate_service.ps1"
+            if service_script.exists():
+                subprocess.run(
+                    [
+                        "powershell",
+                        "-ExecutionPolicy", "Bypass",
+                        "-File", str(service_script),
+                        "-Action", "Install",
+                    ],
+                    check=False,
+                )
+            else:
+                logger.error("Service install script not found: %s", service_script)
 
         if args.add_defender_exclusion:
             add_defender_exclusion(layout)
