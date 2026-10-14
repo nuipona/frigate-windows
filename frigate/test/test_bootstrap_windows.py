@@ -8,6 +8,7 @@ generation without touching the network.
 import importlib.util
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 import zipfile
@@ -243,3 +244,39 @@ class TestInstallArtifact(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestServiceInstall(unittest.TestCase):
+    """The SCM installer is driven with this environment's interpreter."""
+
+    def test_the_environment_interpreter_is_passed_to_the_installer(self):
+        python = Path("C:/Frigate/.venv/Scripts/python.exe")
+
+        with patch.object(bootstrap.subprocess, "run") as run:
+            run.return_value = subprocess.CompletedProcess([], 0)
+            bootstrap.install_service(python)
+
+        command = run.call_args.args[0]
+        self.assertEqual(command[0], "powershell")
+        self.assertIn("-Action", command)
+        self.assertIn("Install", command)
+        # without this the installer would guess, and could register a service
+        # that runs an interpreter without Frigate or pywin32 in it
+        self.assertIn(str(python), command)
+
+    def test_a_refused_install_is_reported(self):
+        """The installer refuses rather than registering a broken service."""
+        with patch.object(bootstrap.subprocess, "run") as run:
+            run.return_value = subprocess.CompletedProcess([], 1)
+
+            with self.assertRaises(bootstrap.BootstrapError) as raised:
+                bootstrap.install_service(Path("C:/Frigate/.venv/Scripts/python.exe"))
+
+        self.assertIn("not installed", str(raised.exception))
+
+    def test_a_missing_installer_is_reported(self):
+        with patch.object(bootstrap, "REPO_ROOT", Path("C:/nowhere")):
+            with self.assertRaises(bootstrap.BootstrapError) as raised:
+                bootstrap.install_service(Path("python.exe"))
+
+        self.assertIn("not found", str(raised.exception))
