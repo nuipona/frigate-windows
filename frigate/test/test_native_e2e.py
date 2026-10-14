@@ -394,7 +394,7 @@ class TestNativeEndToEnd(unittest.TestCase):
 
         name = f"FrigateE2EStop-{os.getpid()}"
         handle = win32event.CreateEvent(None, 1, 0, name)
-        self.addCleanup(win32event.CloseHandle, handle)
+        self.addCleanup(handle.Close)
 
         self._start_frigate(service_stop_event=name)
 

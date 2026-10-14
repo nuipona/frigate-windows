@@ -953,7 +953,8 @@ def _wait_for_service_stop(win32event, name: str, stop_event) -> None:
     try:
         win32event.WaitForSingleObject(handle, win32event.INFINITE)
     finally:
-        win32event.CloseHandle(handle)
+        # win32event has no CloseHandle; the handle closes itself
+        handle.Close()
 
     logger.info("The Windows service asked Frigate to stop")
     stop_event.set()

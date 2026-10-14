@@ -1,8 +1,10 @@
 """Platform helper tests for Windows command and path handling."""
 
 import os
+import tempfile
 import threading
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from frigate.util.builtin import get_ffmpeg_arg_list
@@ -244,25 +246,35 @@ class TestIpcEndpoints(unittest.TestCase):
 class TestMediaUrlPaths(unittest.TestCase):
     def test_cache_urls_resolve_into_the_cache_dir(self):
         """The cache dir is the /cache URL root, not a directory inside it."""
+        # a resolved path is a real path on this platform, so the expected
+        # value is built with the same separators the platform uses
+        cache_dir = str(Path(tempfile.gettempdir()) / "frigate-cache")
+
         with (
             patch("frigate.util.platform.get_media_dir", return_value="/media/frigate"),
-            patch("frigate.util.platform.get_cache_dir", return_value="/tmp/cache"),
+            patch("frigate.util.platform.get_cache_dir", return_value=cache_dir),
         ):
             self.assertEqual(
                 resolve_media_url_path("/cache/previews/front_door/1.jpg"),
-                "/tmp/cache/previews/front_door/1.jpg",
+                os.path.join(cache_dir, "previews", "front_door", "1.jpg"),
             )
             self.assertEqual(
-                to_media_url_path("/tmp/cache/previews/front_door/1.jpg"),
+                to_media_url_path(
+                    os.path.join(cache_dir, "previews", "front_door", "1.jpg")
+                ),
                 "/cache/previews/front_door/1.jpg",
             )
 
     def test_media_paths_round_trip(self):
+        media_dir = str(Path(tempfile.gettempdir()) / "frigate-media")
+
         with (
-            patch("frigate.util.platform.get_media_dir", return_value="/media/frigate"),
+            patch("frigate.util.platform.get_media_dir", return_value=media_dir),
             patch("frigate.util.platform.get_cache_dir", return_value="/tmp/cache"),
         ):
-            path = "/media/frigate/recordings/2024-01-01/10/front_door/00.00.mp4"
+            path = os.path.join(
+                media_dir, "recordings", "2024-01-01", "10", "front_door", "00.00.mp4"
+            )
             self.assertEqual(
                 to_media_url_path(path),
                 "/recordings/2024-01-01/10/front_door/00.00.mp4",
@@ -323,7 +335,7 @@ class TestServiceStopWatcher(unittest.TestCase):
 
         name = f"FrigateTestStop-{os.getpid()}"
         handle = win32event.CreateEvent(None, 1, 0, name)
-        self.addCleanup(win32event.CloseHandle, handle)
+        self.addCleanup(handle.Close)
 
         stop_event = threading.Event()
 
