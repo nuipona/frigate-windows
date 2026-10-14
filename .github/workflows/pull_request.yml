@@ -78,6 +78,29 @@ jobs:
             web/playwright-report/
           retention-days: 7
 
+  upstream_parity:
+    # This fork replaces Linux-only code instead of dropping upstream
+    # behaviour, so every difference from upstream has to be a recorded,
+    # reviewed one. The baseline is where each replacement is justified, and
+    # this fails when upstream adds a file, when upstream edits code this fork
+    # replaces, or when a divergence appears without a reason. Run
+    # testing-scripts/check_upstream_parity.py --update after reviewing.
+    name: Upstream Parity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Python ${{ env.DEFAULT_PYTHON }}
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: ${{ env.DEFAULT_PYTHON }}
+      - name: Check the tree against the commit the baseline was verified on
+        # --fetch pulls the baseline's upstream commit, not the branch tip, so
+        # the result does not depend on when the job runs
+        run: python3 testing-scripts/check_upstream_parity.py --fetch
+
   windows_native_smoke:
     name: Windows Native Compatibility
     runs-on: windows-latest

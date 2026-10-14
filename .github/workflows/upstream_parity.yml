@@ -1,0 +1,50 @@
+name: Upstream parity
+
+# Upstream Frigate moves most days, and this fork syncs by re-applying
+# upstream's changes by hand, so nothing tells anybody that a sync is due.
+# This is that reminder: it fails while upstream's branch has moved past the
+# commit testing-scripts/upstream_parity_baseline.json was verified against,
+# and prints the commits that are waiting. A green run means the fork is still
+# at the commit it was audited against, not that the port is broken.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Mondays at 06:00 UTC. Weekly keeps a failing run meaningful: upstream
+    # merges most weekdays, so a daily check would be red every day.
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+env:
+  DEFAULT_PYTHON: 3.11
+
+jobs:
+  drift:
+    name: Upstream Drift
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Python ${{ env.DEFAULT_PYTHON }}
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: ${{ env.DEFAULT_PYTHON }}
+      - name: Report upstream commits this fork has not synced
+        # a shallow window wide enough to list the commits since the baseline
+        run: python3 testing-scripts/check_upstream_parity.py --fetch --drift
+      - name: Summarise for the run page
+        if: always()
+        run: |
+          {
+            echo "### Upstream parity"
+            echo
+            echo "Weekly check that this fork still carries everything"
+            echo "https://github.com/blakeblackshear/frigate carries."
+            echo
+            echo "Sync with upstream, review the result, then run"
+            echo "\`testing-scripts/check_upstream_parity.py --update\` and commit the baseline."
+          } >> "$GITHUB_STEP_SUMMARY"

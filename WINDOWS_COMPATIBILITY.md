@@ -7,14 +7,46 @@ with no Docker and no WSL. Line references are against the current tree.
 
 ## Upstream parity
 
-This fork tracks `blakeblackshear/frigate` `dev`. **Last synced to upstream
-`e61ad52b` (2026-10-12)**, which brought in two commits this fork was missing. **Updated: upstream `b79e043` (Reduce idle CPU from thread pools, #24652) merged on `arena/3d44d5f3-frigate-windows` (2026-10-13)** — `get_ort_session_options()` now accepts the `cpu` provider flag and disables `session.intra_op.allow_spinning` for CPU enrichment sessions; `frigate/embeddings/__init__.py` and `frigate/output/output.py` set `cv2.setNumThreads(1)`.
+This fork tracks `blakeblackshear/frigate` `dev`. **Verified against upstream
+`b79e043` (Reduce idle CPU from thread pools, #24652, 2026-10-13) on
+2026-10-14**: tree content is at parity, with no upstream file missing and no
+upstream behaviour dropped. The three most recent upstream commits are the
+ones the port had to absorb:
 
 | Upstream commit | What it changes here |
 | --- | --- |
-| `ff9eb8f1` Keep frame shared memory mapped (#24644) | `FrameManager` grows `frame_times()` / `close_camera()` and `get()` takes a `frame_time`, so a reader can tell a lapped ring slot from a frame still being read. Merged on top of this fork's Windows fix in `capture_frames`, which slices `frame_buffer[:frame_size]` because a Windows segment is mapped page aligned. |
-| `e61ad52b` move env helpers out of the config package (#24648) | `frigate/config/env.py` → `frigate/util/env.py`. This fork had already moved the go2rtc config generator into `frigate/util/go2rtc_config.py`, so the import moved there rather than in `create_config.py`. |
-| `b79e043` Reduce idle CPU from thread pools (#24652) | `get_ort_session_options()` gains `cpu: bool`; CPU enrichment disables `intra_op.allow_spinning`; embeddings/output processes set `cv2.setNumThreads(1)`. Merged directly — no Windows branch conflicts. |
+| `ff9eb8f1` Keep frame shared memory mapped (#24644) | `frigate/camera/maintainer.py` grew the per-camera `{name}_frame_times` ledger, `frigate/util/image.py`'s frame manager grew `frame_times()` and `close_camera()`, and `get()` takes a frame time so a reader can tell a lapped ring slot from a frame still being read. The port keeps all of it and adds the Windows half: a segment that another process created is mapped page aligned, so `_segment_holds()` compares `>=` there and `==` on POSIX, and `capture_frames` slices one frame out of the mapping instead of reading to the end of the segment. |
+| `e61ad52b6` move env helpers out of the config package (#24648) | `frigate/config/env.py` → `frigate/util/env.py`, with every importer updated. This fork had already moved the go2rtc config generator into `frigate/util/go2rtc_config.py`, so the entrypoint that imports the helpers moved there rather than in `create_config.py`. |
+| `b79e04397` Reduce idle CPU from thread pools (#24652) | `get_ort_session_options()` takes the `cpu` flag and clears `session.intra_op.allow_spinning` for CPU enrichment sessions; `frigate/embeddings/__init__.py`, `frigate/output/output.py` and `frigate/video/detect.py` set `cv2.setNumThreads(1)`. Merged unchanged. |
+
+The upstream commit *shas* are absent from this fork's history on purpose:
+upstream changes are re-applied by hand so a port that rewrote the same lines
+does not have to be re-resolved, which means ancestry says nothing about
+parity. **Tree content is the thing to check, and it is checked
+automatically**: `testing-scripts/check_upstream_parity.py` compares this tree
+against the upstream commit recorded in
+`testing-scripts/upstream_parity_baseline.json` and fails when
+
+* upstream has a file this fork does not have;
+* a file diverges without a reviewed entry, or with an entry whose reason is
+  still empty;
+* the digest of the upstream lines this fork deliberately lacks changed,
+  meaning upstream edited code the port replaced;
+* a file that was recorded as diverged now matches upstream, or a fork-only
+  file disappeared.
+
+Every entry in the baseline carries the reason the divergence is deliberate,
+so the file doubles as the port's audit record. The check runs on every pull
+request (`.github/workflows/pull_request.yml`, `upstream_parity`), and
+`.github/workflows/upstream_parity.yml` runs it weekly against upstream's
+branch tip so a missed sync is visible instead of being discovered by someone
+reading a diff later. After syncing or reviewing, run
+
+```
+python testing-scripts/check_upstream_parity.py --update   # re-baseline
+python testing-scripts/check_upstream_parity.py --show PATH # what this fork lacks
+python testing-scripts/check_upstream_parity.py --drift     # is a sync due?
+```
 
 The Windows port deliberately *adapts* rather than removes upstream behaviour.
 Everything it swaps out was checked to produce byte-identical results on Linux:
@@ -30,14 +62,12 @@ The remaining gaps are hardware probes with no Windows equivalent
 which return empty on Windows and are tracked under
 [P3-3](#p3-3-detector-coverage-on-windows-is-narrow).
 
-To re-check parity after an upstream merge, diff this tree against upstream
-`dev` and confirm every remaining difference is an `IS_WINDOWS` branch or a
-file this fork adds:
-
-```
-git fetch https://github.com/blakeblackshear/frigate.git dev
-git diff --stat FETCH_HEAD -- .
-```
+To re-check parity after an upstream merge, run
+`python testing-scripts/check_upstream_parity.py --fetch`; it lists every
+upstream line this fork does not carry, which is the population that has to be
+an `IS_WINDOWS` branch or a deliberately replaced Linux-only call. `--update`
+re-baselines once those lines have been reviewed, and the checker refuses to
+pass while an entry has no reason.
 
 ---
 
