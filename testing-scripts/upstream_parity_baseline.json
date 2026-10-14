@@ -32,7 +32,7 @@
       "reason": "documents the native Windows install instead of upstream's 'not officially supported' note"
     },
     "frigate/__main__.py": {
-      "fork_only_lines": 48,
+      "fork_only_lines": 53,
       "missing_digest": "sha256:4cc583293668cf52c5d688c0f208f6d847340092309226727f275fe02c23ca34",
       "missing_lines": 21,
       "reason": "spawn instead of forkserver on Windows, and signal handling that also works in a service"
@@ -314,7 +314,7 @@
       "reason": "fcntl and resource are not available on Windows"
     },
     "frigate/test/test_restart_frigate.py": {
-      "fork_only_lines": 88,
+      "fork_only_lines": 131,
       "missing_digest": "sha256:e7659812943cda42daaea831001745671e1896c0f692820d40ff4cce076feb43",
       "missing_lines": 1,
       "reason": "restart through the launcher and service instead of exec"
@@ -404,7 +404,7 @@
       "reason": "no setproctitle or os.nice on Windows; process groups and job objects instead"
     },
     "frigate/util/services.py": {
-      "fork_only_lines": 314,
+      "fork_only_lines": 340,
       "missing_digest": "sha256:bf90e66230b03fc96139e1554e960420321eba715dd65bea99ca9aeaae399f35",
       "missing_lines": 62,
       "reason": "Windows replacements for the /proc, /dev/shm, libva and DRM probes, and for nice"
@@ -477,6 +477,7 @@
     "frigate/test/test_sqlitevecq_windows.py": "tests for loading sqlite-vec from the Windows wheel layout",
     "frigate/test/test_upstream_parity_check.py": "tests for the parity checker, against throwaway repositories",
     "frigate/test/test_windows_hwaccel.py": "tests for the Windows hwaccel presets and auto-detection",
+    "frigate/test/test_windows_service.py": "tests the service wrapper's interpreter lookup and exit policy, which are plain logic and are checked on every platform (upstream has no SCM service)",
     "frigate/test/windows_suite_denylist.txt": "names the tests that cannot run on Windows for the CI unit-suite job",
     "frigate/util/birdseye_pipe.py": "named-pipe equivalent of upstream's os.mkfifo birdseye pipe",
     "frigate/util/go2rtc_config.py": "go2rtc config generation moved out of the container entrypoint so the native install can run it",
