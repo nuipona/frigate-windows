@@ -6,30 +6,53 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-<a href="https://hosted.weblate.org/engage/frigate-nvr/">
-<img src="https://hosted.weblate.org/widget/frigate-nvr/language-badge.svg" alt="Translation status" />
-</a>
+\[English\] | [简体中文](README_CN.md)
 
-\[English\] | [简体中文](https://github.com/blakeblackshear/frigate/blob/dev/README_CN.md)
+A complete and local NVR designed for [Home Assistant](https://www.home-assistant.io) with AI object detection, running realtime detection locally for IP cameras.
 
-A complete and local NVR designed for [Home Assistant](https://www.home-assistant.io) with AI object detection. Uses OpenCV and Tensorflow to perform realtime object detection locally for IP cameras.
-
-Use of a GPU or AI accelerator is highly recommended. AI accelerators will outperform even the best CPUs with very little overhead. See Frigate's supported [object detectors](https://docs.frigate.video/configuration/object_detectors/).
+Use of a GPU or AI accelerator is highly recommended: accelerators outperform even the best CPUs with very little overhead. See the supported [object detectors](https://docs.frigate.video/configuration/object_detectors/).
 
 - Tight integration with Home Assistant via a [custom component](https://github.com/blakeblackshear/frigate-hass-integration)
-- Designed to minimize resource use and maximize performance by only looking for objects when and where it is necessary
-- Leverages multiprocessing heavily with an emphasis on realtime over processing every frame
-- Uses a very low overhead motion detection to determine where to run object detection
-- Object detection with TensorFlow runs in separate processes for maximum FPS
-- Communicates over MQTT for easy integration into other systems
-- Records video with retention settings based on detected objects
-- 24/7 recording
+- Only looks for objects when and where it is necessary, to minimize resource use
+- Multiprocessing design that favors realtime over processing every frame
+- Low overhead motion detection decides where object detection runs
+- Detection runs in separate processes for maximum FPS
+- MQTT for integration into other systems
+- Recording with retention based on detected objects, plus 24/7 recording
 - Re-streaming via RTSP to reduce the number of connections to your camera
-- WebRTC & MSE support for low-latency live view
+- WebRTC and MSE for low-latency live view
+
+## This fork: native Windows
+
+`nuipona/frigate-windows` tracks `blakeblackshear/frigate` and adds a native Windows install: Frigate runs as a normal Windows process, with no Docker and no WSL. Frigate itself serves the API, the media endpoints and the web interface, so there is no nginx, no s6 and no `/dev/shm`.
+
+Install from an ordinary PowerShell window:
+
+```powershell
+git clone https://github.com/nuipona/frigate-windows.git
+cd frigate-windows
+py -3.12 bootstrap_windows.py
+powershell -ExecutionPolicy Bypass -File .\run_frigate.ps1
+```
+
+The bootstrap script needs 64-bit CPython 3.12. It creates the venv, installs the Windows requirements, fetches pinned FFmpeg and go2rtc builds, builds the web interface when Node.js is available, and writes a launcher that restarts Frigate when Frigate asks to be restarted. Node.js is only needed for that frontend build: the `windows_bundle` release job publishes a zip with `web/dist` already built.
+
+Windows-specific behaviour:
+
+- Detectors: CPU (TFLite, ONNX Runtime, OpenVINO) and Intel GPU/NPU through OpenVINO, plus AMD, Intel and Nvidia GPU inference through DirectML (`onnxruntime-directml`, installed by default). Coral, Hailo and other accelerators that need Linux-only drivers are unavailable, and a config that names one fails validation with the list Windows can run.
+- Video: `preset-windows-d3d11va`, `preset-windows-dxva2`, `preset-windows-qsv` and `preset-windows-nvenc`, and `ffmpeg.hwaccel_args: auto` detects which one to use.
+- Files: everything lives under one base directory, `%LOCALAPPDATA%\Frigate` by default, relocatable with `FRIGATE_BASE_DIR`.
+- Optional SCM service: `bootstrap_windows.py --install-service`.
+
+Read the [Windows installation guide](docs/docs/frigate/installation.md#windows) for setup, ports and tuning, and [WINDOWS_COMPATIBILITY.md](WINDOWS_COMPATIBILITY.md) for the port audit: what was changed, what is verified, and what is still open.
 
 ## Documentation
 
-View the documentation at https://docs.frigate.video
+View the documentation at https://docs.frigate.video. To build this fork's docs locally, see [docs/README.md](docs/README.md).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md).
 
 ## Donations
 

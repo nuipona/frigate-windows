@@ -604,13 +604,13 @@ Finally, configure [hardware object detection](/configuration/object_detectors#a
 
 ## Windows
 
-Frigate can run natively on Windows without Docker or WSL. The API, media endpoints, and web interface are served by Frigate itself. Native Windows has a dedicated dependency set and supports CPU inference plus Windows-compatible video acceleration; Linux-only accelerator runtimes are not included. The Docker Desktop/WSL2 route is separate and follows the [Docker installation](#docker) instructions.
+Frigate can run natively on Windows without Docker or WSL. The API, media endpoints, and web interface are served by Frigate itself. Native Windows has its own dependency set: CPU inference, GPU inference through DirectML and OpenVINO, and Windows video acceleration. Accelerators that need Linux-only drivers or runtimes are not available. The Docker Desktop/WSL2 route is separate and follows the [Docker installation](#docker) instructions.
 
 ### Requirements
 
 - Windows 10 or 11, 64-bit
 - [Python](https://www.python.org/downloads/) 3.12, 64-bit
-- Everything else (FFmpeg, go2rtc, the built web interface) is fetched or built by the bootstrap script below. Node.js is only needed to build the web interface yourself; a [release bundle](https://github.com/nuipona/frigate-windows/releases) ships it prebuilt.
+- Everything else (FFmpeg, go2rtc, the built web interface) is fetched or built by the bootstrap script below. Node.js is only needed to build the web interface yourself; the `windows_bundle` release job publishes a zip with it prebuilt.
 
 ### Installing
 
@@ -629,7 +629,7 @@ Start Frigate with the launcher it writes (this is what the Start Menu shortcut 
 powershell -ExecutionPolicy Bypass -File .\run_frigate.ps1
 ```
 
-Useful options: `--skip-web` to skip the frontend build, `--directml` to run detection on AMD, Intel or Nvidia GPUs through DirectML (see [hardware acceleration](#hardware-acceleration-1)), and `--add-defender-exclusion` to exclude the Frigate directories from Microsoft Defender, which the [tuning](#tuning-windows-for-frigate) section recommends. The FFmpeg and go2rtc downloads are pinned to exact builds and land in `%LOCALAPPDATA%\Frigate\config` (`ffmpeg\` and `go2rtc.exe`), which Frigate looks in before `PATH`; their SHA-256 digests are recorded on first use and verified on every later run.
+Useful options: `--skip-web` to skip the frontend build, `--no-directml` to install CPU-only ONNX Runtime instead of DirectML (see [hardware acceleration](#hardware-acceleration)), `--add-defender-exclusion` to exclude the Frigate directories from Microsoft Defender, which the [tuning](#tuning-windows-for-frigate) section recommends, and `--install-service` to register the optional [Windows service](#running-as-a-windows-service). The FFmpeg and go2rtc downloads are pinned to exact builds and land in `%LOCALAPPDATA%\Frigate\config` (`ffmpeg\` and `go2rtc.exe`), which Frigate looks in before `PATH`; their SHA-256 digests are recorded on first use and verified on every later run.
 
 To install by hand instead, run these commands from PowerShell in the directory where you want the Frigate checkout. The frontend build is required for the native server to serve the UI.
 
@@ -644,7 +644,7 @@ npm run build:native
 Pop-Location
 ```
 
-The Windows requirements install CPU-capable TFLite, ONNX Runtime, and OpenVINO runtimes. The first-time Windows config uses the CPU TFLite detector and downloads its small default model into `<base>\config\model_cache`; this requires network access to GitHub. If the download is blocked, Frigate logs the expected model path so you can place the model there manually. Optional GPU acceleration still requires compatible Windows drivers and an FFmpeg build with the relevant codec support.
+The Windows requirements install CPU-capable TFLite, ONNX Runtime, and OpenVINO runtimes; the bootstrap script then swaps ONNX Runtime for `onnxruntime-directml` so the `onnx` detector can use an AMD, Intel or Nvidia GPU. The first-time Windows config uses the CPU TFLite detector and downloads its small default model into `<base>\config\model_cache`; this requires network access to GitHub. If the download is blocked, Frigate logs the expected model path so you can place the model there manually. Optional GPU acceleration still requires compatible Windows drivers and an FFmpeg build with the relevant codec support.
 
 ### Running
 
@@ -654,7 +654,26 @@ The Windows requirements install CPU-capable TFLite, ONNX Runtime, and OpenVINO 
 
 Frigate stops on Ctrl+C. Closing the console window also stops it. Logs are written to `%LOCALAPPDATA%\Frigate\tmp\logs\frigate\current` by default.
 
-Under the launcher, the restart action in the web UI and the watchdog's restart of a failed detector start Frigate again automatically; Frigate marks the restart request before it exits and the launcher starts it again only when that mark is present, so Ctrl+C still stops it for good. Native Windows does not install a service supervisor, so without the launcher Frigate stays stopped when it exits.
+Under the launcher, the restart action in the web UI and the watchdog's restart of a failed detector start Frigate again automatically; Frigate marks the restart request before it exits and the launcher starts it again only when that mark is present, so Ctrl+C still stops it for good. Without the launcher, or a service, Frigate stays stopped when it exits.
+
+### Running as a Windows service
+
+An optional service runs Frigate with no console and starts it at boot. Install it from an elevated PowerShell prompt:
+
+```powershell
+py -3.12 bootstrap_windows.py --install-service
+# or, against an existing install
+.\scripts\install_frigate_service.ps1 -Action Install
+```
+
+The script also takes `Configure`, `Start`, `Stop`, `Remove` and `Status`.
+
+A service differs from a desktop install in ways the installer handles for you:
+
+- The service runs as `NT AUTHORITY\LocalService` and inherits none of your environment, so it keeps its data in `%ProgramData%\Frigate` by default (`-BaseDir` to change it, or `FRIGATE_BASE_DIR` at install time).
+- The service account cannot read your profile, so the installer refuses to install when the checkout, the interpreter or the data directory sit inside one. A checkout under `C:\Users\...` will be rejected: clone it somewhere like `C:\Frigate` for a service install, or pass `-SkipAccessCheck` if you have granted the access yourself.
+- Stopping goes through a named event rather than a console signal, so recordings are finalized instead of the process being terminated.
+- Frigate exiting is reported to the service control manager as a failure, and the installer configures the recovery actions that restart it 30 seconds later.
 
 ### Where files go
 
@@ -710,7 +729,7 @@ ffmpeg:
   hwaccel_args: preset-windows-d3d11va
 ```
 
-Native Windows inference supports the CPU (ONNX Runtime, OpenVINO, or TFLite) and Intel devices through OpenVINO. The Windows requirements install the CPU ONNX Runtime package; for NVIDIA inference, replace it with the matching `onnxruntime-gpu` package and install compatible NVIDIA drivers. For example, assign an NVIDIA model to `onnx:0`:
+Native Windows inference runs on the CPU (TFLite, ONNX Runtime, or OpenVINO) and on a GPU through DirectML or OpenVINO. Assign a device per model; for example, pin a model to the first ONNX device:
 
 ```yaml
 models:
@@ -718,7 +737,7 @@ models:
       - onnx:0
 ```
 
-On a machine with an AMD, Intel or Nvidia GPU, `onnxruntime-directml` is the one package that covers all three: it adds GPU inference across vendors through DirectML and is the recommended detector for a Windows machine without an Intel iGPU. Both packages provide the `onnxruntime` import, so one replaces the other; `bootstrap_windows.py --directml` performs the swap, or do it by hand:
+`onnxruntime-directml` is the one package that gives GPU inference on AMD, Intel and Nvidia, and `bootstrap_windows.py` installs it by default (`--no-directml` installs the CPU-only `onnxruntime` package instead). Both provide the `onnxruntime` import, so one replaces the other; to swap by hand:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip uninstall onnxruntime
@@ -756,7 +775,7 @@ New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
 
 - Windows shared memory is backed by the page file. Increase the Windows page-file size for large camera setups; Frigate does not report a separate `/dev/shm` capacity on Windows.
 - Birdseye RTSP restreaming is available on Windows through a loopback TCP connection to go2rtc instead of a POSIX FIFO. Install go2rtc and allow it to run; the browser's Birdseye view does not require the RTSP restream.
-- Native Windows does not install a Windows service or automatic restart supervisor. If Frigate exits or you use the restart action, launch it again from PowerShell.
+- Nothing restarts Frigate by itself unless you use the launcher or the optional [Windows service](#running-as-a-windows-service). After a plain `python -m frigate`, Frigate stays stopped once it exits.
 
 ## Docker
 
