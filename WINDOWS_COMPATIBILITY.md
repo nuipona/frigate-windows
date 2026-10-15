@@ -8,12 +8,12 @@ with no Docker and no WSL. Line references are against the current tree.
 ## Upstream parity
 
 This fork tracks `blakeblackshear/frigate` `dev`. It is synced and audited
-against upstream commit `2b0a69c0282226d4b1501864bba67acad7b5eb95` on
+against upstream commit `16a377233e3a1001775790ab64947cb347d6dfae` on
 2026-10-15. That sync carries all 19 commits since the previous verified
-commit, `b79e043` (2026-10-13), including the upstream security release
-(#24658). All upstream source and test files are present; the only upstream
-path intentionally not carried is `.github/pull_request_template.md`, which
-was deleted on this fork and is recorded in the parity baseline.
+commit, `2b0a69c0282226d4b1501864bba67acad7b5eb95`. All upstream source and
+test files are present; the only upstream path intentionally not carried is
+`.github/pull_request_template.md`, which was deleted on this fork and is
+recorded in the parity baseline.
 
 The sync includes the following behavior, not just version or documentation
 updates:
@@ -28,6 +28,9 @@ updates:
 | `cf67f08` | MSE buffer trimming no longer spins when removing a range |
 | `8e569ff`, `41d9577`, `d3b2af9`, `f929134`, `2273cf2` | Intel GPU requirements, shared-memory calculator, release docs, embedding guidance, and camera docs are current |
 | `33cb8d9`, `a3ca874` | Original request-path handling and the upstream go2rtc/API security fixes are carried into both the container and native server paths |
+| `64b0788` | Bounded per-client WebSocket send queues, a stalled-client timeout, protection against lost tracks newly entering zones, 404-aware detail lookup retries, and the latest notice recurrence time. On Windows, `SO_SNDTIMEO` uses Winsock's required millisecond integer rather than the POSIX `timeval` representation; a regression test covers the native format. |
+| `15da89e` | Watchdog resets wait for FFmpeg to exit without buffering raw stdout frames, retaining the timeout and kill fallback. |
+| 17 translation commits through `16a3772` | Locale updates and the new Georgian translation are included. |
 
 The security update is especially relevant to a native install. New go2rtc
 sources submitted through the API or config editor are checked for command

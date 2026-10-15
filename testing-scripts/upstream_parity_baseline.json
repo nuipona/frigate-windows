@@ -103,6 +103,12 @@
       "missing_lines": 2,
       "reason": "ipc_endpoint()"
     },
+    "frigate/comms/ws.py": {
+      "fork_only_lines": 14,
+      "missing_digest": "sha256:d98fc938950aed81cc0905263b4006d51e2bbc8b03e1fcb29b8fc50024813358",
+      "missing_lines": 3,
+      "reason": "Preserves upstream's per-client queue and send timeout, but supplies SO_SNDTIMEO in Winsock's required integer milliseconds (POSIX still uses timeval bytes); the upstream timeval packing is rejected by native Windows."
+    },
     "frigate/comms/zmq_proxy.py": {
       "fork_only_lines": 3,
       "missing_digest": "sha256:d030e52b10bd504a78723f00f56edf59fdfff8d68776b2e6cac02a5e63ed0bdc",
@@ -260,7 +266,7 @@
       "reason": "storage statistics use platform.storage_stat_key() instead of /dev/shm"
     },
     "frigate/test/http_api/test_http_export.py": {
-      "fork_only_lines": 31,
+      "fork_only_lines": 33,
       "missing_digest": "sha256:db6bbcaebdfb0f0644d49c0fd8832e64978afd6f50d08a54da1a8e1a0630e7c4",
       "missing_lines": 1,
       "reason": "covers the Windows backslash-to-URL separator normalization for export thumbnail authorization"
@@ -354,6 +360,12 @@
       "missing_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "missing_lines": 0,
       "reason": "page-file backed shared memory has no size to raise"
+    },
+    "frigate/test/test_ws_send_queue.py": {
+      "fork_only_lines": 19,
+      "missing_digest": "sha256:404780e53591ab08528d819a65f1fa1d29c1fb2a0ccb72441e213d61d57fb9a3",
+      "missing_lines": 3,
+      "reason": "Regression coverage for the native Windows socket timeout format; captures setsockopt and asserts Winsock receives an integer millisecond timeout."
     },
     "frigate/util/audio.py": {
       "fork_only_lines": 3,
@@ -522,6 +534,6 @@
   "removed_upstream_files": {
     ".github/pull_request_template.md": "deleted on dev: this fork does not carry upstream's pull request template, the fork's own CI checks the description instead"
   },
-  "upstream_commit": "2b0a69c0282226d4b1501864bba67acad7b5eb95",
+  "upstream_commit": "16a377233e3a1001775790ab64947cb347d6dfae",
   "upstream_repo": "https://github.com/blakeblackshear/frigate.git"
 }
