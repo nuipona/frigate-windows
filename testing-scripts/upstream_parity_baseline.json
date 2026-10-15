@@ -32,9 +32,9 @@
       "reason": "documents the native Windows install instead of upstream's 'not officially supported' note"
     },
     "frigate/__main__.py": {
-      "fork_only_lines": 53,
-      "missing_digest": "sha256:4cc583293668cf52c5d688c0f208f6d847340092309226727f275fe02c23ca34",
-      "missing_lines": 21,
+      "fork_only_lines": 61,
+      "missing_digest": "sha256:08528682950527ed98bdf53ea09638d94b9e5d3704861f4d5f53155fe8d1662b",
+      "missing_lines": 24,
       "reason": "spawn instead of forkserver on Windows, and signal handling that also works in a service"
     },
     "frigate/api/app.py": {
@@ -54,6 +54,12 @@
       "missing_digest": "sha256:645ffa1b0c6b2cf941d9b71cafce1840420cda767fc6e468dba5ae97a0d2c62e",
       "missing_lines": 3,
       "reason": "internal listen port of the native server"
+    },
+    "frigate/api/export.py": {
+      "fork_only_lines": 15,
+      "missing_digest": "sha256:1183ca75e92f9dec627e11d482ff6485ac87834f96526c483091b7922d92309d",
+      "missing_lines": 7,
+      "reason": "normalizes Windows filesystem separators to URL separators before camera-scoped image authorization"
     },
     "frigate/api/media.py": {
       "fork_only_lines": 11,
@@ -253,6 +259,18 @@
       "missing_lines": 5,
       "reason": "storage statistics use platform.storage_stat_key() instead of /dev/shm"
     },
+    "frigate/test/http_api/test_http_export.py": {
+      "fork_only_lines": 31,
+      "missing_digest": "sha256:db6bbcaebdfb0f0644d49c0fd8832e64978afd6f50d08a54da1a8e1a0630e7c4",
+      "missing_lines": 1,
+      "reason": "covers the Windows backslash-to-URL separator normalization for export thumbnail authorization"
+    },
+    "frigate/test/test_comms_thread_safety.py": {
+      "fork_only_lines": 43,
+      "missing_digest": "sha256:5aeb7065d159c4cf221a23dccb43746d201da772a6a230de1ebd251b4c1a6f63",
+      "missing_lines": 40,
+      "reason": "uses loopback TCP rather than the POSIX-only ipc transport so the ZeroMQ concurrency tests run on Windows"
+    },
     "frigate/test/test_config.py": {
       "fork_only_lines": 131,
       "missing_digest": "sha256:c71d22b112f456b25e2b87c7f2f6f04d4728f5630f0fb1b8595ad9995b1ef3e5",
@@ -312,6 +330,12 @@
       "missing_digest": "sha256:b6c1468d0e2492ae0e1771b94c7db54df7833362d8ef184f3acbd1dad4891a27",
       "missing_lines": 2,
       "reason": "fcntl and resource are not available on Windows"
+    },
+    "frigate/test/test_process.py": {
+      "fork_only_lines": 9,
+      "missing_digest": "sha256:5a565caea01018d933f8b0901aabf4395a1279a3b83de36e329d964693871922",
+      "missing_lines": 3,
+      "reason": "adapts the upstream worker environment test to forkserver on POSIX and spawn on Windows, while isolating native startup side effects"
     },
     "frigate/test/test_restart_frigate.py": {
       "fork_only_lines": 131,
@@ -498,6 +522,6 @@
   "removed_upstream_files": {
     ".github/pull_request_template.md": "deleted on dev: this fork does not carry upstream's pull request template, the fork's own CI checks the description instead"
   },
-  "upstream_commit": "b79e0439769ab7f7b03805295d0c12e2f0a89032",
+  "upstream_commit": "2b0a69c0282226d4b1501864bba67acad7b5eb95",
   "upstream_repo": "https://github.com/blakeblackshear/frigate.git"
 }

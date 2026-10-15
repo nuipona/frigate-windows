@@ -26,7 +26,14 @@ from frigate.util.platform import (
 
 def main() -> None:
     logger = logging.getLogger("frigate")
-    manager = mp.Manager()
+
+    # The manager must not start the forkserver before the config applies
+    # environment_vars, or workers and their ffmpeg processes inherit the old
+    # environment. Windows and macOS use spawn and have no forkserver.
+    if supports_forkserver():
+        manager = mp.get_context("fork").Manager()
+    else:
+        manager = mp.Manager()
     faulthandler.enable()
 
     # Setup the logging thread

@@ -7,91 +7,75 @@ with no Docker and no WSL. Line references are against the current tree.
 
 ## Upstream parity
 
-This fork tracks `blakeblackshear/frigate` `dev`. **Verified against upstream
-`b79e043` (Reduce idle CPU from thread pools, #24652, 2026-10-13) on
-2026-10-14**: tree content is at parity, with no upstream file missing and no
-upstream behaviour dropped. Upstream `dev` was still at `b79e043` when this
-was re-checked, so no sync was due (`master` is the release branch, not the
-branch this fork tracks).
+This fork tracks `blakeblackshear/frigate` `dev`. It is synced and audited
+against upstream commit `2b0a69c0282226d4b1501864bba67acad7b5eb95` on
+2026-10-15. That sync carries all 19 commits since the previous verified
+commit, `b79e043` (2026-10-13), including the upstream security release
+(#24658). All upstream source and test files are present; the only upstream
+path intentionally not carried is `.github/pull_request_template.md`, which
+was deleted on this fork and is recorded in the parity baseline.
 
-That verification was re-done from scratch on 2026-10-14 because the parity
-checker itself was failing at this commit: the pull request that introduced
-the baseline (#9) recorded it before that same pull request's final edits to
-`frigate/util/ffmpeg.py`, `frigate/output/camera.py` and
-`frigate/output/birdseye.py` (the SCM service stop work), so the recorded
-digests for those three files were stale at merge and the claim above was
-not actually being enforced. All three files were re-audited line by line
-against upstream. On POSIX each one keeps upstream's behaviour: ffmpeg is
-started in a new session and stopped with `terminate()`, the same 30 second
-wait and the same kill fallback; birdseye frames still go through the same
-FIFO, recreated once by the converter when a reader goes away. The Windows
-halves are additive (a graceful ffmpeg quit, a new process group, a loopback
-listener in place of the FIFO). The audit did find one real divergence the
-stale baseline had been hiding: `FifoBirdseyePipe.write` recreated the FIFO
-itself and the converter recreated it again, so one reader going away built
-the FIFO twice and could remove the FIFO a just-reconnected reader had
-opened. Recreation is the caller's job again, as it is upstream, and
-`frigate/test/test_birdseye_pipe.py` covers the contract (frames reach a
-reader, frames with no reader are discarded, a reader going away is reported
-rather than recreated). The baseline was then re-recorded, and the checker
-passes against `b79e043` again. The three most recent upstream commits are
-the ones the port had to absorb:
+The sync includes the following behavior, not just version or documentation
+updates:
 
-| Upstream commit | What it changes here |
+| Upstream changes | What is carried here |
 | --- | --- |
-| `ff9eb8f1` Keep frame shared memory mapped (#24644) | `frigate/camera/maintainer.py` grew the per-camera `{name}_frame_times` ledger, `frigate/util/image.py`'s frame manager grew `frame_times()` and `close_camera()`, and `get()` takes a frame time so a reader can tell a lapped ring slot from a frame still being read. The port keeps all of it and adds the Windows half: a segment that another process created is mapped page aligned, so `_segment_holds()` compares `>=` there and `==` on POSIX, and `capture_frames` slices one frame out of the mapping instead of reading to the end of the segment. |
-| `e61ad52b6` move env helpers out of the config package (#24648) | `frigate/config/env.py` → `frigate/util/env.py`, with every importer updated. This fork had already moved the go2rtc config generator into `frigate/util/go2rtc_config.py`, so the entrypoint that imports the helpers moved there rather than in `create_config.py`. |
-| `b79e04397` Reduce idle CPU from thread pools (#24652) | `get_ort_session_options()` takes the `cpu` flag and clears `session.intra_op.allow_spinning` for CPU enrichment sessions; `frigate/embeddings/__init__.py`, `frigate/output/output.py` and `frigate/video/detect.py` set `cv2.setNumThreads(1)`. Merged unchanged. |
+| `e912d08`, `cb745d0` | Safe deletion of the last camera with commented YAML, camera-authorized export thumbnails, and non-blocking recording snapshots |
+| `c06a973`, `cc86519` | Malformed web-push subscriptions no longer fail startup, and shared ZeroMQ sockets are protected against concurrent use |
+| `e66da62`, `2e92251` | Untrained classification models keep saving images, and GenAI debug thumbnails are saved for early requests |
+| `7786da4`, `c75f7c3`, `9d9de62` | Export image access checks, rejection of dot-only usernames, and admin-only camera-group editing |
+| `7e402d7` | Configured environment variables reach workers and their ffmpeg processes; the fork uses a `fork` manager only where `forkserver` is supported, and retains `spawn` on Windows and macOS |
+| `cf67f08` | MSE buffer trimming no longer spins when removing a range |
+| `8e569ff`, `41d9577`, `d3b2af9`, `f929134`, `2273cf2` | Intel GPU requirements, shared-memory calculator, release docs, embedding guidance, and camera docs are current |
+| `33cb8d9`, `a3ca874` | Original request-path handling and the upstream go2rtc/API security fixes are carried into both the container and native server paths |
 
-The upstream commit *shas* are absent from this fork's history on purpose:
-upstream changes are re-applied by hand so a port that rewrote the same lines
-does not have to be re-resolved, which means ancestry says nothing about
-parity. **Tree content is the thing to check, and it is checked
-automatically**: `testing-scripts/check_upstream_parity.py` compares this tree
-against the upstream commit recorded in
-`testing-scripts/upstream_parity_baseline.json` and fails when
+The security update is especially relevant to a native install. New go2rtc
+sources submitted through the API or config editor are checked for command
+injection, the unsafe-execution override cannot be enabled from the editable
+`environment_vars` config block, and proxied live requests cannot create
+ad-hoc go2rtc streams. Existing on-disk sources remain compatible. The same
+FastAPI auth and stream checks are used by the Windows native web server, so
+the nginx-specific routing changes do not leave the native install behind.
 
-* upstream has a file this fork does not have;
-* a file diverges without a reviewed entry, or with an entry whose reason is
-  still empty;
-* the digest of the upstream lines this fork deliberately lacks changed,
-  meaning upstream edited code the port replaced;
-* a file that was recorded as diverged now matches upstream, or a fork-only
-  file disappeared.
+Upstream commit *shas* are not the port's ancestry: upstream changes are
+re-applied by hand so edits to the same lines do not require blindly merging
+Linux-only code. Tree content is the thing to check. The parity baseline records
+the reviewed differences, and `testing-scripts/check_upstream_parity.py`
+compares the fork to the exact upstream commit recorded there. It fails when
 
-Every entry in the baseline carries the reason the divergence is deliberate,
-so the file doubles as the port's audit record. The check runs on every pull
-request (`.github/workflows/pull_request.yml`, `upstream_parity`), and
-`.github/workflows/upstream_parity.yml` runs it weekly against upstream's
-branch tip so a missed sync is visible instead of being discovered by someone
-reading a diff later. After syncing or reviewing, run
+* upstream has an unreviewed file this fork does not have;
+* a file diverges without a reviewed entry, or the entry has no reason;
+* upstream changes lines that a Windows replacement deliberately replaces;
+* a recorded divergence or fork-only file disappears without review.
+
+Every baseline entry includes why that difference is deliberate. The check
+runs on every pull request (`.github/workflows/pull_request.yml`,
+`upstream_parity`), and `.github/workflows/upstream_parity.yml` runs weekly
+against upstream's branch tip so a missed sync is visible. After syncing or
+reviewing, run
 
 ```
-python testing-scripts/check_upstream_parity.py --update   # re-baseline
-python testing-scripts/check_upstream_parity.py --show PATH # what this fork lacks
-python testing-scripts/check_upstream_parity.py --drift     # is a sync due?
+python testing-scripts/check_upstream_parity.py --update    # re-baseline after review
+python testing-scripts/check_upstream_parity.py --show PATH # inspect upstream-only lines
+python testing-scripts/check_upstream_parity.py --drift     # check whether upstream moved
 ```
 
-The Windows port deliberately *adapts* rather than removes upstream behaviour.
-Everything it swaps out was checked to produce byte-identical results on Linux:
-the `frigate/const.py` directory constants, all eight ZeroMQ `ipc://` endpoints
-(now built by `platform.ipc_endpoint()`), the `service.storage` stat keys the
-web UI reads (now built by `platform.storage_stat_key()`),
-`resolve_ffmpeg_path()` against the image's `DEFAULT_FFMPEG_VERSION` /
-`INCLUDED_FFMPEG_VERSIONS`, the `/labelmap.txt` default, and the
-`openvino:CPU` first-run detector default.
+The Windows port adapts rather than removes upstream behavior. All replaced
+Linux calls were checked for byte-identical results on Linux: directory
+constants, all eight ZeroMQ `ipc://` endpoints, storage-stat keys consumed by
+the UI, `resolve_ffmpeg_path()` against the image's bundled FFmpeg versions,
+the `/labelmap.txt` default, and the `openvino:CPU` first-run detector default.
 
 The remaining gaps are hardware probes with no Windows equivalent
-(`frigate/util/services.py`: libva, DRM sysfs, Rockchip, Jetson, Hailo, Axiom),
-which return empty on Windows and are tracked under
+(`frigate/util/services.py`: libva, DRM sysfs, Rockchip, Jetson, Hailo, Axiom).
+They return empty on Windows and are tracked under
 [P3-3](#p3-3-detector-coverage-on-windows-is-narrow).
 
 To re-check parity after an upstream merge, run
 `python testing-scripts/check_upstream_parity.py --fetch`; it lists every
-upstream line this fork does not carry, which is the population that has to be
-an `IS_WINDOWS` branch or a deliberately replaced Linux-only call. `--update`
-re-baselines once those lines have been reviewed, and the checker refuses to
-pass while an entry has no reason.
+upstream line this fork does not carry. Each replacement must be reviewed as
+an `IS_WINDOWS` branch or a deliberately replaced Linux-only call before
+updating the baseline.
 
 ---
 
@@ -768,19 +752,26 @@ Worth saying explicitly so it does not get refactored away:
 - **`vod_native.py` and `web.py` as an nginx facade.** Reimplementing nginx's
   routing *and* its `auth_request` semantics in-process, and documenting why the
   HTTP-subrequest approach deadlocks, is careful engineering.
-- **The honest docs.** `installation.md:605-700` states plainly what does not
-  work (no service, no Coral/Hailo, no `/dev/shm` accounting, page-file-backed
-  shared memory). That is more useful than optimistic docs, and it is the main
-  reason the gaps above are enumerable at all.
+- **The honest docs.** `installation.md:605-700` states plainly what the
+  native install does not support (Coral/Hailo and other Linux-only runtimes,
+  `/dev/shm` accounting, page-file-backed shared memory). An optional SCM
+  service wrapper exists, but it still needs a real Windows validation run.
+  That is more useful than optimistic docs, and it is the main reason the gaps
+  above are enumerable at all.
 
 ---
 
 ## Part 5 — What is still unverified
 
-Everything above was written and checked from Linux. That bounds what the
-changes below actually guarantee, and it is worth being precise about it.
+The original Windows audit and lifecycle fixes were checked from Linux.
+Windows CI now has a denylist-driven unit-suite job and a synthetic-camera
+end-to-end job, but those jobs do not prove compatibility with every Windows
+driver, camera, or GPU. The upstream sync in this change was checked locally
+with Ruff, the parity-checker tests, frontend lint/i18n extraction, and a
+production web build. The full backend suite and the Windows jobs were not run
+in this workspace.
 
-**Verified here** (20 unit tests, `ruff` clean):
+**Previously verified on Linux** (20 lifecycle unit tests, `ruff` clean):
 
 - every branch of `request_ffmpeg_stop()` — POSIX terminate, Windows `q` on
   stdin, the break-event fallback, and each fallback to `terminate()`
@@ -821,11 +812,11 @@ changes below actually guarantee, and it is worth being precise about it.
 The `windows_native_e2e` job uploads Frigate's log and media on failure, so
 the first red run should be enough to fix any of these.
 
-**One thing the end-to-end test deliberately does not cover:** the
-service-mode shutdown path. A Windows service runs in session 0 with no
-console, so `CTRL_BREAK_EVENT` and `SIGBREAK` do not exist there at all, and
-neither does the console-close behaviour the docs describe. When
-[P3-1](#p3-1-no-windows-packaging-or-service-story)(3) is built,
-`install_signal_handlers()` needs a service-aware branch and the graceful
-ffmpeg stop has to keep working without console events — which is why `q` on
-stdin is the primary mechanism rather than the break event.
+**The SCM service still needs an actual service-mode run.**
+`test_service_stop_event_shuts_down_cleanly` exercises the named-event shutdown
+path on `windows-latest`, and the service wrapper's interpreter lookup and exit
+policy have unit tests. The end-to-end test does not start Frigate under the
+SCM as `NT AUTHORITY\LocalService`, so service registration, session-0 startup,
+permissions, recovery actions, and clean SCM stop reporting remain unverified.
+The named event and ffmpeg's `q` on stdin are the intended shutdown path; a
+console break event is not available to a service.

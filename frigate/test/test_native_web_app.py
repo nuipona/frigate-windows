@@ -1,9 +1,13 @@
 """The native web server, which replaces nginx on Windows."""
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from frigate.api.web import create_native_web_app, needs_auth
+from starlette.requests import Request
+
+from frigate.api.auth import deny_response_for_go2rtc_stream
+from frigate.api.web import build_auth_scope, create_native_web_app, needs_auth
 
 
 class TestNativeWebApp(unittest.TestCase):
@@ -20,6 +24,37 @@ class TestNativeWebApp(unittest.TestCase):
         # the helper directly, which is what the lifespan is for
         self.assertTrue(callable(app.router.lifespan_context))
         sweep.assert_not_called()
+
+    def test_in_process_auth_blocks_unknown_go2rtc_streams(self):
+        """Native auth retains the raw path needed by the stream security check."""
+        for path in (
+            "/live/mse/api/ws",
+            "/live/webrtc/api/ws",
+            "/api/go2rtc/webrtc",
+        ):
+            with self.subTest(path=path):
+                scope = {
+                    "type": "http",
+                    "method": "GET",
+                    "scheme": "http",
+                    "path": path,
+                    "raw_path": path.encode(),
+                    "query_string": b"src=unknown_stream",
+                    "headers": [(b"host", b"frigate.local")],
+                }
+                auth_scope = build_auth_scope(scope, 8971)
+                auth_scope["app"] = SimpleNamespace(frigate_config=MagicMock())
+                request = Request(auth_scope)
+                original_url = dict(auth_scope["headers"])[b"x-original-url"].decode()
+
+                with patch(
+                    "frigate.api.auth._is_existing_go2rtc_stream",
+                    return_value=False,
+                ):
+                    self.assertEqual(
+                        deny_response_for_go2rtc_stream(original_url, "admin", request),
+                        403,
+                    )
 
     def test_startup_sweeps_stale_vod_cache_directories(self):
         """Entering the lifespan runs the startup work exactly once."""
