@@ -19,17 +19,59 @@
       "missing_lines": 0,
       "reason": "ignores native install artifacts (venv, bundled binaries, native build output)"
     },
+    "AGENTS.md": {
+      "fork_only_lines": 33,
+      "missing_digest": "sha256:ccd2e152d7011f7ef6cf029b1267bb94f89d16b2ad9e0e50129441f0da0c9238",
+      "missing_lines": 5,
+      "reason": "names the Python targets this tree actually builds against (3.11 for the container and CI, 3.12 for the native Windows requirements) and documents the Windows port's rules and checks"
+    },
+    "CONTRIBUTING.md": {
+      "fork_only_lines": 38,
+      "missing_digest": "sha256:3f274473923512903ea860bc0e30feb7afd86955c3347e6e825be7fd547e6f3b",
+      "missing_lines": 58,
+      "reason": "points at the AI policy in this tree, the PR description sections the template check enforces, and the Windows port; drops the em dashes AGENTS.md's punctuation rule forbids"
+    },
+    "README.md": {
+      "fork_only_lines": 39,
+      "missing_digest": "sha256:96b6fc959d151ee3753f21bbc7c391a58b27c340affe300f651377b2b866cd9b",
+      "missing_lines": 16,
+      "reason": "describes this fork and its native Windows install, which upstream's readme does not mention"
+    },
+    "README_CN.md": {
+      "fork_only_lines": 25,
+      "missing_digest": "sha256:894add5db2c55d06f8574e2ba8be18d46962593584c5aa7c3f314ca45de3d056",
+      "missing_lines": 1,
+      "reason": "mirrors the English readme's Windows section and links the English readme in this repository"
+    },
     "docker/main/rootfs/usr/local/go2rtc/create_config.py": {
       "fork_only_lines": 9,
       "missing_digest": "sha256:ec8e3cbf134dfc374145f298a435c2c8c2d96cfdb5220f3c998444f406ac3033",
       "missing_lines": 200,
       "reason": "thin entrypoint into frigate.util.go2rtc_config, which the native install also calls"
     },
+    "docs/README.md": {
+      "fork_only_lines": 28,
+      "missing_digest": "sha256:a159134070343a9dcfcb4df5beef7fc45e957de5ea9a4504712b9eca2764df0e",
+      "missing_lines": 6,
+      "reason": "names the Docusaurus version this tree pins and the generated content the build needs first"
+    },
     "docs/docs/frigate/installation.md": {
-      "fork_only_lines": 163,
+      "fork_only_lines": 181,
       "missing_digest": "sha256:2a6ab36dcc133a376d49c62439d89d70b9dcfeb26d3d90fe5e30e622f45f51d8",
       "missing_lines": 1,
       "reason": "documents the native Windows install instead of upstream's 'not officially supported' note"
+    },
+    "docs/docs/frigate/updating.md": {
+      "fork_only_lines": 18,
+      "missing_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "missing_lines": 0,
+      "reason": "adds the native Windows update and rollback path, which is neither an image tag nor an app backup"
+    },
+    "docs/scripts/README.md": {
+      "fork_only_lines": 41,
+      "missing_digest": "sha256:bf938bb6005c02a6982a5129cccfa9d7626b22829ff3b0dc9d157c37817390ea",
+      "missing_lines": 153,
+      "reason": "condensed: the same modes, options and data sources without the repeated walkthroughs"
     },
     "frigate/__main__.py": {
       "fork_only_lines": 61,
@@ -451,11 +493,23 @@
       "missing_lines": 4,
       "reason": "reads exactly one frame from a page-aligned mapping and reports a short read"
     },
+    "notebooks/README.md": {
+      "fork_only_lines": 7,
+      "missing_digest": "sha256:cc26b3045b0768aae06a80fdad47294fd185d3ff67535dd625577c00da13db0a",
+      "missing_lines": 5,
+      "reason": "links the notebook in this repository and states what it exports and what the runtime needs"
+    },
     "pyproject.toml": {
       "fork_only_lines": 23,
       "missing_digest": "sha256:1514a01cbd686d229d380f7f14bd1140a6a250fc4facd92362f52a99acb22fdd",
       "missing_lines": 1,
       "reason": "Windows extras (onnxruntime-directml) and the native entry point"
+    },
+    "web/README.md": {
+      "fork_only_lines": 33,
+      "missing_digest": "sha256:0d65728f7ee400d7f5b82d968f7afd73ad39a0d2d68ece57d756a9c8e5684826",
+      "missing_lines": 11,
+      "reason": "documents the native build script, the e2e and i18n commands, and the conventions AGENTS.md enforces"
     },
     "web/package.json": {
       "fork_only_lines": 1,
