@@ -35,7 +35,7 @@ py -3.12 bootstrap_windows.py
 powershell -ExecutionPolicy Bypass -File .\run_frigate.ps1
 ```
 
-The bootstrap script needs 64-bit CPython 3.12. It creates the venv, installs the Windows requirements, fetches pinned FFmpeg and go2rtc builds, builds the web interface when Node.js is available, and writes a launcher that restarts Frigate when Frigate asks to be restarted. [Releases](https://github.com/nuipona/frigate-windows/releases) ship a bundle with the web interface already built, so Node.js is not required.
+The bootstrap script needs 64-bit CPython 3.12. It creates the venv, installs the Windows requirements, fetches pinned FFmpeg and go2rtc builds, builds the web interface when Node.js is available, and writes a launcher that restarts Frigate when Frigate asks to be restarted. Node.js is only needed for that frontend build: the `windows_bundle` release job publishes a zip with `web/dist` already built.
 
 Windows-specific behaviour:
 

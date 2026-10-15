@@ -40,7 +40,7 @@ py -3.12 bootstrap_windows.py
 powershell -ExecutionPolicy Bypass -File .\run_frigate.ps1
 ```
 
-引导脚本需要 64 位 CPython 3.12。它会创建虚拟环境、安装 Windows 依赖、下载固定版本的 FFmpeg 与 go2rtc、在检测到 Node.js 时构建 Web 界面，并生成一个启动脚本（Frigate 请求重启时由它负责重新拉起）。[Release 页面](https://github.com/nuipona/frigate-windows/releases)提供已构建好 Web 界面的安装包，因此不需要安装 Node.js。
+引导脚本需要 64 位 CPython 3.12。它会创建虚拟环境、安装 Windows 依赖、下载固定版本的 FFmpeg 与 go2rtc、在检测到 Node.js 时构建 Web 界面，并生成一个启动脚本（Frigate 请求重启时由它负责重新拉起）。只有构建前端时才需要 Node.js：`windows_bundle` 发布任务会附上一个已构建好 `web/dist` 的 zip。
 
 Windows 相关特性：
 

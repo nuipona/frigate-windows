@@ -108,7 +108,7 @@ For users running Frigate as a Home Assistant App:
    This reinstalls the requirements, re-checks the pinned FFmpeg and go2rtc builds, and rebuilds the web interface. Use `--skip-binaries` or `--skip-web` to skip a step you know has not changed.
 5. **Start Frigate** again. Database migrations run automatically at startup.
 
-If you installed from a [release bundle](https://github.com/nuipona/frigate-windows/releases) instead of a git checkout, download the newer bundle, unpack it over the checkout, and run the bootstrap script again. Your data directory is not touched either way.
+If you installed from a [release zip](https://github.com/nuipona/frigate-windows/releases) instead of a git checkout, unpack the newer one over the old one and run the bootstrap script again. Your data directory is not touched either way.
 
 ## Rolling Back
 

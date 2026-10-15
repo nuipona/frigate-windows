@@ -610,7 +610,7 @@ Frigate can run natively on Windows without Docker or WSL. The API, media endpoi
 
 - Windows 10 or 11, 64-bit
 - [Python](https://www.python.org/downloads/) 3.12, 64-bit
-- Everything else (FFmpeg, go2rtc, the built web interface) is fetched or built by the bootstrap script below. Node.js is only needed to build the web interface yourself; a [release bundle](https://github.com/nuipona/frigate-windows/releases) ships it prebuilt.
+- Everything else (FFmpeg, go2rtc, the built web interface) is fetched or built by the bootstrap script below. Node.js is only needed to build the web interface yourself; the `windows_bundle` release job publishes a zip with it prebuilt.
 
 ### Installing
 
