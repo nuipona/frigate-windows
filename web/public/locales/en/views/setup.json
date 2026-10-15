@@ -10,7 +10,7 @@
       "complete": "Done"
     },
     "welcome": {
-      "title": "Welcome to Frigate",
+      "title": "Welcome to Gannet",
       "description": "Let's get your security cameras set up. We'll walk through camera connection, hardware settings, and recording.",
       "getStarted": "Get Started",
       "skipSetup": "Skip setup and configure manually"

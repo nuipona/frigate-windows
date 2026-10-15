@@ -1,7 +1,7 @@
 {
   "time": {
     "untilForTime": "Until {{time}}",
-    "untilForRestart": "Until Frigate restarts.",
+    "untilForRestart": "Until Gannet restarts.",
     "untilRestart": "Until restart",
     "never": "Never",
     "ago": "{{timeAgo}} ago",
@@ -242,14 +242,16 @@
       "nord": "Nord",
       "red": "Red",
       "highcontrast": "High Contrast",
-      "default": "Default"
+      "default": "Default",
+      "gannet": "Gannet",
+      "maroon": "Maroon"
     },
     "help": "Help",
     "documentation": {
       "title": "Documentation",
-      "label": "Frigate documentation"
+      "label": "Gannet documentation"
     },
-    "restart": "Restart Frigate",
+    "restart": "Restart Gannet",
     "live": {
       "title": "Live",
       "allCameras": "All Cameras",
@@ -307,12 +309,12 @@
     "more": "More pages"
   },
   "accessDenied": {
-    "documentTitle": "Access Denied - Frigate",
+    "documentTitle": "Access Denied - Gannet",
     "title": "Access Denied",
     "desc": "You don't have permission to view this page."
   },
   "notFound": {
-    "documentTitle": "Not Found - Frigate",
+    "documentTitle": "Not Found - Gannet",
     "title": "404",
     "desc": "Page not found"
   },

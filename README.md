@@ -2,7 +2,7 @@
   <img align="center" alt="logo" src="docs/static/img/branding/frigate.png">
 </p>
 
-# Frigate NVR™ - Realtime Object Detection for IP Cameras
+# Gannet NVR™ - Realtime Object Detection for IP Cameras
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 

@@ -1,10 +1,10 @@
 {
   "restart": {
-    "title": "Are you sure you want to restart Frigate?",
-    "description": "This will briefly stop Frigate while it restarts.",
+    "title": "Are you sure you want to restart Gannet?",
+    "description": "This will briefly stop Gannet while it restarts.",
     "button": "Restart",
     "restarting": {
-      "title": "Frigate is Restarting",
+      "title": "Gannet is Restarting",
       "content": "This page will reload in {{countdown}} seconds.",
       "button": "Force Reload Now"
     }

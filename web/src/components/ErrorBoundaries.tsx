@@ -66,7 +66,7 @@ function crashReport({ error, componentStack }: Failure, version?: string) {
   const stack = error instanceof Error ? error.stack : undefined;
 
   return [
-    "Frigate UI crash report",
+    "Gannet UI crash report",
     `Version: ${version || "unknown"}`,
     `Page: ${window.location.href}`,
     `Browser: ${navigator.userAgent}`,
