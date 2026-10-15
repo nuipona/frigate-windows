@@ -49,7 +49,6 @@ logger = logging.getLogger(__name__)
 # operating system
 
 IS_WINDOWS = os.name == "nt"
-IS_POSIX = os.name == "posix"
 IS_LINUX = sys.platform.startswith("linux")
 IS_MACOS = sys.platform == "darwin"
 
@@ -529,20 +528,6 @@ def get_service_log_path(service: str) -> str:
         return os.path.join(get_log_dir(), service, "current")
 
     return f"{CONTAINER_TMP_DIR}/logs/{service}/current"
-
-
-def get_internal_api_base(internal_port: int) -> str:
-    """Base URL internal subprocesses use to reach Frigate's own endpoints.
-
-    Those subprocesses are ffmpeg instances fetching HLS playlists, so they
-    need a URL rather than an in process call. In the container this is nginx
-    on the internal port; a native install uses its loopback only listener,
-    which is always treated as internal and therefore never needs a session.
-    """
-    if serves_web_app():
-        return f"http://127.0.0.1:{INTERNAL_API_PORT}"
-
-    return f"http://127.0.0.1:{internal_port}"
 
 
 # ---------------------------------------------------------------------------

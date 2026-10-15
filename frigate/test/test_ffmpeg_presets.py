@@ -2,7 +2,12 @@ import unittest
 from unittest.mock import patch
 
 from frigate.config import FrigateConfig
-from frigate.config.camera.ffmpeg import FFMPEG_INPUT_ARGS_DEFAULT
+from frigate.config.camera.ffmpeg import (
+    FFMPEG_INPUT_ARGS_DEFAULT,
+    CameraInput,
+    FfmpegConfig,
+    FfmpegOutputArgsConfig,
+)
 from frigate.ffmpeg_presets import (
     PRESETS_HW_ACCEL_DECODE,
     PRESETS_INPUT,
@@ -64,6 +69,19 @@ class TestFfmpegPresets(unittest.TestCase):
             executable,
         )
         self.assertEqual(split_ffmpeg_command(command)[-1], output)
+
+    def test_jetson_encode_preset_never_probes_linux_device_on_windows(self):
+        with (
+            patch("frigate.ffmpeg_presets.IS_WINDOWS", True),
+            patch("frigate.ffmpeg_presets.os.path.exists") as path_exists,
+        ):
+            command = parse_preset_hardware_acceleration_encode(
+                "/ffmpeg", "preset-jetson-h264", "-i pipe:0", "output.mp4"
+            )
+
+        path_exists.assert_not_called()
+        self.assertIn("libx264", command)
+        self.assertNotIn("nvmpi", command)
 
     def test_default_ffmpeg(self):
         FrigateConfig(**self.default_ffmpeg)
@@ -219,6 +237,126 @@ class TestPresetValidation(unittest.TestCase):
             ["-threads", "2"], "ffmpeg.hwaccel_args", PRESETS_HW_ACCEL_DECODE
         )
 
+    def test_linux_only_raw_hardware_args_are_rejected_on_windows(self):
+        cases = (
+            ("ffmpeg.hwaccel_args", "-hwaccel vaapi", "vaapi is not available"),
+            (
+                "ffmpeg.hwaccel_args",
+                ["-hwaccel_device", "/dev/dri/renderD128"],
+                "Linux-only hardware device",
+            ),
+            (
+                "ffmpeg.hwaccel_args",
+                "-hwaccel_device=/dev/dri/renderD128",
+                "Linux-only hardware device",
+            ),
+            (
+                "ffmpeg.hwaccel_args",
+                ["-c:v", "h264_v4l2m2m"],
+                "platform-specific FFmpeg codec",
+            ),
+            (
+                "ffmpeg.output_args.record",
+                ["-c:v", "h264_vaapi"],
+                "platform-specific FFmpeg codec",
+            ),
+            (
+                "ffmpeg.output_args.record",
+                ["-c:v", "hevc_videotoolbox"],
+                "platform-specific FFmpeg codec",
+            ),
+            (
+                "ffmpeg.input_args",
+                ["-hwaccel", "rkmpp"],
+                "rkmpp is not available",
+            ),
+            (
+                "ffmpeg.input_args",
+                ["-f", "v4l2"],
+                "V4L2 FFmpeg input format",
+            ),
+            (
+                "ffmpeg.hwaccel_args",
+                ["-pix_fmt", "drm_prime"],
+                "Linux-only FFmpeg pixel format",
+            ),
+            (
+                "ffmpeg.global_args",
+                "-f=video4linux2",
+                "V4L2 FFmpeg input format",
+            ),
+        )
+
+        with patch("frigate.ffmpeg_presets.IS_WINDOWS", True):
+            for setting, args, message in cases:
+                with self.subTest(setting=setting, args=args):
+                    with self.assertRaisesRegex(ValueError, message):
+                        validate_ffmpeg_args(args, setting, PRESETS_HW_ACCEL_DECODE)
+
+    def test_windows_raw_hwaccel_args_are_allowed(self):
+        with patch("frigate.ffmpeg_presets.IS_WINDOWS", True):
+            for args in (
+                "-hwaccel d3d11va",
+                "-hwaccel_device 0",
+                "-hwaccel qsv -c:v h264_qsv",
+                "-hwaccel cuda -hwaccel_output_format cuda",
+            ):
+                with self.subTest(args=args):
+                    validate_ffmpeg_args(
+                        args, "ffmpeg.hwaccel_args", PRESETS_HW_ACCEL_DECODE
+                    )
+
+    def test_raw_hardware_args_are_checked_in_other_ffmpeg_fields(self):
+        with patch("frigate.ffmpeg_presets.IS_WINDOWS", True):
+            with self.assertRaisesRegex(ValueError, "vaapi is not available"):
+                FfmpegConfig(global_args="-hwaccel vaapi")
+
+            with self.assertRaisesRegex(ValueError, "platform-specific FFmpeg codec"):
+                FfmpegOutputArgsConfig(detect=["-c:v", "h264_vaapi"])
+
+            with self.assertRaisesRegex(ValueError, "vaapi is not available"):
+                CameraInput(
+                    path="rtsp://camera/stream",
+                    roles=["detect"],
+                    global_args="-hwaccel vaapi",
+                )
+
+    def test_linux_camera_input_paths_are_rejected_on_windows(self):
+        with patch("frigate.config.camera.ffmpeg.IS_WINDOWS", True):
+            for path in (
+                "/dev/video0",
+                "unix:///tmp/camera.sock",
+                "v4l2:///dev/video0",
+            ):
+                with self.subTest(path=path):
+                    with self.assertRaisesRegex(
+                        ValueError, "cannot be used on native Windows"
+                    ):
+                        CameraInput(path=path, roles=["detect"])
+
+            CameraInput(path="video=Integrated Camera", roles=["detect"])
+            CameraInput(path="rtsp://camera/stream", roles=["detect"])
+
+    def test_linux_camera_input_paths_remain_allowed_on_linux(self):
+        with patch("frigate.config.camera.ffmpeg.IS_WINDOWS", False):
+            CameraInput(path="/dev/video0", roles=["detect"])
+
+    def test_raw_hardware_args_remain_allowed_in_other_fields_on_linux(self):
+        with patch("frigate.ffmpeg_presets.IS_WINDOWS", False):
+            FfmpegConfig(global_args="-hwaccel vaapi")
+            FfmpegOutputArgsConfig(detect=["-c:v", "h264_vaapi"])
+            CameraInput(
+                path="rtsp://camera/stream",
+                roles=["detect"],
+                global_args="-hwaccel vaapi",
+            )
+
+    def test_linux_raw_hwaccel_args_remain_allowed_on_linux(self):
+        with patch("frigate.ffmpeg_presets.IS_WINDOWS", False):
+            validate_ffmpeg_args(
+                "-hwaccel vaapi", "ffmpeg.hwaccel_args", PRESETS_HW_ACCEL_DECODE
+            )
+
     def test_unknown_preset_is_rejected(self):
         with self.assertRaises(ValueError) as raised:
             validate_ffmpeg_args(
@@ -244,6 +382,10 @@ class TestPresetValidation(unittest.TestCase):
             "preset-vaapi": "preset-windows-d3d11va",
             "preset-intel-qsv-h264": "preset-windows-qsv-h264",
             "preset-intel-qsv-h265": "preset-windows-qsv-h265",
+            "preset-rkmpp": "preset-windows-d3d11va",
+            "preset-rkmpp-no-dump_extra": "preset-windows-d3d11va",
+            "preset-rk-h264": "preset-windows-d3d11va",
+            "preset-rk-h265": "preset-windows-d3d11va",
             "preset-nvidia": "preset-windows-nvenc",
             "preset-nvidia-h264": "preset-windows-nvenc",
         }
@@ -262,7 +404,13 @@ class TestPresetValidation(unittest.TestCase):
         IS_WINDOWS, "the config validator rejects Linux decode presets on Windows"
     )
     def test_linux_only_presets_still_work_on_linux(self):
-        for preset in ("preset-vaapi", "preset-nvidia", "preset-intel-qsv-h264"):
+        for preset in (
+            "preset-vaapi",
+            "preset-nvidia",
+            "preset-intel-qsv-h264",
+            "preset-rkmpp",
+            "preset-rk-h264",
+        ):
             with self.subTest(preset=preset):
                 validate_ffmpeg_args(
                     preset, "ffmpeg.hwaccel_args", PRESETS_HW_ACCEL_DECODE

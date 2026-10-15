@@ -12,7 +12,6 @@ without it, so a missing binary is a warning rather than a failure.
 
 import logging
 import os
-import platform
 import subprocess as sp
 
 from frigate.util.platform import (
@@ -103,7 +102,7 @@ class Go2rtcProcess:
             "stdin": sp.DEVNULL,
         }
 
-        if platform.system() == "Windows":
+        if IS_WINDOWS:
             # keep go2rtc out of the console's Ctrl+C group so Frigate can stop
             # it after its own shutdown work is done
             kwargs["creationflags"] = sp.CREATE_NEW_PROCESS_GROUP

@@ -10,6 +10,13 @@ from frigate.util.services import (
 
 
 class TestGpuStats(unittest.TestCase):
+    @patch("frigate.util.services.enumerate_drm_devices")
+    def test_intel_gpu_stats_skip_linux_sysfs_on_windows(self, drm_devices):
+        with patch("frigate.util.services.IS_WINDOWS", True):
+            self.assertIsNone(get_intel_gpu_stats(None))
+
+        drm_devices.assert_not_called()
+
     def setUp(self):
         self.amd_results = "Unknown Radeon card. <= R500 won't work, new cards might.\nDumping to -, line limit 1.\n1664070990.607556: bus 10, gpu 4.17%, ee 0.00%, vgt 0.00%, ta 0.00%, tc 0.00%, sx 0.00%, sh 0.00%, spi 0.83%, smx 0.00%, cr 0.00%, sc 0.00%, pa 0.00%, db 0.00%, cb 0.00%, vram 60.37% 294.04mb, gtt 0.33% 52.21mb, mclk 100.00% 1.800ghz, sclk 26.65% 0.533ghz\n"
 

@@ -39,7 +39,12 @@ def ffmpeg_popen_kwargs() -> dict[str, Any]:
     return {"start_new_session": True}
 
 
-def request_ffmpeg_stop(ffmpeg_process: sp.Popen[Any], logger: logging.Logger) -> None:
+def request_ffmpeg_stop(
+    ffmpeg_process: sp.Popen[Any],
+    logger: logging.Logger,
+    *,
+    wait_timeout: float = FFMPEG_QUIT_POLL,
+) -> None:
     """Ask an ffmpeg process to exit, letting it finish the file it is writing.
 
     On POSIX this is ``terminate()``: SIGTERM, which ffmpeg handles by closing
@@ -56,7 +61,9 @@ def request_ffmpeg_stop(ffmpeg_process: sp.Popen[Any], logger: logging.Logger) -
        event is addressed to a group id, not to a process
 
     Both are best effort. Anything that goes wrong leaves ``terminate()`` as
-    the fallback, so the worst case is what already happens today.
+    the fallback, so the worst case is what already happens today. ``wait_timeout``
+    lets callers with a raw-pipe input skip the per-process quit poll while still
+    trying the graceful Windows mechanisms.
     """
     if not IS_WINDOWS:
         ffmpeg_process.terminate()
@@ -74,7 +81,7 @@ def request_ffmpeg_stop(ffmpeg_process: sp.Popen[Any], logger: logging.Logger) -
             logger.debug("Could not send ffmpeg the quit command: %s", err)
         else:
             try:
-                ffmpeg_process.wait(timeout=FFMPEG_QUIT_POLL)
+                ffmpeg_process.wait(timeout=wait_timeout)
                 return
             except sp.TimeoutExpired:
                 logger.debug("ffmpeg is still running after the quit command")

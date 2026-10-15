@@ -414,7 +414,9 @@ def detect_cpu() -> DetectionHardware:
     return _hardware("cpu", "cpu", "CPU", units)
 
 
-# ordered so accelerators are offered ahead of the CPU fallback
+# ordered so accelerators are offered ahead of the CPU fallback. Keep the
+# Linux sysfs/device-tree probes out of the Windows process entirely; their
+# paths do not exist there and none of their runtimes are in the Windows build.
 PROBES = (
     detect_coral_pci,
     detect_coral_usb,
@@ -430,6 +432,13 @@ PROBES = (
     detect_axengine,
     detect_synaptics,
     detect_lighter_ane,
+    detect_cpu,
+)
+
+WINDOWS_PROBES = (
+    detect_intel_npu,
+    detect_intel_gpu,
+    detect_nvidia_gpu,
     detect_cpu,
 )
 
@@ -452,8 +461,9 @@ class HardwareProber:
             return self._hardware
 
         found = []
+        probes = WINDOWS_PROBES if IS_WINDOWS else PROBES
 
-        for probe in PROBES:
+        for probe in probes:
             try:
                 hardware = probe()
             except Exception:

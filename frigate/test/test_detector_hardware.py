@@ -3,7 +3,7 @@
 import os
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from frigate.detectors import hardware
 from frigate.detectors.detector_types import config_types
@@ -134,6 +134,26 @@ class TestGpus(HardwareProbeTestCase):
 
 
 class TestWindowsOpenVINODevices(unittest.TestCase):
+    def test_hardware_prober_skips_linux_only_probes(self):
+        linux_probe = MagicMock(name="detect_coral_pci")
+        windows_probe = MagicMock(
+            name="detect_cpu",
+            return_value=hardware._hardware(
+                "cpu", "cpu", "CPU", [hardware.HardwareUnit(device="cpu", label="CPU")]
+            ),
+        )
+
+        with (
+            patch.object(hardware, "IS_WINDOWS", True),
+            patch.object(hardware, "PROBES", (linux_probe,)),
+            patch.object(hardware, "WINDOWS_PROBES", (windows_probe,)),
+        ):
+            found = HardwareProber().probe()
+
+        linux_probe.assert_not_called()
+        windows_probe.assert_called_once()
+        self.assertEqual([item.key for item in found], ["cpu"])
+
     def test_openvino_devices_are_discovered_without_linux_sysfs(self):
         available = ["CPU", "GPU.0", "GPU.1", "NPU"]
         with (

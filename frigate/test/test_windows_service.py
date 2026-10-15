@@ -1,19 +1,22 @@
-"""Tests for the Windows service wrapper's platform independent parts.
+"""Tests for the Windows service wrapper.
 
-The SCM parts of ``frigate/util/windows_service.py`` need Windows and pywin32,
-but the two decisions that are easy to get wrong are plain logic and are tested
-here on every platform: which interpreter runs Frigate, and what the service
-does when Frigate exits.
+The SCM itself needs Windows and pywin32, but the wrapper's interpreter,
+supervision and stop/restart decisions can be exercised with mocked service
+handles on every platform.
 """
 
 import os
+import subprocess as sp
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from types import ModuleType, SimpleNamespace
+from unittest.mock import ANY, Mock, call, patch
 
+import frigate.util.windows_service as windows_service
 from frigate.util.windows_service import (
     FrigateService,
+    FrigateServiceFailure,
     frigate_python,
     supervision_outcome,
 )
@@ -80,6 +83,186 @@ class TestModuleSurface(unittest.TestCase):
     def test_the_class_exists_without_pywin32(self):
         """The module has to import anywhere: the Linux suite imports it too."""
         self.assertEqual(FrigateService._svc_name_, "Frigate")
+
+
+class TestFrigateServiceStopLifecycle(unittest.TestCase):
+    def _service(self) -> FrigateService:
+        service = FrigateService.__new__(FrigateService)
+        service.hWaitStop = object()
+        service.stop_event = object()
+        service.stop_event_name = "FrigateServiceStop-test"
+        service.stop_requested = False
+        service.ReportServiceStatus = Mock()
+        return service
+
+    def test_stop_before_service_run_does_not_start_a_child(self):
+        """A stop sent before SvcDoRun must not start then kill Frigate."""
+        service = self._service()
+        service._start_frigate = Mock()
+        service._shut_down = Mock()
+
+        win32event = Mock()
+        win32service = SimpleNamespace(SERVICE_STOP_PENDING=0x00000102)
+
+        with (
+            patch.object(windows_service, "win32event", win32event, create=True),
+            patch.object(windows_service, "win32service", win32service, create=True),
+            patch.object(windows_service, "log_base_dir"),
+        ):
+            service.SvcStop()
+            service.SvcDoRun()
+
+        win32event.SetEvent.assert_has_calls(
+            [call(service.stop_event), call(service.hWaitStop)]
+        )
+        win32event.ResetEvent.assert_not_called()
+        service._start_frigate.assert_not_called()
+        service._shut_down.assert_not_called()
+
+    def test_stop_during_restart_delay_prevents_a_second_child(self):
+        service = self._service()
+        service.stop_requested = False
+        process = Mock(returncode=0)
+        service._start_frigate = Mock(return_value=process)
+        service._wait_for_exit = Mock()
+        service._shut_down = Mock()
+
+        win32event = Mock()
+        win32service = SimpleNamespace(SERVICE_STOP_PENDING=0x00000102)
+        services_module = ModuleType("frigate.util.services")
+        services_module.consume_restart_request = Mock(return_value=True)
+
+        with (
+            patch.dict(sys.modules, {"frigate.util.services": services_module}),
+            patch.object(windows_service, "win32event", win32event, create=True),
+            patch.object(windows_service, "win32service", win32service, create=True),
+            patch.object(windows_service, "log_base_dir"),
+            patch.object(
+                windows_service.time,
+                "sleep",
+                side_effect=lambda _delay: service.SvcStop(),
+            ),
+        ):
+            service.SvcDoRun()
+
+        service._start_frigate.assert_called_once()
+        service._wait_for_exit.assert_called_once_with(process, ANY)
+        service._shut_down.assert_not_called()
+        services_module.consume_restart_request.assert_called_once()
+        win32event.SetEvent.assert_has_calls(
+            [call(service.stop_event), call(service.hWaitStop)]
+        )
+
+    def test_stop_consumes_a_restart_marker_after_child_shutdown(self):
+        service = self._service()
+        process = Mock(returncode=0)
+        service._start_frigate = Mock(return_value=process)
+        service._wait_for_exit = Mock(
+            side_effect=lambda _process, _logger: setattr(
+                service, "stop_requested", True
+            )
+        )
+        service._shut_down = Mock()
+
+        win32event = Mock()
+        win32service = SimpleNamespace(SERVICE_STOP_PENDING=0x00000102)
+        services_module = ModuleType("frigate.util.services")
+        services_module.consume_restart_request = Mock(return_value=True)
+
+        with (
+            patch.dict(sys.modules, {"frigate.util.services": services_module}),
+            patch.object(windows_service, "win32event", win32event, create=True),
+            patch.object(windows_service, "win32service", win32service, create=True),
+            patch.object(windows_service, "log_base_dir"),
+        ):
+            service.SvcDoRun()
+
+        service._shut_down.assert_called_once_with(process, ANY)
+        services_module.consume_restart_request.assert_called_once()
+        service._start_frigate.assert_called_once()
+
+    def test_clean_child_exit_stops_the_service(self):
+        service = self._service()
+        process = Mock(returncode=0)
+        service._start_frigate = Mock(return_value=process)
+        service._wait_for_exit = Mock()
+        services_module = ModuleType("frigate.util.services")
+        services_module.consume_restart_request = Mock(return_value=False)
+
+        with (
+            patch.dict(sys.modules, {"frigate.util.services": services_module}),
+            patch.object(windows_service, "log_base_dir"),
+        ):
+            service.SvcDoRun()
+
+        service._start_frigate.assert_called_once()
+        service._wait_for_exit.assert_called_once_with(process, ANY)
+
+    def test_unrequested_child_failure_fails_the_service(self):
+        service = self._service()
+        process = Mock(returncode=1)
+        service._start_frigate = Mock(return_value=process)
+        service._wait_for_exit = Mock()
+        services_module = ModuleType("frigate.util.services")
+        services_module.consume_restart_request = Mock(return_value=False)
+
+        with (
+            patch.dict(sys.modules, {"frigate.util.services": services_module}),
+            patch.object(windows_service, "log_base_dir"),
+            self.assertRaisesRegex(FrigateServiceFailure, "exited with code 1"),
+        ):
+            service.SvcDoRun()
+
+        service._start_frigate.assert_called_once()
+        service._wait_for_exit.assert_called_once_with(process, ANY)
+
+
+class TestFrigateServiceShutdown(unittest.TestCase):
+    def _service(self) -> FrigateService:
+        return FrigateService.__new__(FrigateService)
+
+    def test_child_that_exits_within_grace_period_is_not_terminated(self):
+        service = self._service()
+        process = Mock()
+        process.poll.return_value = None
+        logger = Mock()
+
+        service._shut_down(process, logger)
+
+        process.wait.assert_called_once_with(timeout=windows_service.STOP_GRACE_SECONDS)
+        process.terminate.assert_not_called()
+        process.kill.assert_not_called()
+
+    def test_child_is_terminated_then_killed_only_after_each_timeout(self):
+        service = self._service()
+        process = Mock()
+        process.poll.return_value = None
+        process.wait.side_effect = [
+            sp.TimeoutExpired("frigate", windows_service.STOP_GRACE_SECONDS),
+            sp.TimeoutExpired("frigate", windows_service.TERMINATE_GRACE_SECONDS),
+            None,
+        ]
+
+        service._shut_down(process, Mock())
+
+        process.terminate.assert_called_once()
+        process.kill.assert_called_once()
+        self.assertEqual(
+            [call.args for call in process.wait.call_args_list],
+            [
+                (),
+                (),
+                (),
+            ],
+        )
+        self.assertEqual(
+            [call.kwargs for call in process.wait.call_args_list],
+            [
+                {"timeout": windows_service.STOP_GRACE_SECONDS},
+                {"timeout": windows_service.TERMINATE_GRACE_SECONDS},
+                {},
+            ],
+        )
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ import sys
 import threading
 from collections import deque
 from collections.abc import Callable, Generator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from enum import Enum
 from functools import wraps
 from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
@@ -155,9 +155,11 @@ if hasattr(os, "register_at_fork"):
 
 # based on https://codereview.stackexchange.com/a/17959
 class LogPipe(threading.Thread):
-    def __init__(self, log_name: str, level: int = logging.ERROR):
+    def __init__(
+        self, log_name: str, level: int = logging.ERROR, *, daemon: bool = False
+    ):
         """Setup the object with a logger and start the thread"""
-        super().__init__(daemon=False)
+        super().__init__(daemon=daemon)
         self.logger = logging.getLogger(log_name)
         self.level = level
         self.deque: deque[str] = deque(maxlen=100)
@@ -330,49 +332,30 @@ def redirect_output_to_logger(logger: logging.Logger, level: int) -> Callable[[_
 
 
 def suppress_os_output(func: Callable) -> Callable:
-    """
-    A decorator that suppresses all output (stdout and stderr)
-    at the operating system file descriptor level for the decorated function.
-    This is useful for silencing noisy C/C++ libraries.
-    Note: This is a Unix-specific solution using os.dup2 and os.pipe.
-    It temporarily redirects file descriptors 1 (stdout) and 2 (stderr)
-    to a non-read pipe, effectively discarding their output.
+    """Discard C-level stdout and stderr while ``func`` runs.
+
+    Redirecting to an unread pipe can block once its buffer fills. ``os.devnull``
+    is available on both Windows and POSIX and safely discards arbitrarily large
+    native-library output.
     """
 
     @wraps(func)
     def wrapper(*args: tuple, **kwargs: dict[str, Any]) -> Any:
-        # Save the original file descriptors for stdout (1) and stderr (2)
-        original_stdout_fd = os.dup(1)
-        original_stderr_fd = os.dup(2)
+        with ExitStack() as cleanup:
+            devnull_fd = os.open(os.devnull, os.O_WRONLY)
+            cleanup.callback(os.close, devnull_fd)
 
-        # Create dummy pipes. We only need the write ends to redirect to.
-        # The data written to these pipes will be discarded as nothing
-        # will read from the read ends.
-        devnull_read_fd, devnull_write_fd = os.pipe()
+            original_stdout_fd = os.dup(1)
+            cleanup.callback(os.close, original_stdout_fd)
+            original_stderr_fd = os.dup(2)
+            cleanup.callback(os.close, original_stderr_fd)
 
-        try:
-            # Redirect stdout (FD 1) and stderr (FD 2) to the write end of our dummy pipe
-            os.dup2(devnull_write_fd, 1)  # Redirect stdout to devnull pipe
-            os.dup2(devnull_write_fd, 2)  # Redirect stderr to devnull pipe
+            os.dup2(devnull_fd, 1)
+            cleanup.callback(os.dup2, original_stdout_fd, 1)
+            os.dup2(devnull_fd, 2)
+            cleanup.callback(os.dup2, original_stderr_fd, 2)
 
-            # Execute the original function
-            result = func(*args, **kwargs)
-
-        finally:
-            # Restore original stdout and stderr file descriptors (1 and 2)
-            # This is crucial to ensure normal printing resumes after the decorated function.
-            os.dup2(original_stdout_fd, 1)
-            os.dup2(original_stderr_fd, 2)
-
-            # Close all duplicated and pipe file descriptors to prevent resource leaks.
-            # It's important to close the read end of the dummy pipe too,
-            # as nothing is explicitly reading from it.
-            os.close(original_stdout_fd)
-            os.close(original_stderr_fd)
-            os.close(devnull_read_fd)
-            os.close(devnull_write_fd)
-
-        return result
+            return func(*args, **kwargs)
 
     return wrapper
 

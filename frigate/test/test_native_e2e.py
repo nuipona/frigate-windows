@@ -134,7 +134,11 @@ class TestNativeEndToEnd(unittest.TestCase):
         )
 
         if pinned:
-            self.base = os.path.abspath(pinned)
+            # Each test gets an isolated tree. Reusing one base means the
+            # service-stop test can see recordings from the preceding test and
+            # stop before its own camera has written a segment.
+            self.base = os.path.abspath(os.path.join(pinned, self._testMethodName))
+            shutil.rmtree(self.base, ignore_errors=True)
             os.makedirs(self.base, exist_ok=True)
         else:
             self.base = tempfile.mkdtemp(prefix="frigate-e2e-")
@@ -169,11 +173,137 @@ class TestNativeEndToEnd(unittest.TestCase):
             shutil.rmtree(self.base, ignore_errors=True)
 
     def _log_tail(self, lines: int = 60) -> str:
+        candidates = (
+            Path(self.base) / "tmp" / "logs" / "frigate" / "current",
+            Path(self.log_path),
+        )
+
+        for path in candidates:
+            try:
+                with open(path, encoding="utf-8", errors="replace") as log:
+                    content = log.readlines()
+                    if content:
+                        return "".join(content[-lines:])
+            except OSError:
+                continue
+
+        return "<no log>"
+
+    def _run_service_action(
+        self, action: str, timeout: float = 120
+    ) -> sp.CompletedProcess:
+        command = [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(Path(REPO_ROOT) / "scripts" / "install_frigate_service.ps1"),
+            "-Action",
+            action,
+        ]
+
+        if action == "Install":
+            command.extend(["-BaseDir", self.base, "-PythonPath", sys.executable])
+
+        return sp.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+
+    def _service_is_admin(self) -> bool:
+        result = sp.run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "$identity = [Security.Principal.WindowsIdentity]::GetCurrent(); "
+                "$principal = [Security.Principal.WindowsPrincipal]::new($identity); "
+                "$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        return result.returncode == 0 and result.stdout.strip().lower() == "true"
+
+    def _service_is_registered(self) -> bool:
+        result = sp.run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "if (Get-Service -Name Frigate -ErrorAction SilentlyContinue) "
+                "{ 'present' } else { 'absent' }",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Unable to query the Frigate service: {result.stderr}\n{result.stdout}"
+            )
+        return result.stdout.strip().lower() == "present"
+
+    def _service_start_name(self) -> str | None:
+        result = sp.run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "(Get-CimInstance -ClassName Win32_Service "
+                "-Filter \"Name='Frigate'\").StartName",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode != 0:
+            return None
+        return result.stdout.strip()
+
+    def _service_status(self) -> str | None:
+        result = sp.run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "(Get-Service -Name Frigate -ErrorAction Stop).Status.ToString()",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode != 0:
+            return None
+        return result.stdout.strip()
+
+    def _remove_installed_service(self) -> None:
+        if not getattr(self, "_service_remove_pending", False):
+            return
+
         try:
-            with open(self.log_path, encoding="utf-8", errors="replace") as log:
-                return "".join(log.readlines()[-lines:])
-        except OSError:
-            return "<no log>"
+            result = self._run_service_action("Remove", timeout=60)
+        except (OSError, sp.TimeoutExpired) as err:
+            logger.error("Unable to remove the E2E Frigate service: %s", err)
+            return
+
+        if result.returncode != 0:
+            logger.error(
+                "Unable to remove the E2E Frigate service: %s\n%s",
+                result.stdout,
+                result.stderr,
+            )
+        else:
+            self._service_remove_pending = False
 
     def _start_frigate(self, service_stop_event: str | None = None) -> None:
         env = dict(os.environ)
@@ -428,6 +558,99 @@ class TestNativeEndToEnd(unittest.TestCase):
 
         self._assert_stopped_cleanly(exit_code)
 
+    @unittest.skipUnless(
+        os.name == "nt", "the Windows SCM is only available on Windows"
+    )
+    def test_scm_service_installs_and_stops_cleanly(self) -> None:
+        """Exercise registration, service-account startup and an SCM stop.
+
+        This is deliberately separate from the named-event E2E: that test
+        proves Frigate responds to the event, while this one verifies the
+        installer and the actual Service Control Manager path that creates
+        and sets it.
+        """
+        if os.environ.get("FRIGATE_E2E_SCM", "").strip() != "1":
+            self.skipTest("set FRIGATE_E2E_SCM=1 to install a temporary SCM service")
+
+        self.assertTrue(
+            self._service_is_admin(),
+            "FRIGATE_E2E_SCM=1 requires an elevated Windows runner",
+        )
+        if self._service_is_registered():
+            self.skipTest("the Frigate SCM service is already registered")
+
+        # Register cleanup before installation so even a partially completed
+        # install is removed before the isolated data directory is deleted.
+        self._service_remove_pending = True
+        self.addCleanup(self._remove_installed_service)
+
+        installed = self._run_service_action("Install")
+        self.assertEqual(
+            installed.returncode,
+            0,
+            "Service installation failed.\n"
+            + installed.stdout
+            + installed.stderr
+            + self._log_tail(),
+        )
+
+        self.assertEqual(
+            (self._service_start_name() or "").casefold(),
+            r"NT AUTHORITY\LocalService".casefold(),
+            "The SCM service must run as LocalService",
+        )
+
+        ready = _wait_until(self._api_ready, timeout=180)
+        self.assertTrue(
+            ready,
+            "The SCM service never brought Frigate's API up.\n" + self._log_tail(),
+        )
+
+        recorded = _wait_until(lambda: len(self._segments()) >= 1, timeout=180)
+        self.assertTrue(
+            recorded,
+            "The SCM service did not produce a saved recording.\n"
+            + self._cache_listing()
+            + self._camera_stats()
+            + self._log_tail(),
+        )
+
+        stopped = self._run_service_action("Stop", timeout=90)
+        self.assertEqual(
+            stopped.returncode,
+            0,
+            "The SCM service rejected the stop request.\n"
+            + stopped.stdout
+            + stopped.stderr
+            + self._log_tail(),
+        )
+        service_stopped = _wait_until(
+            lambda: self._service_status() == "Stopped", timeout=90
+        )
+        self.assertTrue(
+            service_stopped,
+            f"The SCM did not report Frigate stopped (status: {self._service_status()}).\n"
+            + self._log_tail(),
+        )
+
+        # The service host does not expose its child's exit code. These checks
+        # prove that FrigateApp.stop ran and that user-visible output is intact.
+        self._assert_stopped_cleanly(None)
+
+        removed = self._run_service_action("Remove")
+        self.assertEqual(
+            removed.returncode,
+            0,
+            "The SCM service could not be removed after a clean stop.\n"
+            + removed.stdout
+            + removed.stderr,
+        )
+        removed_from_scm = _wait_until(
+            lambda: not self._service_is_registered(), timeout=20
+        )
+        self.assertTrue(removed_from_scm, "The removed service is still registered")
+        self._service_remove_pending = False
+
     def _assert_stopped_cleanly(self, exit_code: int | None) -> None:
         """Everything that has to be true of a shutdown rather than a death."""
         self.log_file.flush()
@@ -441,11 +664,12 @@ class TestNativeEndToEnd(unittest.TestCase):
             "rather than shut down.\n" + self._log_tail(),
         )
 
-        self.assertEqual(
-            exit_code,
-            0,
-            f"Frigate exited with {exit_code} rather than 0.\n" + self._log_tail(),
-        )
+        if exit_code is not None:
+            self.assertEqual(
+                exit_code,
+                0,
+                f"Frigate exited with {exit_code} rather than 0.\n" + self._log_tail(),
+            )
 
         # give the operating system a moment to reap what the job object or
         # the process group is responsible for
@@ -461,16 +685,19 @@ class TestNativeEndToEnd(unittest.TestCase):
             + self._log_tail(),
         )
 
-        # anything still on disk has to be a complete file
+        # Only files moved into recordings are user-visible output. The cache
+        # is staging space and can contain the partial segment that ffmpeg was
+        # writing when Frigate stopped; the next run validates or discards it.
+        recordings_dir = Path(self.base) / "media" / "recordings"
         broken = [
             str(path)
-            for path in Path(self.base).rglob("*.mp4")
+            for path in recordings_dir.rglob("*.mp4")
             if not self._probe_ok(str(path))
         ]
         self.assertEqual(
             broken,
             [],
-            "These recording files were left incomplete, which is what "
+            "These recorded files were left incomplete, which is what "
             "happens when ffmpeg is killed instead of stopped:\n" + "\n".join(broken),
         )
 

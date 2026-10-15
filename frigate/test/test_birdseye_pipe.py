@@ -17,7 +17,11 @@ import unittest
 from unittest.mock import patch
 
 from frigate.util import birdseye_pipe
-from frigate.util.birdseye_pipe import FifoBirdseyePipe, TcpBirdseyePipe
+from frigate.util.birdseye_pipe import (
+    FifoBirdseyePipe,
+    TcpBirdseyePipe,
+    create_birdseye_pipe,
+)
 
 FRAME = b"\x10" * 64
 
@@ -139,6 +143,22 @@ class TestTcpBirdseyePipe(unittest.TestCase):
             self.fail("the pipe never noticed its reader going away")
 
         self.assertFalse(self.pipe.reading)
+
+
+class TestBirdseyePipeFactory(unittest.TestCase):
+    def test_windows_uses_the_tcp_pipe(self) -> None:
+        with patch.object(birdseye_pipe, "IS_WINDOWS", True):
+            pipe = create_birdseye_pipe()
+
+        self.assertIsInstance(pipe, TcpBirdseyePipe)
+        pipe.close()
+
+    def test_posix_uses_the_fifo_pipe(self) -> None:
+        with patch.object(birdseye_pipe, "IS_WINDOWS", False):
+            pipe = create_birdseye_pipe()
+
+        self.assertIsInstance(pipe, FifoBirdseyePipe)
+        pipe.close()
 
 
 if __name__ == "__main__":

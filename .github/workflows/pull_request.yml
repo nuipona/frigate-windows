@@ -258,6 +258,7 @@ jobs:
       - name: Run the native end to end test
         env:
           FRIGATE_E2E: "1"
+          FRIGATE_E2E_SCM: "1"
           FRIGATE_E2E_DIR: ${{ runner.temp }}\frigate-e2e
         shell: pwsh
         run: |
@@ -281,20 +282,34 @@ jobs:
         run: |
           . .\testing-scripts\publish-log-annotations.ps1
           Publish-Log -Path 'e2e.log' -Prefix 'e2e-log'
-          # the start of Frigate's own log: the config it started with, the
-          # ffmpeg command lines, and what ffmpeg said on the way in
-          Publish-Log -Path (Join-Path $env:FRIGATE_E2E_DIR 'frigate-run.log') `
-            -Prefix 'frigate-head' -Drop @('Unable to read frames') -Head 40 -Tail 20
-          # everything ffmpeg or the recording maintainer complains about,
-          # without the frame reader's retry storm drowning it out
-          Publish-Log -Path (Join-Path $env:FRIGATE_E2E_DIR 'frigate-run.log') `
-            -Prefix 'frigate-said' `
-            -Drop @('Unable to read frames', 'peewee_migrate', 'Migrate ') `
-            -Keep 'ffmpeg|lavfi|Invalid|No such|Conversion|Error|error|Unable|discard|segment'
-          # the end of Frigate's own log: how the stop went, which is what
-          # the clean stop assertions are about
-          Publish-Log -Path (Join-Path $env:FRIGATE_E2E_DIR 'frigate-run.log') `
-            -Prefix 'frigate-tail' -Head 1 -Tail 40
+          # Each end-to-end test keeps its own data and log so a later test
+          # cannot overwrite the evidence from an earlier failure.
+          $frigateLogs = @(
+            Get-ChildItem -Path $env:FRIGATE_E2E_DIR `
+              -Filter 'frigate-run.log' -Recurse -File -ErrorAction SilentlyContinue
+            Get-ChildItem -Path $env:FRIGATE_E2E_DIR `
+              -Filter 'current' -Recurse -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.Directory.Name -eq 'frigate' }
+          )
+          foreach ($logFile in $frigateLogs) {
+            $testName = if ($logFile.Name -eq 'current') {
+              $logFile.Directory.Parent.Parent.Parent.Name
+            } else {
+              $logFile.Directory.Name
+            }
+            $prefix = "frigate-$testName"
+            # the config and ffmpeg command lines from startup
+            Publish-Log -Path $logFile.FullName -Prefix "$prefix-head" `
+              -Drop @('Unable to read frames') -Head 40 -Tail 20
+            # ffmpeg and recording-maintainer errors, without the frame
+            # reader's retry storm drowning them out
+            Publish-Log -Path $logFile.FullName -Prefix "$prefix-said" `
+              -Drop @('Unable to read frames', 'peewee_migrate', 'Migrate ') `
+              -Keep 'ffmpeg|lavfi|Invalid|No such|Conversion|Error|error|Unable|discard|segment'
+            # shutdown log, which is what the clean-stop assertions are about
+            Publish-Log -Path $logFile.FullName -Prefix "$prefix-tail" `
+              -Head 1 -Tail 40
+          }
           # the recording role encodes with libx264, so when no segment shows
           # up, prove the runner can encode one at all: without this a broken
           # ffmpeg on the runner looks exactly like a broken Frigate

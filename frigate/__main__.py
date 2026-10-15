@@ -4,6 +4,7 @@ import logging
 import multiprocessing as mp
 import sys
 import threading
+from multiprocessing.managers import SyncManager
 
 import ruamel.yaml
 from pydantic import ValidationError
@@ -24,25 +25,28 @@ from frigate.util.platform import (
 )
 
 
-def main() -> None:
-    logger = logging.getLogger("frigate")
+def _create_process_manager() -> SyncManager:
+    """Install Windows process containment before spawning the manager."""
+    # The manager is the first child Frigate creates. Put the main process in
+    # its job object first so the manager and every later child inherit it.
+    install_job_object()
 
     # The manager must not start the forkserver before the config applies
     # environment_vars, or workers and their ffmpeg processes inherit the old
     # environment. Windows and macOS use spawn and have no forkserver.
     if supports_forkserver():
-        manager = mp.get_context("fork").Manager()
-    else:
-        manager = mp.Manager()
+        return mp.get_context("fork").Manager()
+
+    return mp.Manager()
+
+
+def main() -> None:
+    logger = logging.getLogger("frigate")
+    manager = _create_process_manager()
     faulthandler.enable()
 
     # Setup the logging thread
     setup_logging(manager)
-
-    # Join a Windows job object before anything is spawned, so every process
-    # Frigate starts is a member and is terminated with it. Nothing happens on
-    # other platforms, where the supervisor or a process group does this.
-    install_job_object()
 
     threading.current_thread().name = "frigate"
     stop_event = mp.Event()

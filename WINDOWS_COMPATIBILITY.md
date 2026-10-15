@@ -17,6 +17,8 @@ The port runs. The four process-lifecycle bugs the first audit found are fixed a
 | P1-1 | `hwaccel_args: auto` could never detect Windows hardware | fixed | go2rtc's decoder list first, display adapters as the fallback, returning a `preset-windows-*` preset; software decode with a warning when neither finds a GPU |
 | P1-2 | the docs recommended a decode preset that did not exist | fixed | real Windows decode presets in `frigate/ffmpeg_presets.py`, and an unknown or Linux-only preset is now a config validation error naming the valid ones |
 | P1-3 | the hwaccel recommender emitted Linux presets | fixed | Windows families in `frigate/util/hwaccel.py`; `_intel_generation()` reads the CPU brand from the registry instead of `/proc/cpuinfo` |
+| P1-4 | audio shutdown waits multiplied by camera count, and a blocked log-pipe thread could pin the worker | fixed | Windows audio maintainers share an 11s deadline, use a nonblocking FFmpeg quit poll, and use daemon log-pipe threads; the parent waits at most 13s. Linux retains its per-thread cleanup. `frigate/test/test_audio_spawn.py` and `frigate/test/test_ffmpeg_stop.py` |
+| P1-5 | an SCM stop during startup or the restart delay could launch Frigate after STOP was requested | fixed | `SvcDoRun()` checks the sticky stop flag before each launch and consumes restart markers after a service stop; regressions in `frigate/test/test_windows_service.py` |
 | P2-1 | reserved device names were valid camera names | fixed | rejected on Windows only (`WINDOWS_RESERVED_NAMES`, `frigate/config/camera/camera.py`) |
 | P2-2 | the 260 character path limit | mitigated | `long_path_warning()` warns at startup with the base directory and the registry value. Paths are not rewritten |
 | P2-3 | the filesystem is case insensitive | fixed | camera names that differ only by case are rejected on Windows |
@@ -27,7 +29,7 @@ The port runs. The four process-lifecycle bugs the first audit found are fixed a
 | P2-8 | smaller items | fixed | `find_go2rtc()` skips the `X_OK` check on Windows, `hwaccel.py` guards its Linux probes, `get_physical_interfaces()` drops virtual and down adapters, the storage panel labels page-file-backed memory instead of `/dev/shm`, and `testing-scripts/check_windows_requirements.py` reports requirement drift |
 | P3-1 | no installer, no bundled binaries, no service | done, service unverified | `bootstrap_windows.py`, the `windows_bundle` job in `release.yml`, `frigate/util/windows_service.py` with `scripts/install_frigate_service.ps1`, and a starter `winget-manifest/Frigate.FrigateWindows.yaml` |
 | P3-2 | Windows CI was six hand-picked tests | done | `windows_native_smoke`, `windows_native_e2e` and `windows_native_unit_suite` in `.github/workflows/pull_request.yml`, the last driven by `frigate/test/windows_suite_denylist.txt` |
-| P3-3 | detector coverage was CPU and Intel only | partly | `onnxruntime-directml` covers AMD, Intel and Nvidia and is installed by default; a config naming a Linux-only accelerator fails validation naming the four that work |
+| P3-3 | detector coverage was CPU and Intel only | partly | `onnxruntime-directml` covers AMD, Intel and Nvidia and is installed by default; Windows rejects non-Windows detector types even when their plugin imports, and refuses their runtime manifests before installation. Real-GPU validation remains open |
 
 ## What the port consists of
 
@@ -37,7 +39,7 @@ The port runs. The four process-lifecycle bugs the first audit found are fixed a
 
 | Concern | How it is handled |
 | --- | --- |
-| Platform detection | `IS_WINDOWS` / `IS_POSIX` / `IS_LINUX` / `IS_MACOS` |
+| Platform detection | `IS_WINDOWS` / `IS_LINUX` / `IS_MACOS` |
 | Directory layout | One base dir (`%LOCALAPPDATA%\Frigate` by default), overridable per directory with `FRIGATE_BASE_DIR`, `FRIGATE_CONFIG_DIR`, `FRIGATE_MEDIA_DIR`, `FRIGATE_CACHE_DIR`, `FRIGATE_TMP_DIR` |
 | Binary discovery | `find_executable()` checks `PATH`, then the install dir, the bundled ffmpeg dir, and the winget/chocolatey/scoop shim dirs; `EXECUTABLE_SUFFIX` appends `.exe` |
 | Process priority | `os.nice()` becomes `psutil` priority classes |
@@ -59,9 +61,13 @@ The port runs. The four process-lifecycle bugs the first audit found are fixed a
 - `frigate/util/file.py`: `FileLock` falls back to `msvcrt.locking`, and `robust_remove` / `robust_move` retry around sharing violations.
 - `frigate/util/job_object.py`: the job object that keeps children from outliving Frigate.
 - `frigate/util/go2rtc_process.py`: starts and stops go2rtc itself, with `CREATE_NEW_PROCESS_GROUP`.
+- `frigate/util/go2rtc_config.py`: Frigate's generated birdseye source uses the resolved Windows FFmpeg binary and the TCP pipe; user-authored go2rtc stream sources are passed through after the existing exec-safety filter. No Linux command is generated for a custom source, so any OS-specific custom command/path remains the configuration owner's responsibility rather than being guessed or rewritten.
 - `frigate/util/ffmpeg.py`: `ffmpeg_popen_kwargs()`, `stop_ffmpeg()` and `request_ffmpeg_stop()`.
-- `frigate/ffmpeg_presets.py`: `preset-windows-d3d11va`, `preset-windows-dxva2`, `preset-windows-qsv-h264`, `preset-windows-qsv-h265` for decode; `preset-windows-nvenc` and `preset-windows-qsv` for encode.
-- `frigate/detectors/hardware.py`: enumerates Intel GPU and NPU through OpenVINO instead of DRM sysfs.
+- `frigate/app.py`: lets worker processes observe the shared stop event and close their own FFmpeg resources instead of terminating them during normal shutdown.
+- `frigate/ffmpeg_presets.py`: `preset-windows-d3d11va`, `preset-windows-dxva2`, `preset-windows-qsv-h264`, `preset-windows-qsv-h265` for decode; `preset-windows-nvenc` and `preset-windows-qsv` for encode. Linux-only presets, recognized raw Linux/macOS hardware and V4L2 arguments across FFmpeg fields, and Linux device/Unix-socket camera inputs are rejected on Windows.
+- `frigate/detectors/device.py` limits Windows configurations to CPU, ONNX, OpenVINO and ZMQ, even when a Linux-only plugin module imports; `frigate/detectors/detection_api.py` blocks its runtime manifest from being installed as a second line of defense.
+- `frigate/detectors/hardware.py`: Windows probes only OpenVINO Intel GPU/NPU, NVIDIA, and CPU; Linux sysfs, device-tree and device-node probes are not run. `frigate/detectors/detection_runners.py` also skips the RKNN device-tree and LighterANE provider lookups when loading models on Windows.
+- `frigate/stats/hardware.py`: skips hardware pollers without a Windows implementation and does not read Linux detector temperature sysfs paths on Windows.
 - `frigate/config/config.py`: Windows gets a CPU TFLite default model, downloaded atomically into `<base>\config\model_cache`.
 - `frigate/log.py`: no `os.register_at_fork`, and std streams are reopened for `spawn`.
 - `frigate/util/ownership.py`: chown is a no-op, `pwd` is imported optionally.
@@ -70,11 +76,11 @@ The port runs. The four process-lifecycle bugs the first audit found are fixed a
 
 ## Open items
 
-1. **The SCM service has not run under the SCM.** Registration, session 0 startup, service-account permissions, recovery actions and clean stop reporting are untested outside unit tests. `test_service_stop_event_shuts_down_cleanly` covers the named-event shutdown path, and `frigate/test/test_windows_service.py` covers the interpreter lookup and exit policy on every platform.
+1. **The SCM service has not yet been run under the SCM in CI.** The Windows E2E now has an opt-in (`FRIGATE_E2E_SCM=1`) test that installs the service, starts Frigate as LocalService, and asks the SCM to stop it; the named-event test and mocked wrapper tests remain separate checks. Registration, session 0 startup, service-account permissions, recovery actions and clean stop reporting need the first Windows run to confirm.
 2. **The winget manifest needs a signed installer URL.** `winget-manifest/Frigate.FrigateWindows.yaml` is a starter.
 3. **DirectML has not run on a real GPU.** The provider pass-through is unit tested; the package swap has not been validated against AMD or Nvidia drivers.
 4. **`windows_native_unit_suite` is `continue-on-error`.** It reports rather than blocks until `frigate/test/windows_suite_denylist.txt` covers every test that genuinely cannot run on Windows. Dropping that flag is the signal the denylist is done.
-5. **Hardware probes with no Windows equivalent return empty**: libva, DRM sysfs, Rockchip, Jetson, Hailo and Axiom in `frigate/util/services.py`.
+5. **Some hardware telemetry has no Windows implementation.** Linux-only probes are skipped, while libva, DRM sysfs, Rockchip, Jetson, Hailo and Axiom stats remain unavailable on Windows.
 6. **The path limit is reported, not solved.** `long_path_warning()` warns; nothing rewrites paths with the `\\?\` prefix.
 
 ## Upstream parity

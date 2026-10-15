@@ -54,7 +54,7 @@ from frigate.debug_replay import (
 from frigate.detectors.detector_types import api_types
 from frigate.detectors.device import build_detector_config, runner_names
 from frigate.embeddings import EmbeddingProcess, EmbeddingsContext
-from frigate.events.audio import AudioProcessor
+from frigate.events.audio import AudioProcessor, join_audio_process
 from frigate.events.cleanup import EventCleanup
 from frigate.events.maintainer import EventProcessor
 from frigate.jobs.export import reap_stale_exports
@@ -752,7 +752,9 @@ class FrigateApp:
             if serves_web_app():
                 # no reverse proxy in front of us, so the API, the web app, the
                 # media directories and recorded video are all served here
-                run_native_web_server(app, self.config.networking.listen.internal_port)
+                run_native_web_server(
+                    app, self.config.networking.listen.internal_port, self.stop_event
+                )
             else:
                 # nginx is the only client, and it reaches the API directly
                 uvicorn.run(
@@ -791,10 +793,10 @@ class FrigateApp:
             ReviewSegment.end_time == None
         ).execute()
 
-        # stop the audio process
+        # stop the audio process after the shared stop event so it can flush
+        # and close its own FFmpeg workers cleanly on Windows.
         if self.audio_process:
-            self.audio_process.terminate()
-            self.audio_process.join()
+            join_audio_process(self.audio_process)
 
         # stop go2rtc, which a native install runs as a child process
         if self.go2rtc_process:
@@ -822,13 +824,10 @@ class FrigateApp:
         empty_and_close_queue(self.timeline_queue)
         logger.info("Timeline queue closed")
 
-        self.output_processor.terminate()
+        # These workers observe the shared event and perform their own cleanup;
+        # do not terminate them while they hold queues or files open.
         self.output_processor.join()
-
-        self.recording_process.terminate()
         self.recording_process.join()
-
-        self.review_segment_process.terminate()
         self.review_segment_process.join()
 
         self.dispatcher.stop()
