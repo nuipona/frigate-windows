@@ -668,9 +668,10 @@ py -3.12 bootstrap_windows.py --install-service
 
 The script also takes `Configure`, `Start`, `Stop`, `Remove` and `Status`.
 
-Three things differ from a desktop install, and the installer handles all of them:
+A service differs from a desktop install in ways the installer handles for you:
 
-- The service runs as `NT AUTHORITY\LocalService` and inherits none of your environment, so it keeps its data in `%ProgramData%\Frigate` by default (`-BaseDir` to change it, or `FRIGATE_BASE_DIR` at install time). It refuses to install when the checkout, the interpreter or the data directory sit inside a user profile, which the service account cannot read.
+- The service runs as `NT AUTHORITY\LocalService` and inherits none of your environment, so it keeps its data in `%ProgramData%\Frigate` by default (`-BaseDir` to change it, or `FRIGATE_BASE_DIR` at install time).
+- The service account cannot read your profile, so the installer refuses to install when the checkout, the interpreter or the data directory sit inside one. A checkout under `C:\Users\...` will be rejected: clone it somewhere like `C:\Frigate` for a service install, or pass `-SkipAccessCheck` if you have granted the access yourself.
 - Stopping goes through a named event rather than a console signal, so recordings are finalized instead of the process being terminated.
 - Frigate exiting is reported to the service control manager as a failure, and the installer configures the recovery actions that restart it 30 seconds later.
 

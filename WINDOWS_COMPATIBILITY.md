@@ -1,6 +1,6 @@
 # Windows Compatibility
 
-The audit and current state of running Frigate natively on Windows, with no Docker and no WSL. Setup, ports and tuning are user documentation and live in [the Windows install guide](docs/docs/frigate/installation.md#windows); this file is for whoever maintains the port. Line references are against the current tree.
+The audit and current state of running Frigate natively on Windows, with no Docker and no WSL. Setup, ports and tuning are user documentation and live in [the Windows install guide](docs/docs/frigate/installation.md#windows); this file is for whoever maintains the port. File and function references are against the current tree, and the original audit's full analysis of each finding is in this file's git history.
 
 ## Summary
 
