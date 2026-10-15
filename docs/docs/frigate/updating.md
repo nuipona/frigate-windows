@@ -93,6 +93,23 @@ For users running Frigate as a Home Assistant App:
 - Ensure your `/config/frigate.yml` is compatible with the new version by reviewing the [Release notes](https://github.com/blakeblackshear/frigate/releases).
 - If using custom hardware (e.g., Coral or GPU), verify that configurations still work, as app updates don’t modify your hardware settings.
 
+## Updating a native Windows install
+
+1. **Stop Frigate**: Ctrl+C in the launcher window, or `.\scripts\install_frigate_service.ps1 -Action Stop` when it runs as a service.
+2. **Back up your data**: copy `%LOCALAPPDATA%\Frigate\config`, which holds `config.yml`, `frigate.db` and the model cache.
+3. **Update the checkout**:
+   ```powershell
+   git pull
+   ```
+4. **Refresh the install**:
+   ```powershell
+   py -3.12 bootstrap_windows.py
+   ```
+   This reinstalls the requirements, re-checks the pinned FFmpeg and go2rtc builds, and rebuilds the web interface. Use `--skip-binaries` or `--skip-web` to skip a step you know has not changed.
+5. **Start Frigate** again. Database migrations run automatically at startup.
+
+If you installed from a [release bundle](https://github.com/nuipona/frigate-windows/releases) instead of a git checkout, download the newer bundle, unpack it over the checkout, and run the bootstrap script again. Your data directory is not touched either way.
+
 ## Rolling Back
 
 If an update causes issues:
@@ -103,6 +120,7 @@ If an update causes issues:
    - For Docker: Specify an older tag (e.g., `ghcr.io/blakeblackshear/frigate:0.18.0`) in your `docker run` command.
    - For Docker Compose: Edit your `docker-compose.yml`, specify the older version tag (e.g., `ghcr.io/blakeblackshear/frigate:0.16.4`), and re-run `docker compose up -d`.
    - For Home Assistant: Restore from the app/addon backup you took before you updated.
+   - For a native Windows install: check out the previous commit with `git checkout <sha>` and run `py -3.12 bootstrap_windows.py` again.
 4. Verify the old version is running again.
 
 ## Troubleshooting

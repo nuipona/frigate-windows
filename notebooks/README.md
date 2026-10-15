@@ -1,10 +1,12 @@
 # Notebooks
 
-## YOLO-NAS Pretrained
+## YOLO-NAS pretrained export
 
-You can build and download a compatible model with pre-trained weights using [Google Colab](https://colab.research.google.com/github/blakeblackshear/frigate/blob/dev/notebooks/YOLO_NAS_Pretrained_Export.ipynb).
+[`YOLO_NAS_Pretrained_Export.ipynb`](YOLO_NAS_Pretrained_Export.ipynb) exports a COCO-pretrained YOLO-NAS detector to ONNX, in the layout Frigate's `onnx` detector expects. Run it on [Google Colab](https://colab.research.google.com/github/nuipona/frigate-windows/blob/dev/notebooks/YOLO_NAS_Pretrained_Export.ipynb) or locally.
 
-> [!WARNING]  
-> The pre-trained YOLO-NAS weights from DeciAI are subject to their license and can't be used commercially. For more information, see: https://docs.deci.ai/super-gradients/latest/LICENSE.YOLONAS.html
+- Set the Colab runtime to Python 3.11 before running: `super-gradients` does not work on the current Colab default. The first cell says this too.
+- The export is 320x320, which costs less CPU and infers faster with no practical accuracy loss, because Frigate crops to regions of interest before it runs detection. Change `input_image_shape` to `(640, 640)` to use the larger input.
+- `Models.YOLO_NAS_S` is the default. `YOLO_NAS_M` and `YOLO_NAS_L` export the same way and are larger and slower.
 
-The input image size in this notebook is set to 320x320. This results in lower CPU usage and faster inference times without impacting performance in most cases due to the way Frigate crops video frames to areas of interest before running detection. The notebook and config can be updated to 640x640 if desired. By default, YOLO_NAS_S is built with YOLO_NAS_M and YOLO_NAS_L sizes also being available for export.
+> [!WARNING]
+> The pre-trained YOLO-NAS weights from DeciAI are subject to their license and cannot be used commercially. See https://docs.deci.ai/super-gradients/latest/LICENSE.YOLONAS.html

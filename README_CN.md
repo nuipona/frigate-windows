@@ -8,7 +8,7 @@
 <img src="https://hosted.weblate.org/widget/frigate-nvr/-/zh_Hans/svg-badge.svg" alt="翻译状态" />
 </a>
 
-[English](https://github.com/blakeblackshear/frigate) | \[简体中文\]
+[English](README.md) | \[简体中文\]
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -26,6 +26,30 @@
 - 24/7 全天候录制
 - 通过 RTSP 重新流传输以减少摄像头的连接数
 - 支持 WebRTC 和 MSE，实现低延迟的实时观看
+
+## 本仓库：原生 Windows 支持
+
+`nuipona/frigate-windows` 跟踪 `blakeblackshear/frigate`，并增加了原生 Windows 安装方式：Frigate 以普通 Windows 进程运行，不需要 Docker，也不需要 WSL。API、媒体接口和 Web 界面都由 Frigate 自己提供，因此没有 nginx、s6 和 `/dev/shm`。
+
+在普通的 PowerShell 窗口中安装：
+
+```powershell
+git clone https://github.com/nuipona/frigate-windows.git
+cd frigate-windows
+py -3.12 bootstrap_windows.py
+powershell -ExecutionPolicy Bypass -File .\run_frigate.ps1
+```
+
+引导脚本需要 64 位 CPython 3.12。它会创建虚拟环境、安装 Windows 依赖、下载固定版本的 FFmpeg 与 go2rtc、在检测到 Node.js 时构建 Web 界面，并生成一个启动脚本（Frigate 请求重启时由它负责重新拉起）。[Release 页面](https://github.com/nuipona/frigate-windows/releases)提供已构建好 Web 界面的安装包，因此不需要安装 Node.js。
+
+Windows 相关特性：
+
+- 检测器：CPU（TFLite、ONNX Runtime、OpenVINO），通过 OpenVINO 使用 Intel 显卡/NPU，以及通过 DirectML（`onnxruntime-directml`，默认安装）在 AMD、Intel 和 Nvidia 显卡上推理。Coral、Hailo 等依赖 Linux 专用驱动的加速器不可用，配置中若指定这类设备会在启动校验阶段报错并列出 Windows 可用的检测器。
+- 视频：`preset-windows-d3d11va`、`preset-windows-dxva2`、`preset-windows-qsv`、`preset-windows-nvenc`，`ffmpeg.hwaccel_args: auto` 会自动选择合适的预设。
+- 文件：所有内容位于同一个基础目录，默认为 `%LOCALAPPDATA%\Frigate`，可用 `FRIGATE_BASE_DIR` 迁移。
+- 可选的 Windows 服务（SCM）：`bootstrap_windows.py --install-service`。
+
+安装、端口与调优请阅读 [Windows 安装文档](docs/docs/frigate/installation.md#windows)，移植审计（改了什么、验证了什么、还缺什么）见 [WINDOWS_COMPATIBILITY.md](WINDOWS_COMPATIBILITY.md)。
 
 ## 社区中文翻译文档
 

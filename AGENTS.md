@@ -6,10 +6,36 @@ This document provides coding guidelines and best practices for contributing to 
 
 Frigate NVR is a realtime object detection system for IP cameras that uses:
 
-- **Backend**: Python 3.13+ with FastAPI, OpenCV, TensorFlow/ONNX
+- **Backend**: Python 3.11+ with FastAPI, OpenCV, and pluggable detectors (TFLite, ONNX Runtime, OpenVINO, TensorRT, Coral)
 - **Frontend**: React with TypeScript, Vite, TailwindCSS
 - **Architecture**: Multiprocessing design with ZMQ and MQTT communication
 - **Focus**: Minimal resource usage with maximum performance
+
+This repository (`nuipona/frigate-windows`) is a fork of `blakeblackshear/frigate` that also runs natively on Windows, without Docker or WSL. See [Native Windows](#native-windows) before touching anything platform specific.
+
+## Native Windows
+
+This fork also runs on Windows as an ordinary process: Frigate itself serves the API, the media endpoints and the web interface, so there is no nginx, no s6 and no `/dev/shm`. Rules that keep that working:
+
+- Every platform difference goes through `frigate/util/platform.py`, which imports nothing else from Frigate and never imports a POSIX-only module at module scope. Prefer its helpers (paths, `ipc_endpoint()`, `find_executable()`, `install_signal_handlers()`, `split_ffmpeg_command()`) over new `IS_WINDOWS` branches in feature code.
+- Never `terminate()` a child you want to stop cleanly: on Windows that is `TerminateProcess`. Stop ffmpeg through `stop_ffmpeg()` / `request_ffmpeg_stop()`, and let `frigate/util/job_object.py` take the process tree down if Frigate dies.
+- Antivirus and the search indexer hold recording files open, so delete and move them with `robust_remove()` / `robust_move()` from `frigate/util/file.py`.
+- Detectors that work natively are `cpu`, `onnx`, `openvino` and `zmq`. A config naming a Linux-only accelerator has to fail validation with a message that says so (`frigate/detectors/device.py`).
+- Windows behaviour goes behind `IS_WINDOWS` and gets a test. Most of them run on any platform by patching the platform layer (`frigate/test/test_platform_windows.py`, `test_windows_service.py`).
+
+```bash
+# Whole unit suite on Windows minus frigate/test/windows_suite_denylist.txt
+python testing-scripts/run_windows_unit_suite.py
+
+# The Windows dependency set and bundled ffmpeg/go2rtc versions resolve
+python testing-scripts/check_windows_requirements.py
+
+# Compare this tree with the recorded upstream commit. Compares HEAD, so
+# commit first, and use --fetch when refs/remotes/upstream/dev is not local.
+python testing-scripts/check_upstream_parity.py --fetch
+```
+
+The parity checker fails on any divergence from upstream that `testing-scripts/upstream_parity_baseline.json` does not explain. After an audited change, re-run it with `--update` and write the reason for each new entry. `WINDOWS_COMPATIBILITY.md` records what the port changed and what is still unverified.
 
 ## Code Review Guidelines
 
@@ -23,7 +49,7 @@ When reviewing code, do NOT comment on:
 
 ### Python Requirements
 
-- **Compatibility**: Python 3.13+
+- **Compatibility**: Python 3.11+ (`requires-python` in `pyproject.toml`, the container image, and CI all use 3.11). The native Windows dependency set targets 64-bit CPython 3.12, and `bootstrap_windows.py` refuses any other version.
 - **Language Features**: Use modern Python features:
   - Pattern matching
   - Type hints (comprehensive typing preferred)
@@ -238,7 +264,7 @@ ruff check frigate/
 python3 -u -m mypy --config-file frigate/mypy.ini frigate
 
 # Regenerate the OpenAPI spec after adding, changing, or removing an API
-# endpoint or its auth dependency — outputs docs/static/frigate-api.yaml,
+# endpoint or its auth dependency. Outputs docs/static/frigate-api.yaml,
 # annotated with each endpoint's auth requirement (admin / any / camera /
 # public). NEVER edit that file by hand. CI runs the --check variant and fails
 # if it is out of date. (from repo root)
@@ -284,7 +310,7 @@ npx playwright test --config e2e/playwright.config.ts --project=desktop
 # E2E: regenerate mock data after backend model changes (from repo root)
 PYTHONPATH=. python3 web/e2e/fixtures/mock-data/generate-mock-data.py
 
-# Regenerate config translations from Pydantic models — outputs to
+# Regenerate config translations from Pydantic models. Outputs
 # web/public/locales/en/config/{global,cameras}.json. NEVER edit those
 # JSON files by hand; change the Pydantic field title/description and
 # re-run this script. (from repo root)
@@ -446,5 +472,7 @@ Always conform new and refactored code to the existing coding style in the proje
 ## Additional Resources
 
 - Documentation: https://docs.frigate.video
-- Main Repository: https://github.com/blakeblackshear/frigate
+- This fork: https://github.com/nuipona/frigate-windows
+- Upstream repository: https://github.com/blakeblackshear/frigate
+- Windows port audit: [WINDOWS_COMPATIBILITY.md](WINDOWS_COMPATIBILITY.md)
 - Home Assistant Integration: https://github.com/blakeblackshear/frigate-hass-integration
