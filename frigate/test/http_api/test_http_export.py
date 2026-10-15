@@ -2,8 +2,9 @@ import io
 import os
 import tempfile
 import zipfile
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+from frigate.const import CLIPS_DIR
 from frigate.jobs.export import (
     ExportJob,
     get_export_job_manager,
@@ -1050,6 +1051,97 @@ class TestHttpExport(BaseTestHttp):
 
         assert response.status_code == 400
         assert ExportCase.select().count() == 0
+
+    def _batch_export_with_image(self, image_path: str, role: str):
+        with patch(
+            "frigate.api.export.start_export_job",
+            side_effect=lambda _config, job: job.id,
+        ) as start_export_job:
+            with AuthTestClient(self.app) as client:
+                response = client.post(
+                    "/exports/batch",
+                    headers={"remote-user": role, "remote-role": role},
+                    json={
+                        "items": [
+                            {
+                                "camera": "front_door",
+                                "start_time": 110,
+                                "end_time": 150,
+                                "image_path": image_path,
+                            }
+                        ],
+                    },
+                )
+
+        return response, start_export_job
+
+    def test_batch_export_restricted_role_rejects_unreadable_image_path(self):
+        self._insert_recording("rec-front", "front_door", 100, 400)
+        self.app.frigate_config.auth.roles["limited_user"] = ["front_door"]
+
+        for image_path in (
+            f"{CLIPS_DIR}/review/thumb-backyard-123.456-abc.webp",
+            f"{CLIPS_DIR}/thumbs/backyard/123.webp",
+            f"{CLIPS_DIR}/faces/someone/1.webp",
+            f"{CLIPS_DIR}/custom/thumb.jpg",
+        ):
+            response, _ = self._batch_export_with_image(image_path, "limited_user")
+
+            assert response.status_code == 400, image_path
+
+    def test_batch_export_restricted_role_accepts_own_camera_image_path(self):
+        self._insert_recording("rec-front", "front_door", 100, 400)
+        self.app.frigate_config.auth.roles["limited_user"] = ["front_door"]
+        image_path = f"{CLIPS_DIR}/review/thumb-front_door-123.456-abc.webp"
+
+        response, start_export_job = self._batch_export_with_image(
+            image_path, "limited_user"
+        )
+
+        assert response.status_code == 202
+        assert start_export_job.call_args.args[1].image_path == image_path
+
+    def test_existing_image_auth_uses_url_separators_on_windows(self):
+        from frigate.api import export as export_api
+
+        image_path = r"C:\Frigate\clips\thumbs\front_door\review.webp"
+        request = MagicMock()
+        request.headers.get.return_value = "limited_user"
+        request.app.frigate_config = self.app.frigate_config
+
+        with (
+            patch.object(
+                export_api, "sanitize_contained_path", return_value=image_path
+            ),
+            patch.object(
+                export_api.os.path,
+                "relpath",
+                return_value=r"thumbs\front_door\review.webp",
+            ),
+            patch.object(export_api.os, "sep", "\\"),
+            patch.object(
+                export_api, "deny_response_for_media_uri", return_value=None
+            ) as authorize,
+        ):
+            sanitized, error = export_api._sanitize_existing_image(request, "ignored")
+
+        assert error is None
+        assert sanitized == image_path
+        authorize.assert_called_once_with(
+            "/clips/thumbs/front_door/review.webp",
+            "limited_user",
+            self.app.frigate_config,
+        )
+
+    def test_batch_export_unrestricted_roles_accept_custom_image_path(self):
+        self._insert_recording("rec-front", "front_door", 100, 400)
+        image_path = f"{CLIPS_DIR}/custom/thumb.jpg"
+
+        for role in ("admin", "viewer"):
+            response, start_export_job = self._batch_export_with_image(image_path, role)
+
+            assert response.status_code == 202, role
+            assert start_export_job.call_args.args[1].image_path == image_path
 
     def test_batch_export_non_admin_can_queue(self):
         self._insert_recording("rec-front", "front_door", 100, 400)
