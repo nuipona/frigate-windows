@@ -10,8 +10,32 @@ with no Docker and no WSL. Line references are against the current tree.
 This fork tracks `blakeblackshear/frigate` `dev`. **Verified against upstream
 `b79e043` (Reduce idle CPU from thread pools, #24652, 2026-10-13) on
 2026-10-14**: tree content is at parity, with no upstream file missing and no
-upstream behaviour dropped. The three most recent upstream commits are the
-ones the port had to absorb:
+upstream behaviour dropped. Upstream `dev` was still at `b79e043` when this
+was re-checked, so no sync was due (`master` is the release branch, not the
+branch this fork tracks).
+
+That verification was re-done from scratch on 2026-10-14 because the parity
+checker itself was failing at this commit: the pull request that introduced
+the baseline (#9) recorded it before that same pull request's final edits to
+`frigate/util/ffmpeg.py`, `frigate/output/camera.py` and
+`frigate/output/birdseye.py` (the SCM service stop work), so the recorded
+digests for those three files were stale at merge and the claim above was
+not actually being enforced. All three files were re-audited line by line
+against upstream. On POSIX each one keeps upstream's behaviour: ffmpeg is
+started in a new session and stopped with `terminate()`, the same 30 second
+wait and the same kill fallback; birdseye frames still go through the same
+FIFO, recreated once by the converter when a reader goes away. The Windows
+halves are additive (a graceful ffmpeg quit, a new process group, a loopback
+listener in place of the FIFO). The audit did find one real divergence the
+stale baseline had been hiding: `FifoBirdseyePipe.write` recreated the FIFO
+itself and the converter recreated it again, so one reader going away built
+the FIFO twice and could remove the FIFO a just-reconnected reader had
+opened. Recreation is the caller's job again, as it is upstream, and
+`frigate/test/test_birdseye_pipe.py` covers the contract (frames reach a
+reader, frames with no reader are discarded, a reader going away is reported
+rather than recreated). The baseline was then re-recorded, and the checker
+passes against `b79e043` again. The three most recent upstream commits are
+the ones the port had to absorb:
 
 | Upstream commit | What it changes here |
 | --- | --- |
