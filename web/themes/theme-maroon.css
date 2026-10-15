@@ -1,0 +1,99 @@
+@layer base {
+  .theme-gannet.light {
+    --background: 30 20% 96%;
+    --background-alt: 30 15% 92%;
+    --foreground: 350 60% 20%;
+    --card: 0 0% 100%;
+    --card-foreground: 350 60% 20%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 350 60% 20%;
+    --primary: 38 90% 45%;
+    --primary-variant: 38 90% 35%;
+    --primary-foreground: 350 60% 10%;
+    --secondary: 350 20% 90%;
+    --secondary-foreground: 350 40% 30%;
+    --secondary-highlight: 350 20% 85%;
+    --neutral: 350 20% 45%;
+    --neutral_variant: 350 20% 32%;
+    --muted: 350 20% 92%;
+    --muted-foreground: 350 20% 40%;
+    --accent: 38 80% 90%;
+    --accent-foreground: 350 60% 20%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --warning: 38 100% 50%;
+    --warning-foreground: 350 60% 10%;
+    --border: 350 20% 80%;
+    --input: 350 20% 80%;
+    --ring: 38 90% 45%;
+    --selected: 38 90% 45%;
+    --selected-foreground: 350 60% 10%;
+
+    --severity_alert: var(--red-800);
+    --severity_alert_dimmed: var(--red-500);
+
+    --severity_detection: var(--orange-600);
+    --severity_detection_dimmed: var(--orange-400);
+
+    --severity_significant_motion: var(--yellow-400);
+    --severity_significant_motion_dimmed: var(--yellow-200);
+
+    --motion_review: hsl(44, 94%, 50%);
+    --motion_review: 44 94% 50%;
+
+    --motion_review_dimmed: hsl(44, 60%, 40%);
+    --motion_review_dimmed: 44 60% 40%;
+
+    --audio_review: hsl(228, 94%, 67%);
+    --audio_review: 228 94% 67%;
+  }
+
+  .theme-gannet.dark {
+    --background: 350 45% 8%;
+    --background-alt: 350 40% 12%;
+    --foreground: 38 95% 62%;
+    --card: 350 40% 11%;
+    --card-foreground: 38 95% 62%;
+    --popover: 350 40% 9%;
+    --popover-foreground: 38 95% 62%;
+    --primary: 38 95% 55%;
+    --primary-variant: 38 95% 45%;
+    --primary-foreground: 350 45% 8%;
+    --secondary: 350 30% 16%;
+    --secondary-foreground: 38 80% 70%;
+    --secondary-highlight: 350 30% 22%;
+    --neutral: 350 20% 50%;
+    --neutral_variant: 350 20% 40%;
+    --muted: 350 30% 14%;
+    --muted-foreground: 38 40% 60%;
+    --accent: 350 30% 16%;
+    --accent-foreground: 38 95% 62%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 85.7% 97.3%;
+    --warning: 38 100% 50%;
+    --warning-foreground: 350 45% 8%;
+    --border: 350 30% 20%;
+    --input: 350 30% 16%;
+    --ring: 38 95% 55%;
+    --selected: 38 95% 55%;
+    --selected-foreground: 350 45% 8%;
+
+    --severity_alert: var(--red-800);
+    --severity_alert_dimmed: var(--red-500);
+
+    --severity_detection: var(--orange-600);
+    --severity_detection_dimmed: var(--orange-400);
+
+    --severity_significant_motion: var(--yellow-400);
+    --severity_significant_motion_dimmed: var(--yellow-200);
+
+    --motion_review: hsl(44, 94%, 50%);
+    --motion_review: 44 94% 50%;
+
+    --motion_review_dimmed: hsl(44, 60%, 40%);
+    --motion_review_dimmed: 44 60% 40%;
+
+    --audio_review: hsl(228, 94%, 67%);
+    --audio_review: 228 94% 67%;
+  }
+}

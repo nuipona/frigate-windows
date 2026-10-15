@@ -1,6 +1,6 @@
 {
-  "name": "Frigate",
-  "short_name": "Frigate",
+  "name": "Gannet",
+  "short_name": "Gannet",
   "start_url": "/BASE_PATH/",
   "icons": [
     {
@@ -28,7 +28,7 @@
       "purpose": "maskable"
     }
   ],
-  "theme_color": "#ffffff",
-  "background_color": "#ffffff",
+  "theme_color": "#2a0a12",
+  "background_color": "#2a0a12",
   "display": "standalone"
 }

@@ -8,6 +8,8 @@ const proxyHost = process.env.PROXY_HOST || "localhost:5000";
 // https://vitejs.dev/config/
 export default defineConfig({
   server: {
+    host: "0.0.0.0",
+    allowedHosts: true,
     proxy: {
       "/api": {
         target: `http://${proxyHost}`,

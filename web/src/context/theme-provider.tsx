@@ -7,6 +7,8 @@ type ColorScheme =
   | "theme-green"
   | "theme-nord"
   | "theme-red"
+  | "theme-gannet"
+  | "theme-maroon"
   | "theme-high-contrast"
   | "theme-default";
 
@@ -16,6 +18,8 @@ export const colorSchemes: ColorScheme[] = [
   "theme-green",
   "theme-nord",
   "theme-red",
+  "theme-gannet",
+  "theme-maroon",
   "theme-high-contrast",
   "theme-default",
 ];
@@ -45,7 +49,7 @@ type ThemeProviderState = {
 const initialState: ThemeProviderState = {
   theme: "system",
   systemTheme: undefined,
-  colorScheme: "theme-default",
+  colorScheme: "theme-gannet",
   setTheme: () => null,
   setColorScheme: () => null,
 };
@@ -80,9 +84,9 @@ function updateThemeMetaTags(theme: ActiveTheme): void {
 
 export function ThemeProvider({
   children,
-  defaultTheme = "system",
-  defaultColorScheme = "theme-default",
-  storageKey = "frigate-ui-theme",
+  defaultTheme = "dark",
+  defaultColorScheme = "theme-gannet",
+  storageKey = "gannet-ui-theme",
   ...props
 }: ThemeProviderProps) {
   const [theme, setTheme] = useState<Theme>(() => {
