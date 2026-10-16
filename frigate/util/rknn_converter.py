@@ -11,6 +11,7 @@ from pathlib import Path
 
 from frigate.const import SUPPORTED_RK_SOCS
 from frigate.util.file import FileLock
+from frigate.util.platform import IS_WINDOWS
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +154,10 @@ def ensure_rknn_toolkit() -> bool:
 
 
 def get_soc_type() -> str | None:
-    """Get the SoC type from device tree."""
+    """Get the SoC type from device tree on Linux."""
+    if IS_WINDOWS:
+        return None
+
     try:
         with open("/proc/device-tree/compatible") as file:
             content = file.read()

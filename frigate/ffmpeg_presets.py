@@ -14,7 +14,7 @@ from frigate.const import (
     FFMPEG_HWACCEL_VULKAN,
     LIBAVFORMAT_VERSION_MAJOR,
 )
-from frigate.util.platform import IS_WINDOWS, quote_ffmpeg_arg
+from frigate.util.platform import IS_WINDOWS, quote_ffmpeg_arg, split_ffmpeg_command
 from frigate.util.services import vainfo_hwaccel
 from frigate.util.version import VERSION
 
@@ -325,8 +325,11 @@ def parse_preset_hardware_acceleration_encode(
     if not isinstance(arg, str):
         return arg_map["default"].format(quote_ffmpeg_arg(ffmpeg_path), input, output)
 
-    # Not all jetsons have HW encoders, so fall back to default SW encoder if not
-    if arg.startswith("preset-jetson-") and not os.path.exists("/dev/nvhost-msenc"):
+    # This preset is Linux-only, and not all Jetsons have its HW encoder.
+    # Fall back to software when unsupported, without probing /dev on Windows.
+    if arg.startswith("preset-jetson-") and (
+        IS_WINDOWS or not os.path.exists("/dev/nvhost-msenc")
+    ):
         arg = "default"
 
     return arg_map.get(arg, arg_map["default"]).format(
@@ -605,13 +608,17 @@ def parse_preset_output_record(arg: Any, force_record_hvc1: bool) -> list[str] |
 # preset validation
 # ---------------------------------------------------------------------------
 
-#: presets that decode through a Linux or macOS only API. They are valid
-#: elsewhere and cannot work on Windows, so the config validator names the
-#: Windows preset to use instead rather than letting ffmpeg fail at startup.
+#: presets whose implementation contains a platform-specific API or device
+#: argument that cannot work on Windows. The validator names the Windows
+#: preset to use instead rather than letting ffmpeg fail at startup.
 LINUX_ONLY_DECODE_PRESETS = {
     FFMPEG_HWACCEL_VAAPI: "preset-windows-d3d11va",
     "preset-intel-qsv-h264": "preset-windows-qsv-h264",
     "preset-intel-qsv-h265": "preset-windows-qsv-h265",
+    FFMPEG_HWACCEL_RKMPP: "preset-windows-d3d11va",
+    f"{FFMPEG_HWACCEL_RKMPP}-no-dump_extra": "preset-windows-d3d11va",
+    "preset-rk-h264": "preset-windows-d3d11va",
+    "preset-rk-h265": "preset-windows-d3d11va",
 }
 
 #: decode presets that only exist for another platform's hardware
@@ -693,6 +700,138 @@ def _preset_error(
     return None
 
 
+_WINDOWS_UNSUPPORTED_HWACCEL = {
+    "vaapi": "preset-windows-d3d11va",
+    "drm": "preset-windows-d3d11va",
+    "drm_prime": "preset-windows-d3d11va",
+    "rkmpp": "preset-windows-d3d11va",
+    "nvmpi": "preset-windows-d3d11va",
+    "v4l2m2m": "preset-windows-d3d11va",
+    "videotoolbox": "preset-windows-d3d11va",
+    "mmal": "preset-windows-d3d11va",
+    "mediacodec": "preset-windows-d3d11va",
+}
+
+_WINDOWS_UNSUPPORTED_CODEC_MARKERS = (
+    "_v4l2m2m",
+    "_nvmpi",
+    "_rkmpp",
+    "_vaapi",
+    "_omx",
+    "_videotoolbox",
+    "_mmal",
+    "_mediacodec",
+)
+_WINDOWS_LINUX_DEVICE_PREFIXES = (
+    "/dev/dri/",
+    "/dev/video",
+    "/dev/v4l/",
+    "/dev/nvidia",
+    "/dev/nvhost",
+)
+
+
+def _windows_raw_hardware_error(args: list[str], setting: str) -> str | None:
+    """Explain why raw Linux or macOS hardware arguments cannot run on Windows."""
+    tokens: list[str] = []
+
+    for arg in args:
+        try:
+            tokens.extend(split_ffmpeg_command(arg))
+        except ValueError:
+            tokens.extend(arg.split())
+
+    lowered = [token.lower() for token in tokens]
+
+    for index, token in enumerate(lowered):
+        if token == "-f" and index + 1 < len(lowered):
+            input_format = lowered[index + 1]
+        elif token.startswith("-f="):
+            input_format = token.split("=", maxsplit=1)[1]
+        else:
+            input_format = None
+
+        if input_format in ("v4l2", "video4linux2"):
+            return (
+                "The V4L2 FFmpeg input format is Linux-only and cannot be used on "
+                "native Windows. Use a DirectShow input or a network stream instead."
+            )
+
+        backend = None
+
+        if token in ("-hwaccel", "-hwaccel_output_format", "-init_hw_device"):
+            if index + 1 < len(lowered):
+                backend = lowered[index + 1].split("=", maxsplit=1)[0]
+        elif token.startswith(("-hwaccel=", "-hwaccel_output_format=")):
+            backend = token.split("=", maxsplit=1)[1].split("=", maxsplit=1)[0]
+
+        if backend in _WINDOWS_UNSUPPORTED_HWACCEL:
+            if setting == "ffmpeg.output_args.record":
+                return (
+                    f"{backend} is not available for native Windows recording. "
+                    "Use a Windows-compatible output encoder instead."
+                )
+
+            replacement = _WINDOWS_UNSUPPORTED_HWACCEL[backend]
+            return (
+                f"{backend} is not available on native Windows. Use {replacement} "
+                "or another Windows decode preset."
+            )
+
+        device_path = token
+
+        if token.startswith(("-hwaccel_device=", "-vaapi_device=")):
+            device_path = token.split("=", maxsplit=1)[1]
+
+        if token == "-vaapi_device" or device_path.startswith(
+            _WINDOWS_LINUX_DEVICE_PREFIXES
+        ):
+            if setting == "ffmpeg.output_args.record":
+                return (
+                    f"{tokens[index]} is a Linux-only hardware device path and "
+                    "cannot be used for native Windows recording."
+                )
+
+            return (
+                f"{tokens[index]} is a Linux-only hardware device path and cannot "
+                "be used on native Windows. Use a Windows decode preset instead."
+            )
+
+        if "drm_prime" in token:
+            return (
+                f"{tokens[index]} uses a Linux-only FFmpeg pixel format that is "
+                "not available on native Windows. Use a Windows-supported pixel format instead."
+            )
+
+        if any(marker in token for marker in _WINDOWS_UNSUPPORTED_CODEC_MARKERS):
+            return (
+                f"{tokens[index]} uses a platform-specific FFmpeg codec that is "
+                "not available on native Windows. Use a Windows-supported codec instead."
+            )
+
+        if any(
+            marker in token for marker in ("scale_vaapi", "format=vaapi", "scale_rkrga")
+        ):
+            return (
+                f"{tokens[index]} is a Linux-only FFmpeg filter and cannot run on "
+                "native Windows. Use Windows-supported FFmpeg filters instead."
+            )
+
+    return None
+
+
+def validate_ffmpeg_platform_args(value: str | list[str] | None, setting: str) -> None:
+    """Reject raw hardware arguments for a platform that cannot run them."""
+    if not IS_WINDOWS or value is None:
+        return
+
+    args = [value] if isinstance(value, str) else value
+    error = _windows_raw_hardware_error(args, setting)
+
+    if error:
+        raise ValueError(error)
+
+
 def validate_ffmpeg_args(
     value: str | list[str] | None, setting: str, presets: dict[str, Any] | list[str]
 ) -> None:
@@ -716,3 +855,6 @@ def validate_ffmpeg_args(
 
         if error:
             raise ValueError(error)
+
+    if setting.startswith("ffmpeg."):
+        validate_ffmpeg_platform_args(args, setting)

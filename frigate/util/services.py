@@ -732,6 +732,9 @@ def get_intel_gpu_stats(
     counters), each of which logs a distinct warning, and the caller latches
     it against retries for an hour.
     """
+    if IS_WINDOWS:
+        return None
+
     from frigate.stats.intel_gpu_info import intel_gpu_name_resolver
 
     target_pdev = _resolve_intel_gpu_pdev(intel_gpu_device)

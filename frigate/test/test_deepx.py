@@ -585,6 +585,7 @@ class TestDeepxConfig(unittest.TestCase):
                 with self.assertRaises(ValidationError):
                     DeepxDetectorConfig(type="deepx", device=configured)
 
+    @patch("frigate.detectors.device.IS_WINDOWS", False)
     def test_a_bad_device_is_refused_where_the_config_is_parsed(self):
         """parse_device builds the detector config to surface a bad device at
         startup, so the comma-separated form fails there rather than binding a
@@ -595,6 +596,7 @@ class TestDeepxConfig(unittest.TestCase):
             with self.subTest(raw=raw), self.assertRaises(DeviceParseError):
                 parse_device(raw)
 
+    @patch("frigate.detectors.device.IS_WINDOWS", False)
     def test_a_device_string_builds_this_detector_config(self):
         """Frigate turns a `deepx:PCIe:0` entry into the detector config with
         the model already attached, which is the path app.py takes; a bare

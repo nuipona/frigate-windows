@@ -5,6 +5,7 @@ import logging
 import subprocess
 import threading
 import time
+from multiprocessing import Process
 from multiprocessing.managers import DictProxy
 from multiprocessing.synchronize import Event as MpEvent
 from typing import Any
@@ -41,7 +42,12 @@ from frigate.data_processing.types import DataProcessorMetrics
 from frigate.ffmpeg_presets import parse_preset_input
 from frigate.log import LogPipe, suppress_stderr_during
 from frigate.util.builtin import get_ffmpeg_arg_list, load_labels
-from frigate.util.ffmpeg import start_or_restart_ffmpeg, stop_ffmpeg
+from frigate.util.ffmpeg import (
+    request_ffmpeg_stop,
+    start_or_restart_ffmpeg,
+    stop_ffmpeg,
+)
+from frigate.util.platform import IS_WINDOWS
 from frigate.util.process import FrigateProcess
 
 try:
@@ -51,6 +57,29 @@ except ModuleNotFoundError:
 
 
 logger = logging.getLogger(__name__)
+
+#: One shared shutdown budget for all Windows audio maintainer threads. Keep the
+#: single-camera allowance consistent with the former 1s + 10s joins.
+AUDIO_THREAD_SHUTDOWN_TIMEOUT = 11.0
+
+#: A small margin for the audio process to finish its own cleanup after its
+#: maintainers have used the shared deadline.
+AUDIO_PROCESS_SHUTDOWN_TIMEOUT = AUDIO_THREAD_SHUTDOWN_TIMEOUT + 2.0
+
+
+def join_audio_process(process: Process) -> None:
+    """Bound Windows audio-worker shutdown if a native thread is stuck."""
+    if IS_WINDOWS:
+        process.join(timeout=AUDIO_PROCESS_SHUTDOWN_TIMEOUT)
+        if process.is_alive():
+            logger.warning(
+                "Audio process did not exit within %.1f seconds; continuing shutdown",
+                AUDIO_PROCESS_SHUTDOWN_TIMEOUT,
+            )
+    else:
+        # Preserve the existing Linux behavior: the worker is expected to
+        # finish its per-thread cleanup before the app proceeds.
+        process.join()
 
 
 def get_ffmpeg_command(ffmpeg: CameraFfmpegConfig) -> list[str]:
@@ -124,6 +153,11 @@ class AudioProcessor(FrigateProcess):
             self.stop_event,  # type: ignore[arg-type]
             self.genai_manager,
         )
+        if IS_WINDOWS:
+            # A stuck native pipe read must not pin the audio worker process
+            # after its stop event.
+            thread.daemon = True
+
         self.audio_threads[name] = thread
         thread.start()
         self.logger.info(f"Audio maintainer started for {name}")
@@ -139,6 +173,35 @@ class AudioProcessor(FrigateProcess):
             self.logger.warning(f"Audio maintainer thread for {camera} is still alive")
         else:
             self.logger.info(f"Audio maintainer stopped for {camera}")
+
+    def _stop_audio_threads(self) -> None:
+        """Stop all maintainers, sharing the shutdown wait on Windows."""
+        threads = list(self.audio_threads.values())
+
+        deadline: float | None = None
+        if IS_WINDOWS:
+            deadline = time.monotonic() + AUDIO_THREAD_SHUTDOWN_TIMEOUT
+
+        for thread in threads:
+            thread.stop()
+
+        for thread in threads:
+            if IS_WINDOWS:
+                if thread.is_alive():
+                    self.logger.info(f"Waiting for thread {thread.name:s} to exit")
+                assert deadline is not None
+                remaining = max(0.0, deadline - time.monotonic())
+                thread.join(remaining)
+            else:
+                # Retain the historical per-thread waits on Linux.
+                thread.join(1)
+                if thread.is_alive():
+                    self.logger.info(f"Waiting for thread {thread.name:s} to exit")
+                    thread.join(10)
+
+        for thread in threads:
+            if thread.is_alive():
+                self.logger.warning(f"Thread {thread.name} is still alive")
 
     def run(self) -> None:
         self.pre_run_setup(self.config.logger)
@@ -204,16 +267,7 @@ class AudioProcessor(FrigateProcess):
                 self.spawn_if_needed(camera)
 
         config_subscriber.stop()
-
-        for thread in self.audio_threads.values():
-            thread.join(1)
-            if thread.is_alive():
-                self.logger.info(f"Waiting for thread {thread.name:s} to exit")
-                thread.join(10)
-
-        for thread in self.audio_threads.values():
-            if thread.is_alive():
-                self.logger.warning(f"Thread {thread.name} is still alive")
+        self._stop_audio_threads()
 
         self.logger.info("Exiting audio processor")
 
@@ -251,7 +305,9 @@ class AudioEventMaintainer(threading.Thread):
         self.chunk_size = int(round(AUDIO_DURATION * AUDIO_SAMPLE_RATE * 2))
         self.logger = logging.getLogger(f"audio.{self.camera_config.name}")
         self.ffmpeg_cmd = get_ffmpeg_command(self.camera_config.ffmpeg)
-        self.logpipe = LogPipe(f"ffmpeg.{self.camera_config.name}.audio")
+        self.logpipe = LogPipe(
+            f"ffmpeg.{self.camera_config.name}.audio", daemon=IS_WINDOWS
+        )
         self.audio_listener: subprocess.Popen[Any] | None = None
         self.audio_transcription_model_runner = audio_transcription_model_runner
         self.genai_manager = genai_manager
@@ -389,11 +445,14 @@ class AudioEventMaintainer(threading.Thread):
 
     def read_audio(self) -> None:
         def log_and_restart() -> None:
-            if self.stop_event.is_set():
+            if self.stop_event.is_set() or self.camera_stop_event.is_set():
                 return
 
-            time.sleep(self.camera_config.ffmpeg.retry_interval)
-            self.start_or_restart_ffmpeg()
+            if self.camera_stop_event.wait(self.camera_config.ffmpeg.retry_interval):
+                return
+
+            if not self.stop_event.is_set():
+                self.start_or_restart_ffmpeg()
 
         if self.audio_listener is None or self.audio_listener.stdout is None:
             log_and_restart()
@@ -420,11 +479,23 @@ class AudioEventMaintainer(threading.Thread):
             log_and_restart()
 
     def stop(self) -> None:
-        """Signal this maintainer to exit its run loop and clean up."""
+        """Signal this maintainer and unblock its FFmpeg pipe read."""
         self.camera_stop_event.set()
 
+        if self.audio_listener is not None:
+            if IS_WINDOWS:
+                # This stream carries raw PCM, not a recording. Avoid spending
+                # one quit-poll second per camera before unblocking its reader.
+                request_ffmpeg_stop(self.audio_listener, self.logger, wait_timeout=0.0)
+            else:
+                request_ffmpeg_stop(self.audio_listener, self.logger)
+
     def run(self) -> None:
-        if self.camera_config.enabled:
+        if (
+            self.camera_config.enabled
+            and not self.stop_event.is_set()
+            and not self.camera_stop_event.is_set()
+        ):
             self.start_or_restart_ffmpeg()
 
         while not self.stop_event.is_set() and not self.camera_stop_event.is_set():

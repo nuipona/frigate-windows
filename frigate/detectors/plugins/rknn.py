@@ -13,6 +13,7 @@ from frigate.detectors.detection_api import DetectionApi
 from frigate.detectors.detection_runners import RKNNModelRunner
 from frigate.detectors.detector_config import BaseDetectorConfig, ModelTypeEnum
 from frigate.util.model import post_process_yolo, xyxy_to_xywh_for_nms
+from frigate.util.platform import IS_WINDOWS
 from frigate.util.rknn_converter import auto_convert_model
 
 logger = logging.getLogger(__name__)
@@ -89,6 +90,9 @@ class Rknn(DetectionApi):
             pass
 
     def get_soc(self):
+        if IS_WINDOWS:
+            raise RuntimeError("The RKNN detector is only available on Linux.")
+
         try:
             with open("/proc/device-tree/compatible") as file:
                 soc = file.read().split(",")[-1].strip("\x00")

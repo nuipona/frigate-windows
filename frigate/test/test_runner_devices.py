@@ -17,6 +17,7 @@ from frigate.detectors.detection_runners import (
     record_loaded_device,
     snapshot_loaded_devices,
 )
+from frigate.util import rknn_converter
 
 
 class TestRunnerDeviceName(unittest.TestCase):
@@ -98,6 +99,34 @@ class TestLoadRegistry(unittest.TestCase):
         self.assertIsInstance(runner, ONNXModelRunner)
         self.assertEqual(loaded_devices["/models/arcface.onnx"], ("arcface", "CPU"))
 
+    def test_windows_runner_skips_rknn_probe(self):
+        session = MagicMock()
+        session.get_providers.return_value = ["CPUExecutionProvider"]
+
+        with (
+            patch.object(detection_runners, "IS_WINDOWS", True),
+            patch.object(detection_runners, "is_rknn_compatible") as rknn_probe,
+            patch.object(
+                detection_runners,
+                "get_ort_providers",
+                return_value=(["CPUExecutionProvider"], [{}]),
+            ),
+            patch.object(
+                detection_runners,
+                "is_openvino_gpu_npu_available",
+                return_value=False,
+            ),
+            patch.object(
+                detection_runners.ort, "InferenceSession", return_value=session
+            ),
+            patch.object(
+                detection_runners, "get_ort_session_options", return_value=None
+            ),
+        ):
+            get_optimized_runner("C:\\models\\yolo.onnx", "GPU", "yolo")
+
+        rknn_probe.assert_not_called()
+
     def test_only_cpu_enrichment_sessions_disable_spinning(self):
         for provider, expected in [
             ("CPUExecutionProvider", "0"),
@@ -138,6 +167,18 @@ class TestLoadRegistry(unittest.TestCase):
                     spinning = None
 
                 self.assertEqual(spinning, expected)
+
+
+class TestRknnPlatformProbe(unittest.TestCase):
+    def test_windows_skips_device_tree_probe(self):
+        with (
+            patch("frigate.util.rknn_converter.IS_WINDOWS", True),
+            patch("builtins.open") as open_file,
+        ):
+            self.assertIsNone(rknn_converter.get_soc_type())
+            self.assertFalse(rknn_converter.is_rknn_compatible("/models/yolo.onnx"))
+
+        open_file.assert_not_called()
 
 
 class TestLoadedDeviceSnapshot(unittest.TestCase):
@@ -191,6 +232,17 @@ class TestLighterANE(unittest.TestCase):
         device = MagicMock()
         device.ep_name = "LighterANE"
         return device
+
+    def test_windows_skips_lighter_library_lookup(self):
+        with (
+            patch.object(detection_runners, "IS_WINDOWS", True),
+            patch.object(detection_runners.os.path, "exists") as path_exists,
+            patch.object(detection_runners.ort, "get_ep_devices") as get_ep_devices,
+        ):
+            self.assertEqual(detection_runners.get_lighter_ane_devices(), [])
+
+        path_exists.assert_not_called()
+        get_ep_devices.assert_not_called()
 
     def test_no_devices_without_the_library(self):
         with patch.object(detection_runners.ort, "get_ep_devices") as get_ep_devices:

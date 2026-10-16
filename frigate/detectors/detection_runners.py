@@ -11,6 +11,7 @@ import numpy as np
 import onnxruntime as ort
 
 from frigate.util.model import get_ort_providers
+from frigate.util.platform import IS_WINDOWS
 from frigate.util.rknn_converter import auto_convert_model, is_rknn_compatible
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,9 @@ def get_lighter_ane_devices() -> list[Any]:
     Returns:
         The provider's ONNX Runtime devices, or an empty list without lighter's device
     """
+    if IS_WINDOWS:
+        return []
+
     library = os.environ.get("LIGHTER_ANE_EP", LIGHTER_ANE_LIBRARY)
 
     if not os.path.exists(library):
@@ -734,7 +738,7 @@ def get_optimized_runner(
     """Get an optimized runner for the hardware."""
     device = device or "AUTO"
 
-    if device != "CPU" and is_rknn_compatible(model_path):
+    if not IS_WINDOWS and device != "CPU" and is_rknn_compatible(model_path):
         rknn_path = auto_convert_model(model_path)
 
         if rknn_path:

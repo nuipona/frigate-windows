@@ -53,6 +53,22 @@ class TestRequestFfmpegStop(unittest.TestCase):
         mock_kill.assert_not_called()
 
     @patch.object(ffmpeg_util, "IS_WINDOWS", True)
+    def test_windows_can_skip_the_quit_poll_before_breaking(self):
+        """Raw audio pipes do not need a full per-camera quit-poll delay."""
+        stdin = MagicMock()
+        process = _process(stdin=stdin, wait_side_effect=sp.TimeoutExpired("ffmpeg", 0))
+
+        with (
+            patch.object(signal, "CTRL_BREAK_EVENT", 21, create=True),
+            patch.object(ffmpeg_util.os, "kill") as mock_kill,
+        ):
+            ffmpeg_util.request_ffmpeg_stop(process, logger, wait_timeout=0.0)
+
+        process.wait.assert_called_once_with(timeout=0.0)
+        mock_kill.assert_called_once_with(4242, 21)
+        process.terminate.assert_not_called()
+
+    @patch.object(ffmpeg_util, "IS_WINDOWS", True)
     def test_windows_falls_back_to_a_break_event(self):
         """A break event is aimed at the process group, never a CTRL_C_EVENT.
 

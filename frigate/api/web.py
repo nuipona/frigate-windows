@@ -837,12 +837,61 @@ def create_native_web_app(api_app: Any, port: int) -> Starlette:
     return app
 
 
-async def _serve(servers: list) -> None:
-    """Run every listener until the process is stopped."""
-    await asyncio.gather(*(server.serve() for server in servers))
+async def _watch_stop_event(servers: list, stop_event: Any) -> None:
+    """Ask every listener to stop when Frigate's process event is set."""
+    while not stop_event.is_set():
+        await asyncio.sleep(0.1)
+
+    for server in servers:
+        server.should_exit = True
 
 
-def run_native_web_server(api_app: Any, internal_port: int) -> None:
+async def _serve(servers: list, stop_event: Any | None = None) -> None:
+    """Run listeners until one exits or the process stop event is set."""
+    server_tasks = [asyncio.create_task(server.serve()) for server in servers]
+    stop_watcher = None
+
+    if stop_event is not None:
+        stop_watcher = asyncio.create_task(_watch_stop_event(servers, stop_event))
+
+    try:
+        wait_for = set(server_tasks)
+        if stop_watcher is not None:
+            wait_for.add(stop_watcher)
+
+        # A Uvicorn listener exits on Ctrl+C, or when its startup fails. Other
+        # listeners must be asked to stop too, otherwise gather waits forever.
+        await asyncio.wait(wait_for, return_when=asyncio.FIRST_COMPLETED)
+
+        for server in servers:
+            server.should_exit = True
+
+        errors: list[BaseException] = []
+        for task in server_tasks:
+            if task.done() and not task.cancelled():
+                error = task.exception()
+                if error is not None:
+                    errors.append(error)
+
+        await asyncio.gather(*server_tasks, return_exceptions=True)
+
+        if errors:
+            raise errors[0]
+    finally:
+        if stop_watcher is not None:
+            stop_watcher.cancel()
+            await asyncio.gather(stop_watcher, return_exceptions=True)
+
+        for task in server_tasks:
+            if not task.done():
+                task.cancel()
+
+        await asyncio.gather(*server_tasks, return_exceptions=True)
+
+
+def run_native_web_server(
+    api_app: Any, internal_port: int, stop_event: Any | None = None
+) -> None:
     """Serve the web interface, the API and the media without nginx.
 
     Two things have to be reachable at once:
@@ -891,7 +940,7 @@ def run_native_web_server(api_app: Any, internal_port: int) -> None:
         internal_server.install_signal_handlers = lambda: None  # type: ignore[method-assign]
         servers.append(internal_server)
 
-    asyncio.run(_serve(servers))
+    asyncio.run(_serve(servers, stop_event))
 
 
 def log_startup_banner(host: str, port: int, internal_port: int) -> None:

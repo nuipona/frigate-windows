@@ -103,6 +103,8 @@ class TestConfig(unittest.TestCase):
         assert detector_config.device == "GPU"
         assert detector_config.model.path == "/etc/hosts"
 
+    @patch("frigate.config.config.IS_WINDOWS", False)
+    @patch("frigate.detectors.device.IS_WINDOWS", False)
     @patch("frigate.detectors.detector_config.load_labels")
     def test_model_default_paths_per_detector(self, mock_labels):
         mock_labels.return_value = {}
@@ -539,6 +541,7 @@ class TestConfig(unittest.TestCase):
 
         assert runner_names(devices) == ["openvino:GPU", "openvino:GPU#2"]
 
+    @patch("frigate.detectors.device.IS_WINDOWS", False)
     @patch("frigate.detectors.detector_config.load_labels")
     def test_exclusive_devices_may_not_repeat(self, mock_labels):
         mock_labels.return_value = {}

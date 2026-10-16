@@ -5,7 +5,13 @@ from typing import ClassVar
 import numpy as np
 
 from frigate.detectors.detector_config import BaseDetectorConfig, ModelTypeEnum
-from frigate.util.runtime_deps import RuntimeManifest, activate, ensure_installed
+from frigate.util.platform import IS_WINDOWS
+from frigate.util.runtime_deps import (
+    RuntimeDependencyError,
+    RuntimeManifest,
+    activate,
+    ensure_installed,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +43,22 @@ class DetectionApi(ABC):
         single install serves every process and the user site is on sys.path
         before it is inherited.
         """
-        if cls.runtime_manifest is not None:
-            ensure_installed(cls.runtime_manifest)
+        if cls.runtime_manifest is None:
+            return
+
+        if IS_WINDOWS:
+            # Device validation normally prevents this path, but some Linux
+            # plugin modules import on Windows even though their runtime
+            # archives and SDKs do not. Keep a second guard here so a direct
+            # dependency-preparation call cannot download/install them.
+            from frigate.detectors.device import WINDOWS_DETECTORS
+
+            if cls.type_key not in WINDOWS_DETECTORS:
+                raise RuntimeDependencyError(
+                    f"The {cls.type_key} detector runtime is not supported on native Windows."
+                )
+
+        ensure_installed(cls.runtime_manifest)
 
     @classmethod
     def activate_dependencies(cls) -> None:

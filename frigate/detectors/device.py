@@ -29,10 +29,9 @@ _PLUGIN_MODULE_KEYS = {
 # Linux-only drivers or runtimes that requirements-windows.txt does not carry.
 WINDOWS_DETECTORS = ("cpu", "onnx", "openvino", "zmq")
 
-# The detector keys that exist upstream but are absent from a native Windows
-# install because their drivers or runtimes do not run there. These are the
-# names a user is most likely to have copied from Linux-targeted docs, so they
-# get a message that says so rather than "unknown detector".
+# Detector keys whose drivers or runtimes are Linux-only. Some plugin
+# modules still import without their vendor SDK, so these cannot be filtered
+# reliably by whether their config type was registered.
 LINUX_ONLY_DETECTORS = (
     "axengine",
     "deepx",
@@ -123,6 +122,12 @@ def parse_device(raw: str) -> DeviceSpec:
             valid for that detector
     """
     detector, separator, device = raw.partition(":")
+
+    # Some Linux-only plugins can import successfully on Windows even though
+    # their device drivers and runtime archives cannot run there. Reject them
+    # before application startup can install their runtime dependencies.
+    if IS_WINDOWS and detector not in WINDOWS_DETECTORS:
+        raise DeviceParseError(_unknown_detector_message(raw, detector))
 
     if detector not in config_types:
         raise DeviceParseError(_unknown_detector_message(raw, detector))

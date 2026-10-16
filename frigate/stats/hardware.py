@@ -38,6 +38,12 @@ logger = logging.getLogger(__name__)
 HARDWARE_ERROR_COOLDOWN_SECONDS = 3600
 POLL_TIMEOUT_SECONDS = 10
 
+# Linux sysfs/device-tree pollers have no Windows implementation. NVIDIA's
+# NVML polling is cross-platform and remains enabled separately.
+WINDOWS_UNSUPPORTED_HARDWARE_STATS = frozenset(
+    {"amd_gpu", "axengine", "intel_gpu", "intel_npu", "jetson", "rockchip", "rpi"}
+)
+
 # hardware names polled here, in the order used to resolve a generic GPU demand
 GPU_HARDWARE_KEYS = {
     "onnx:nvidia": "nvidia",
@@ -279,6 +285,9 @@ class HardwareStats:
         monitored: dict[str, Callable[[], HardwarePollResult]] = {}
 
         for name in sorted(names):
+            if IS_WINDOWS and name in WINDOWS_UNSUPPORTED_HARDWARE_STATS:
+                continue
+
             if name == "intel_gpu" and not self.config.telemetry.stats.intel_gpu_stats:
                 continue
 
@@ -475,6 +484,9 @@ def read_temperature(path: str) -> float | None:
 
 def get_hardware_temperatures(detector_type: str) -> list[float | None]:
     """Per unit temperatures for a detector type, in stable device order."""
+    if IS_WINDOWS:
+        return []
+
     if detector_type == "edgetpu":
         # PCIe Corals expose a temperature through the apex driver
         base = "/sys/class/apex/"

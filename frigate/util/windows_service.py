@@ -39,7 +39,6 @@ from __future__ import annotations
 
 import logging
 import os
-import signal
 import subprocess
 import sys
 import time
@@ -205,18 +204,9 @@ class FrigateService(win32serviceutil.ServiceFramework if IS_SERVICE else object
         win32event.SetEvent(self.hWaitStop)
 
     def SvcDoRun(self) -> None:
-        from frigate.util.services import consume_restart_request
-
         logger = logging.getLogger("frigate_service")
 
         log_base_dir(logger)
-
-        # Session 0 has no console: SIGINT / SIGBREAK do not exist.
-        # Register only the signals that can actually arrive.
-        try:
-            signal.signal(signal.SIGTERM, lambda s, f: self.SvcStop())
-        except (ValueError, OSError):
-            pass
 
         # Frigate's own entry point rather than the launcher: a .ps1 cannot
         # be started by Popen, and the service already runs in the
@@ -226,8 +216,12 @@ class FrigateService(win32serviceutil.ServiceFramework if IS_SERVICE else object
         env[SERVICE_STOP_EVENT_VAR] = self.stop_event_name
 
         while True:
-            # a stop that was requested before this start must not carry over
-            win32event.ResetEvent(self.stop_event)
+            if self.stop_requested:
+                # The SCM can send STOP after reporting RUNNING but before
+                # entering SvcDoRun, or while the restart delay is in progress.
+                # Do not launch a child after that request.
+                logger.info("Service stop was requested before Frigate started")
+                return
 
             process = self._start_frigate(logger, env)
 
@@ -236,8 +230,14 @@ class FrigateService(win32serviceutil.ServiceFramework if IS_SERVICE else object
 
             self._wait_for_exit(process, logger)
 
+            from frigate.util.services import consume_restart_request
+
             if self.stop_requested:
                 self._shut_down(process, logger)
+                # The app may have written a restart marker while it was
+                # finishing its graceful stop. The SCM stop wins; consume it
+                # so a later service start does not inherit a stale request.
+                consume_restart_request()
                 # The SCM asked for this stop, so it is a clean one: return
                 # normally and the host reports the service as stopped.
                 logger.info("Frigate stopped on request")

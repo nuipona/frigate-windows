@@ -273,6 +273,30 @@ class TestUpdateConfig(HardwareStatsTestCase):
         stats = self.make_stats(config)
         self.assertEqual(set(stats._monitored), set())
 
+    def test_windows_skips_linux_hardware_pollers(self):
+        stats = self.make_stats()
+        linux_hardware = {
+            "amd_gpu",
+            "axengine",
+            "intel_gpu",
+            "intel_npu",
+            "jetson",
+            "rockchip",
+            "rpi",
+        }
+
+        with (
+            patch("frigate.stats.hardware.IS_WINDOWS", True),
+            patch.object(
+                stats, "_scan_ffmpeg", return_value=linux_hardware | {"nvidia"}
+            ),
+            patch.object(stats, "_scan_detectors", return_value=set()),
+            patch.object(stats, "_scan_enrichments", return_value=set()),
+        ):
+            stats.update_config()
+
+        self.assertEqual(set(stats._monitored), {"nvidia"})
+
     def test_recalculated_on_config_update(self):
         config = self.make_config()
         stats = self.make_stats(config)
@@ -411,6 +435,13 @@ class TestUpdateStats(HardwareStatsTestCase):
 
 
 class TestHardwareTemperatures(unittest.TestCase):
+    @patch("frigate.stats.hardware.os.path.isdir")
+    def test_windows_does_not_read_linux_sysfs(self, isdir):
+        with patch("frigate.stats.hardware.IS_WINDOWS", True):
+            self.assertEqual(get_hardware_temperatures("edgetpu"), [])
+
+        isdir.assert_not_called()
+
     @patch("frigate.stats.hardware.read_temperature", side_effect=[45.0, 55.0])
     @patch("frigate.stats.hardware.os.listdir", return_value=["apex_1", "apex_0"])
     @patch("frigate.stats.hardware.os.path.isdir", return_value=True)

@@ -7,9 +7,11 @@ from frigate.ffmpeg_presets import (
     PRESETS_INPUT,
     PRESETS_RECORD_OUTPUT,
     validate_ffmpeg_args,
+    validate_ffmpeg_platform_args,
 )
 from frigate.util.config import resolve_ffmpeg_path
 from frigate.util.env import EnvString
+from frigate.util.platform import IS_WINDOWS
 
 from ..base import FrigateBaseModel
 
@@ -53,6 +55,12 @@ class FfmpegOutputArgsConfig(FrigateBaseModel):
         title="Sub stream record output arguments",
         description="Output arguments for record_sub role streams. The record output arguments are used when this is not set.",
     )
+
+    @field_validator("detect")
+    @classmethod
+    def validate_detect_args(cls, v):
+        validate_ffmpeg_platform_args(v, "ffmpeg.output_args.detect")
+        return v
 
     @field_validator("record", "record_sub")
     @classmethod
@@ -113,6 +121,12 @@ class FfmpegConfig(FrigateBaseModel):
         description="Default GPU index used for hardware acceleration if available.",
     )
 
+    @field_validator("global_args")
+    @classmethod
+    def validate_global_args(cls, v):
+        validate_ffmpeg_platform_args(v, "ffmpeg.global_args")
+        return v
+
     @field_validator("hwaccel_args")
     @classmethod
     def validate_hwaccel_args(cls, v):
@@ -165,6 +179,25 @@ class CameraInput(FrigateBaseModel):
         title="Input arguments",
         description="Input arguments specific to this stream.",
     )
+
+    @field_validator("path")
+    @classmethod
+    def validate_path_for_windows(cls, v):
+        source = v.strip().lower()
+
+        if IS_WINDOWS and source.startswith(("/dev/", "unix:", "v4l2:")):
+            raise ValueError(
+                "Linux device paths, Unix sockets, and V4L2 inputs cannot be used "
+                "on native Windows. Use a Windows camera source or network stream."
+            )
+
+        return v
+
+    @field_validator("global_args")
+    @classmethod
+    def validate_global_args(cls, v):
+        validate_ffmpeg_platform_args(v, "ffmpeg.global_args")
+        return v
 
     @field_validator("hwaccel_args")
     @classmethod

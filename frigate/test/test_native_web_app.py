@@ -1,5 +1,7 @@
 """The native web server, which replaces nginx on Windows."""
 
+import asyncio
+import threading
 import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -7,7 +9,57 @@ from unittest.mock import MagicMock, patch
 from starlette.requests import Request
 
 from frigate.api.auth import deny_response_for_go2rtc_stream
-from frigate.api.web import build_auth_scope, create_native_web_app, needs_auth
+from frigate.api.web import (
+    _serve,
+    build_auth_scope,
+    create_native_web_app,
+    needs_auth,
+)
+
+
+class _FakeServer:
+    """Small Uvicorn-like listener for shutdown coordination tests."""
+
+    def __init__(self, exits_immediately: bool = False) -> None:
+        self.should_exit = False
+        self.exits_immediately = exits_immediately
+        self.started = asyncio.Event()
+
+    async def serve(self) -> None:
+        self.started.set()
+
+        if self.exits_immediately:
+            return
+
+        while not self.should_exit:
+            await asyncio.sleep(0.01)
+
+
+class TestNativeWebServerShutdown(unittest.IsolatedAsyncioTestCase):
+    async def test_stop_event_stops_every_listener(self) -> None:
+        """A service event must stop Uvicorn so Frigate can shut down cleanly."""
+        stop_event = threading.Event()
+        servers = [_FakeServer(), _FakeServer()]
+        serving = asyncio.create_task(_serve(servers, stop_event))
+
+        try:
+            await asyncio.gather(*(server.started.wait() for server in servers))
+            stop_event.set()
+            await asyncio.wait_for(serving, timeout=2)
+        finally:
+            if not serving.done():
+                stop_event.set()
+                await asyncio.wait_for(serving, timeout=2)
+
+        self.assertTrue(all(server.should_exit for server in servers))
+
+    async def test_exit_of_one_listener_stops_the_other(self) -> None:
+        """Ctrl+C reaches one Uvicorn server, not the loopback listener."""
+        servers = [_FakeServer(exits_immediately=True), _FakeServer()]
+
+        await asyncio.wait_for(_serve(servers), timeout=2)
+
+        self.assertTrue(all(server.should_exit for server in servers))
 
 
 class TestNativeWebApp(unittest.TestCase):

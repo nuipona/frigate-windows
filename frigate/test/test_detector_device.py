@@ -3,16 +3,27 @@
 import unittest
 from unittest.mock import patch
 
+from frigate.detectors.detection_api import DetectionApi
 from frigate.detectors.detector_config import ModelConfig
 from frigate.detectors.device import (
+    LINUX_ONLY_DETECTORS,
     DeviceParseError,
     build_detector_config,
+    config_types,
     parse_device,
     runner_names,
 )
+from frigate.util.runtime_deps import RuntimeDependencyError, RuntimeManifest
 
 
 class TestParseDevice(unittest.TestCase):
+    def setUp(self) -> None:
+        # These cases exercise cross-platform parsing semantics, not the
+        # Windows allowlist; the Windows-specific cases patch it explicitly.
+        platform_patch = patch("frigate.detectors.device.IS_WINDOWS", False)
+        platform_patch.start()
+        self.addCleanup(platform_patch.stop)
+
     def test_bare_detector_has_no_device(self):
         spec = parse_device("cpu")
 
@@ -37,22 +48,21 @@ class TestParseDevice(unittest.TestCase):
             parse_device("not_a_detector:0")
 
     def _parse_without_plugins(self, raw: str):
-        """Parse as if no detector plugin module imported.
+        """Parse as if no plugin registered the configured detector type.
 
-        This is what a native Windows install looks like for the Linux-only
-        runtimes: their plugin modules fail to import because the drivers and
-        wheels they need do not exist there.
+        The Linux-only detector check must not depend on whether its plugin
+        happened to import; unknown-name and import-failure cases use this to
+        cover the other error messages.
         """
         with patch.dict("frigate.detectors.device.config_types", {}, clear=True):
             return parse_device(raw)
 
     @patch("frigate.detectors.device.IS_WINDOWS", True)
     def test_linux_only_detector_is_named_on_windows(self):
-        """A device string copied from Linux docs should say why it cannot run.
+        """A Linux-only detector should explain why it cannot run on Windows.
 
-        On a native Windows install the Linux-only plugin modules are absent,
-        which used to surface as the same 'unknown detector' message as a
-        typo, pointing nowhere near the actual problem.
+        The actionable platform message has to win whether the detector plugin
+        failed to import or registered a config type without its vendor SDK.
         """
         with self.assertRaises(DeviceParseError) as raised:
             self._parse_without_plugins("edgetpu:usb:0")
@@ -62,9 +72,37 @@ class TestParseDevice(unittest.TestCase):
 
     @patch("frigate.detectors.device.IS_WINDOWS", True)
     def test_windows_detectors_still_parse_on_windows(self):
-        for raw in ("onnx:0", "zmq"):
+        for raw in ("cpu", "onnx:0", "openvino:GPU", "zmq"):
             with self.subTest(raw=raw):
                 self.assertEqual(parse_device(raw).detector, raw.partition(":")[0])
+
+    @patch("frigate.detectors.device.IS_WINDOWS", True)
+    def test_importable_linux_plugin_is_still_rejected_on_windows(self):
+        # axengine's plugin module imports without its vendor SDK, so it is in
+        # config_types even though its device runtime is Linux-only.
+        self.assertIn("axengine", config_types)
+
+        for detector in LINUX_ONLY_DETECTORS:
+            with self.subTest(detector=detector):
+                with self.assertRaises(DeviceParseError) as raised:
+                    parse_device(detector)
+
+                self.assertIn("only available on Linux", str(raised.exception))
+
+    def test_direct_linux_runtime_installation_is_blocked_on_windows(self):
+        manifest = RuntimeManifest(name="axengine", version="test", artifacts=())
+
+        with (
+            patch("frigate.detectors.detection_api.IS_WINDOWS", True),
+            patch("frigate.detectors.detection_api.ensure_installed") as install,
+            patch.object(DetectionApi, "type_key", "axengine", create=True),
+            patch.object(DetectionApi, "runtime_manifest", manifest),
+        ):
+            with self.assertRaises(RuntimeDependencyError) as raised:
+                DetectionApi.ensure_dependencies()
+
+        self.assertIn("not supported on native Windows", str(raised.exception))
+        install.assert_not_called()
 
     @patch("frigate.detectors.device.IS_WINDOWS", True)
     def test_unknown_name_on_windows_reports_the_windows_detectors(self):
@@ -113,6 +151,11 @@ class TestParseDevice(unittest.TestCase):
 
 
 class TestBuildDetectorConfig(unittest.TestCase):
+    def setUp(self) -> None:
+        platform_patch = patch("frigate.detectors.device.IS_WINDOWS", False)
+        platform_patch.start()
+        self.addCleanup(platform_patch.stop)
+
     def _build(self, raw: str):
         return build_detector_config(parse_device(raw), ModelConfig())
 
@@ -151,7 +194,31 @@ class TestBuildDetectorConfig(unittest.TestCase):
         self.assertIs(build_detector_config(parse_device("cpu"), model).model, model)
 
 
+class TestRknnPlatform(unittest.TestCase):
+    def test_get_soc_rejects_windows_before_reading_device_tree(self) -> None:
+        try:
+            from frigate.detectors.plugins.rknn import Rknn
+        except ImportError as err:
+            self.skipTest(f"RKNN plugin dependencies are unavailable: {err}")
+
+        detector = object.__new__(Rknn)
+
+        with (
+            patch("frigate.detectors.plugins.rknn.IS_WINDOWS", True),
+            patch("builtins.open") as open_file,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "only available on Linux"):
+                detector.get_soc()
+
+        open_file.assert_not_called()
+
+
 class TestRunnerNames(unittest.TestCase):
+    def setUp(self) -> None:
+        platform_patch = patch("frigate.detectors.device.IS_WINDOWS", False)
+        platform_patch.start()
+        self.addCleanup(platform_patch.stop)
+
     def test_unique_devices_keep_their_name(self):
         devices = [parse_device("edgetpu:pci:0"), parse_device("edgetpu:pci:1")]
 
