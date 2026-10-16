@@ -127,7 +127,10 @@ class HardwareStats:
         hardware_futures: dict[Future[HardwarePollResult], str] = {}
         for name, poll in self._monitored.items():
             last_error = self._errors.get(name)
-            if last_error is not None and now - last_error < HARDWARE_ERROR_COOLDOWN_SECONDS:
+            if (
+                last_error is not None
+                and now - last_error < HARDWARE_ERROR_COOLDOWN_SECONDS
+            ):
                 continue
             self._errors.pop(name, None)
             hardware_futures[self._executor.submit(poll)] = name

@@ -18,13 +18,9 @@ class TestPlusModelList(unittest.TestCase):
             return api.get_models()["list"]
 
     def test_native_windows_detectors_are_unchanged(self):
-        models = self._get_models(
-            [{"supportedDetectors": ["cpu", "openvino", "onnx"]}]
-        )
+        models = self._get_models([{"supportedDetectors": ["cpu", "openvino", "onnx"]}])
 
-        self.assertEqual(
-            models[0]["supportedDetectors"], ["cpu", "openvino", "onnx"]
-        )
+        self.assertEqual(models[0]["supportedDetectors"], ["cpu", "openvino", "onnx"])
 
     def test_unsupported_variants_and_models_are_removed(self):
         models = self._get_models(

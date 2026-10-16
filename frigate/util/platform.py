@@ -620,8 +620,10 @@ def get_fs_type(path: str) -> str:
     fs_type = ""
     for part in partitions:
         mountpoint = part.mountpoint
-        if mountpoint and is_subpath(path, mountpoint) and len(best_match) < len(
+        if (
             mountpoint
+            and is_subpath(path, mountpoint)
+            and len(best_match) < len(mountpoint)
         ):
             fs_type = part.fstype
             best_match = mountpoint

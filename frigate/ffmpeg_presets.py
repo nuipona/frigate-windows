@@ -111,7 +111,11 @@ def parse_preset_hardware_acceleration_encode(
     else:
         arg_map = PRESETS_HW_ACCEL_ENCODE_TIMELAPSE
 
-    preset = arg_map.get(arg, arg_map["default"]) if isinstance(arg, str) else arg_map["default"]
+    preset = (
+        arg_map.get(arg, arg_map["default"])
+        if isinstance(arg, str)
+        else arg_map["default"]
+    )
     return preset.format(quote_ffmpeg_arg(ffmpeg_path), input, output, 0)
 
 

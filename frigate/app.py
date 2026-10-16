@@ -325,7 +325,9 @@ class FrigateApp:
                 with open(f"{CONFIG_DIR}/.exports", "w") as f:
                     f.write(str(datetime.datetime.now().timestamp()))
             except PermissionError:
-                logger.error("Unable to write export state to the Windows config directory")
+                logger.error(
+                    "Unable to write export state to the Windows config directory"
+                )
 
             migrate_exports(self.config.ffmpeg, list(self.config.cameras.keys()))
 

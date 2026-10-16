@@ -84,9 +84,7 @@ class TestAvailableFamilies(unittest.TestCase):
         recommended, available = self._options(["AMD Radeon"], {"amd"})
 
         self.assertEqual(recommended, "windows-d3d11va")
-        self.assertEqual(
-            [family.key for family in available], ["windows-d3d11va"]
-        )
+        self.assertEqual([family.key for family in available], ["windows-d3d11va"])
 
     def test_unknown_vendor_still_uses_d3d11va(self):
         recommended, _available = self._options(["Basic Display Adapter"], set())
@@ -120,9 +118,7 @@ class TestAvailableFamilies(unittest.TestCase):
         )
 
         self.assertEqual(recommended, "windows-d3d11va")
-        self.assertEqual(
-            [family.key for family in available], ["windows-d3d11va"]
-        )
+        self.assertEqual([family.key for family in available], ["windows-d3d11va"])
 
     def test_hevc_alias_is_supported_by_qsv(self):
         _recommended, available = self._options(
@@ -153,9 +149,7 @@ class TestAutomaticPreset(unittest.TestCase):
         vendors: set[str] | None = None,
     ) -> str:
         with (
-            patch.object(
-                hwaccel, "get_display_adapters", return_value=adapters or []
-            ),
+            patch.object(hwaccel, "get_display_adapters", return_value=adapters or []),
             patch.object(
                 hwaccel, "get_display_adapter_vendors", return_value=vendors or set()
             ),

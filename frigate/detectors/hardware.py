@@ -68,9 +68,7 @@ def _openvino_available_devices() -> list[str]:
         return []
 
 
-def _openvino_hardware(
-    kind: str, key: str, name: str
-) -> DetectionHardware | None:
+def _openvino_hardware(kind: str, key: str, name: str) -> DetectionHardware | None:
     devices = [
         device
         for device in _openvino_available_devices()
@@ -166,6 +164,7 @@ WINDOWS_PROBES = (
     detect_directml_gpu,
     detect_cpu,
 )
+
 
 class HardwareProber:
     """Probe Windows inference runtimes and cache the result per process."""

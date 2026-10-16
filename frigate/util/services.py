@@ -94,13 +94,17 @@ def get_cpu_stats() -> dict[str, dict]:
             process_name = str(process.info["name"] or "")
             cmdline = " ".join(process.info["cmdline"] or []).rstrip()
             searchable = f"{process_name} {cmdline}".casefold()
-            if not any(keyword.casefold() in searchable for keyword in PROCESS_KEYWORDS):
+            if not any(
+                keyword.casefold() in searchable for keyword in PROCESS_KEYWORDS
+            ):
                 continue
             user, system, started = _process_cpu_times(process)
             mem_pct = round((_process_resident_memory(process) / total_mem) * 100, 1)
             usages[str(process.info["pid"])] = {
                 "cpu": str(process.info["cpu_percent"]),
-                "cpu_average": str(round(_process_cpu_average(user, system, started), 2)),
+                "cpu_average": str(
+                    round(_process_cpu_average(user, system, started), 2)
+                ),
                 "mem": str(mem_pct),
                 "name": process_name,
                 "cmdline": clean_camera_user_pass(cmdline),
@@ -120,7 +124,11 @@ def try_get_info(function, handle, default="N/A", sensor=None):
 
 
 def _nvml_text(value: Any) -> str:
-    return value.decode("utf-8", errors="replace") if isinstance(value, bytes) else str(value)
+    return (
+        value.decode("utf-8", errors="replace")
+        if isinstance(value, bytes)
+        else str(value)
+    )
 
 
 def get_nvidia_gpu_stats() -> dict[int, dict]:
@@ -133,7 +141,11 @@ def get_nvidia_gpu_stats() -> dict[int, dict]:
             handle = nvml.nvmlDeviceGetHandleByIndex(index)
             base_name = _nvml_text(nvml.nvmlDeviceGetName(handle))
             names[base_name] = names.get(base_name, 0) + 1
-            name = base_name if names[base_name] == 1 else f"{base_name} ({names[base_name]})"
+            name = (
+                base_name
+                if names[base_name] == 1
+                else f"{base_name} ({names[base_name]})"
+            )
             memory = try_get_info(nvml.nvmlDeviceGetMemoryInfo, handle)
             utilization = try_get_info(nvml.nvmlDeviceGetUtilizationRates, handle)
             encoder = try_get_info(nvml.nvmlDeviceGetEncoderUtilization, handle)
@@ -141,7 +153,9 @@ def get_nvidia_gpu_stats() -> dict[int, dict]:
             temperature = try_get_info(
                 nvml.nvmlDeviceGetTemperature, handle, default=None, sensor=0
             )
-            power_state = try_get_info(nvml.nvmlDeviceGetPowerState, handle, default=None)
+            power_state = try_get_info(
+                nvml.nvmlDeviceGetPowerState, handle, default=None
+            )
             results[index] = {
                 "name": name,
                 "gpu": utilization.gpu if utilization != "N/A" else 0,
@@ -154,6 +168,7 @@ def get_nvidia_gpu_stats() -> dict[int, dict]:
     except Exception:
         logger.debug("Unable to query NVIDIA GPU stats", exc_info=True)
     return results
+
 
 # Snapshot: environment_vars lands in os.environ after import and must not
 # be able to enable this.

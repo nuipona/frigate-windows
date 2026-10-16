@@ -45,6 +45,7 @@ _PROVIDER_LABELS = {
     "CPUExecutionProvider": "CPU",
 }
 
+
 def get_ort_session_options(
     model_type: str | None = None, cpu: bool = False
 ) -> ort.SessionOptions | None:

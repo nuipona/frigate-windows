@@ -893,9 +893,10 @@ class FrigateConfig(FrigateBaseModel):
                     f"model.path must be set when using the {detector} detector"
                 )
 
-        if detector in ("cpu", "openvino") and model_config.get(
-            "path"
-        ) == DEFAULT_MODEL_PATH:
+        if (
+            detector in ("cpu", "openvino")
+            and model_config.get("path") == DEFAULT_MODEL_PATH
+        ):
             _ensure_default_cpu_model(DEFAULT_MODEL_PATH)
 
         loaded = ModelConfig.model_validate(model_config)

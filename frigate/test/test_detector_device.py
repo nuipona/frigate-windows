@@ -34,9 +34,7 @@ class TestParseDevice(unittest.TestCase):
 
     def test_supported_runtime_import_failure_is_reported(self):
         with (
-            patch.dict(
-                "frigate.detectors.device.config_types", {}, clear=True
-            ),
+            patch.dict("frigate.detectors.device.config_types", {}, clear=True),
             patch.dict(
                 "frigate.detectors.device.failed_plugin_imports",
                 {"onnx": "missing DirectML runtime"},

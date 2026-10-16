@@ -1,0 +1,95 @@
+name: Windows Python
+
+# This is a native Windows-only application, so the checks that gate a change
+# run on a Windows host. Results from other operating systems are not
+# evidence for this runtime (see WINDOWS_COMPATIBILITY.md).
+on:
+  pull_request:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-python-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Ruff, compile, and generated artifacts
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+          cache: pip
+
+      # Pinned so the format gate cannot drift with a new Ruff release; bump
+      # deliberately and re-run `ruff format` across the tree when it moves.
+      - name: Install Ruff
+        run: pip install ruff==0.17.1
+
+      - name: Ruff format
+        run: ruff format --check bootstrap_windows.py frigate migrations testing-scripts
+
+      - name: Ruff check
+        run: ruff check bootstrap_windows.py frigate migrations testing-scripts
+
+      - name: Compile
+        run: python -m compileall -q bootstrap_windows.py frigate migrations testing-scripts
+
+      - name: Install requirements
+        run: pip install -r requirements.txt
+
+      - name: Register pywin32
+        run: python pywin32_postinstall.py -install
+        working-directory: ${{ env.pythonLocation }}\Scripts
+
+      - name: Windows requirements are installable
+        run: python testing-scripts/check_windows_requirements.py
+
+      - name: API auth spec is up to date
+        run: python generate_api_auth_spec.py --check
+
+      - name: PowerShell scripts parse
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem -Recurse -Filter *.ps1 | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName, [ref]$tokens, [ref]$errors)
+            if ($errors -and $errors.Count -gt 0) {
+              $failed = $true
+              Write-Host "$($_.FullName): $($errors[0].Message)"
+            }
+          }
+          if ($failed) { exit 1 }
+
+  unit-tests:
+    name: Windows unit suite
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+          cache: pip
+
+      - name: Install requirements
+        run: pip install -r requirements.txt
+
+      - name: Register pywin32
+        run: python pywin32_postinstall.py -install
+        working-directory: ${{ env.pythonLocation }}\Scripts
+
+      - name: Run the unit suite
+        run: python testing-scripts/run_windows_unit_suite.py

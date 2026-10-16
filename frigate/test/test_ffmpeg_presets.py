@@ -66,7 +66,10 @@ class TestFfmpegPresets(unittest.TestCase):
             "preset-windows-qsv", ["-f", "rawvideo"], 10, 1280, 720
         )
 
-        self.assertIn("fps=10,vpp_qsv=w=1280:h=720:format=nv12,hwdownload,format=nv12,format=yuv420p", args)
+        self.assertIn(
+            "fps=10,vpp_qsv=w=1280:h=720:format=nv12,hwdownload,format=nv12,format=yuv420p",
+            args,
+        )
         self.assertEqual(args[-2:], ["-f", "rawvideo"])
 
     def test_unknown_scale_preset_uses_software(self):
@@ -176,7 +179,10 @@ class TestPresetValidation(unittest.TestCase):
     def test_linux_only_raw_hardware_args_are_rejected(self):
         cases = (
             ("-hwaccel vaapi", "vaapi is not available"),
-            (["-hwaccel_device", "/dev/dri/renderD128"], "not a Windows hardware device"),
+            (
+                ["-hwaccel_device", "/dev/dri/renderD128"],
+                "not a Windows hardware device",
+            ),
             (["-c:v", "h264_v4l2m2m"], "codec unavailable on Windows"),
             (["-f", "v4l2"], "V4L2 input is not available"),
             (["-pix_fmt", "drm_prime"], "pixel format unavailable on Windows"),
@@ -203,7 +209,9 @@ class TestPresetValidation(unittest.TestCase):
             "v4l2:///dev/video0",
         ):
             with self.subTest(path=path):
-                with self.assertRaisesRegex(ValueError, "cannot be used on native Windows"):
+                with self.assertRaisesRegex(
+                    ValueError, "cannot be used on native Windows"
+                ):
                     CameraInput(path=path, roles=["detect"])
 
     def test_windows_and_network_camera_paths_are_allowed(self):

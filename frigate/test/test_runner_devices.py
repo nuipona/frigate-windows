@@ -110,9 +110,7 @@ class TestLoadedDeviceSnapshot(unittest.TestCase):
         def writer() -> None:
             index = 0
             while not stop.is_set():
-                record_loaded_device(
-                    rf"C:\models\{index}.onnx", "paddleocr", "CPU"
-                )
+                record_loaded_device(rf"C:\models\{index}.onnx", "paddleocr", "CPU")
                 index += 1
 
         thread = threading.Thread(target=writer, daemon=True)

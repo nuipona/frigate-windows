@@ -1,0 +1,42 @@
+name: Windows Web
+
+# The frontend ships as the native build (`build:native`, served from `/`),
+# so lint and that build are what CI gates on. Run on Windows to match the
+# supported installation path in bootstrap_windows.py.
+on:
+  pull_request:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-web-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Lint and native build
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build (native)
+        run: npm run build:native

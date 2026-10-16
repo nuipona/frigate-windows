@@ -82,7 +82,10 @@ class TestNativeGo2rtcConfig(unittest.TestCase):
 class TestGo2rtcProcess(unittest.TestCase):
     @patch("frigate.util.go2rtc_process.sp.Popen")
     @patch("frigate.util.go2rtc_process.prepare_homekit_config")
-    @patch("frigate.util.go2rtc_process.find_go2rtc", return_value=r"C:\\Frigate\\go2rtc.exe")
+    @patch(
+        "frigate.util.go2rtc_process.find_go2rtc",
+        return_value=r"C:\\Frigate\\go2rtc.exe",
+    )
     @patch("frigate.util.go2rtc_process.get_service_log_path")
     @patch("frigate.util.go2rtc_process.os.makedirs")
     def test_homekit_config_is_the_writable_primary_config(

@@ -186,5 +186,6 @@ class TestMigrateConfigFile(unittest.TestCase):
             os.path.exists(os.path.join(self.temp_dir.name, "backup_config.yaml"))
         )
 
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

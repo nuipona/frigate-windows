@@ -140,7 +140,9 @@ def has_windows_build(name: str, version: str | None, metadata: dict) -> bool:
     releases = metadata["releases"]
 
     if version:
-        matching = sorted(release for release in releases if release.startswith(version))
+        matching = sorted(
+            release for release in releases if release.startswith(version)
+        )
     else:
         matching = sorted(releases)
 
@@ -197,7 +199,9 @@ def third_party_imports() -> dict[str, set[str]]:
                 if not top_level or top_level in stdlib or top_level == "frigate":
                     continue
 
-                imports.setdefault(top_level, set()).add(str(path.relative_to(REPO_ROOT)))
+                imports.setdefault(top_level, set()).add(
+                    str(path.relative_to(REPO_ROOT))
+                )
 
     return imports
 

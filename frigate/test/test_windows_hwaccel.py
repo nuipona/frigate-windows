@@ -44,9 +44,7 @@ class TestWindowsFamilies(unittest.TestCase):
             vendors,
             patch.object(hwaccel, "_intel_generation", return_value=12),
         ):
-            recommended, available = hwaccel.hwaccel_options(
-                "openvino:GPU", {"h264"}
-            )
+            recommended, available = hwaccel.hwaccel_options("openvino:GPU", {"h264"})
 
         self.assertEqual(recommended, "windows-qsv")
         self.assertEqual(available[0].key, "windows-qsv")
@@ -82,20 +80,14 @@ class TestAutoPreset(unittest.TestCase):
 
     def test_go2rtc_qsv(self) -> None:
         sources = [{"name": "OK", "url": "ffmpeg:camera#hardware=qsv"}]
-        self.assertEqual(
-            hwaccel.windows_hwaccel_preset(sources), "preset-windows-qsv"
-        )
+        self.assertEqual(hwaccel.windows_hwaccel_preset(sources), "preset-windows-qsv")
 
     def test_display_adapter_fallback(self) -> None:
         with (
             patch.object(hwaccel, "get_display_adapters", return_value=["AMD Radeon"]),
-            patch.object(
-                hwaccel, "get_display_adapter_vendors", return_value={"amd"}
-            ),
+            patch.object(hwaccel, "get_display_adapter_vendors", return_value={"amd"}),
         ):
-            self.assertEqual(
-                hwaccel.windows_hwaccel_preset(), "preset-windows-d3d11va"
-            )
+            self.assertEqual(hwaccel.windows_hwaccel_preset(), "preset-windows-d3d11va")
 
     def test_no_adapter_falls_back_to_software(self) -> None:
         with patch.object(hwaccel, "get_display_adapters", return_value=[]):
