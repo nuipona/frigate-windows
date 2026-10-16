@@ -17,7 +17,7 @@ import numpy as np
 
 from frigate.config import CameraConfig
 from frigate.ffmpeg_presets import parse_preset_hardware_acceleration_decode
-from frigate.util.ffmpeg import terminate_ffmpeg_stream
+from frigate.util.ffmpeg import ffmpeg_popen_kwargs, terminate_ffmpeg_stream
 from frigate.util.services import auto_detect_hwaccel
 
 logger = logging.getLogger(__name__)
@@ -179,7 +179,9 @@ def _run_vod_decode(
     )
     frame_size = out_width * out_height * channels
     stderr_file = tempfile.SpooledTemporaryFile(max_size=65536)
-    proc = sp.Popen(cmd, stdout=sp.PIPE, stderr=stderr_file)
+    # group leader, so terminate_ffmpeg_stream can stop this process
+    # without addressing a console event at Frigate's own process group
+    proc = sp.Popen(cmd, stdout=sp.PIPE, stderr=stderr_file, **ffmpeg_popen_kwargs())
     assert proc.stdout is not None
 
     count = 0

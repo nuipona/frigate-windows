@@ -28,8 +28,17 @@ def ffmpeg_popen_kwargs() -> dict[str, Any]:
 
     ``CREATE_NEW_PROCESS_GROUP`` makes ffmpeg a group leader so a targeted
     ``CTRL_BREAK_EVENT`` can ask it to finalize the file it is writing.
+    Every process that will later be stopped through
+    :func:`request_ffmpeg_stop` must be spawned with these arguments:
+    without its own process group, the break event is addressed to a
+    process id that is not a group, and the console event can reach
+    Frigate's own process group instead, stopping Frigate itself.
+
+    Empty where the flag does not exist, so unit tests on other hosts can
+    still spawn the process.
     """
-    return {"creationflags": sp.CREATE_NEW_PROCESS_GROUP}
+    creationflags = getattr(sp, "CREATE_NEW_PROCESS_GROUP", 0)
+    return {"creationflags": creationflags} if creationflags else {}
 
 
 def request_ffmpeg_stop(

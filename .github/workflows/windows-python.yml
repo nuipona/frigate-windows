@@ -92,13 +92,4 @@ jobs:
         working-directory: ${{ env.pythonLocation }}\Scripts
 
       - name: Run the unit suite
-        shell: pwsh
-        run: |
-          python -m unittest frigate.test.test_clip_download -v 2>&1 |
-            Tee-Object -FilePath suite.log
-          exit $LASTEXITCODE
-
-      # TEMPORARY DIAGNOSTIC: surface suite failures as annotations
-      - name: Report suite failures
-        if: failure()
-        run: python testing-scripts/_ci_suite_report.py
+        run: python testing-scripts/run_windows_unit_suite.py
