@@ -38,5 +38,23 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # TEMPORARY DIAGNOSTIC: surface eslint errors as annotations
+      - name: Diagnose lint
+        if: failure()
+        shell: pwsh
+        run: |
+          npx eslint . --format json --output-file eslint.json; $code = $LASTEXITCODE
+          $results = Get-Content eslint.json -Raw | ConvertFrom-Json
+          $count = 0
+          foreach ($file in $results) {
+            foreach ($msg in $file.messages) {
+              if ($msg.severity -eq 2 -and $count -lt 10) {
+                $count++
+                Write-Host "::error file=$($file.filePath),line=$($msg.line),col=$($msg.column)::$($msg.ruleId): $($msg.message)"
+              }
+            }
+          }
+          Write-Host "::error::eslint exit=$code files-with-errors=$(($results | Where-Object errorCount -gt 0).Count) total-errors=$(($results | Measure-Object errorCount -Sum).Sum)"
+
       - name: Build (native)
         run: npm run build:native
