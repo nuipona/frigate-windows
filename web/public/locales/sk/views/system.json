@@ -6,8 +6,7 @@
     "enrichments": "Štatistiky AI funkcií - Frigate",
     "logs": {
       "frigate": "Protokoly Frigate - Frigate",
-      "go2rtc": "Protokoly Go2RTC - Frigate",
-      "nginx": "Protokoly Ngnix - Frigate"
+      "go2rtc": "Protokoly Go2RTC - Frigate"
     }
   },
   "title": "System",

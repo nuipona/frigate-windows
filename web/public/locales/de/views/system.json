@@ -65,7 +65,6 @@
     "logs": {
       "frigate": "Frigate Protokolle – Frigate",
       "go2rtc": "Go2RTC Protokolle - Frigate",
-      "nginx": "Nginx Protokolle - Frigate",
       "websocket": "Nachrichten Protokolle - Frigate"
     },
     "enrichments": "Erweiterte Statistiken - Frigate"

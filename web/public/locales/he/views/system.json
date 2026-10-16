@@ -14,8 +14,7 @@
     "enrichments": "סטטיסטיקת העשרה - Frigate",
     "logs": {
       "frigate": "לוגים - Frigate",
-      "go2rtc": "לוגים - Go2RTC - Frigate",
-      "nginx": "לוגים - Nginx - Frigate"
+      "go2rtc": "לוגים - Go2RTC - Frigate"
     }
   },
   "title": "מערכת",

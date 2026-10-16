@@ -1,15 +1,15 @@
 mqtt:
-  host: mqtt
+  host: 127.0.0.1
 
 cameras:
   test:
     ffmpeg:
       inputs:
-        - path: /media/frigate/car-stopping.mp4
+        - path: 'C:\FrigateSamples\car-stopping.mp4'
           input_args: -re -stream_loop -1 -fflags +genpts
           roles:
             - detect
-            - rtmp
+            - record
     detect:
       height: 1080
       width: 1920

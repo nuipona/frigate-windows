@@ -6,7 +6,6 @@
     "logs": {
       "frigate": "Frigate dnevniki - Frigate",
       "go2rtc": "Go2RTC dnevniki - Frigate",
-      "nginx": "Nginx dnevniki - Frigate",
       "websocket": "Dnevniki sporočil - Frigate"
     },
     "enrichments": "Statistika obogatenih podatkov - Frigate"

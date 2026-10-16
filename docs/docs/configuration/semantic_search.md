@@ -21,7 +21,7 @@ Semantic search requires a one-time internet connection to download embedding mo
 
 ## Minimum System Requirements
 
-Semantic Search works by running a large AI model locally on your system. Small or underpowered systems like a Raspberry Pi will not run Semantic Search reliably or at all.
+Semantic Search runs a large AI model locally. Systems with limited RAM or CPU/GPU capacity may not run it reliably.
 
 A minimum of 8GB of RAM is required to use Semantic Search. A CPU with AVX + AVX2 instructions is required to run Semantic Search. A GPU is not strictly required but will provide a significant performance increase over CPU-only systems.
 
@@ -181,7 +181,7 @@ Switching between Jina models and a GenAI provider requires reindexing. Embeddin
 
 ### GPU Acceleration
 
-The CLIP models are downloaded in ONNX format, and the `large` model can be accelerated using GPU hardware, when available. This depends on the Docker build that is used. You can also target a specific device in a multi-GPU installation.
+CLIP models are downloaded in ONNX format. The `large` model can use a supported Windows GPU provider, and a specific device can be selected on multi-GPU systems.
 
 <ConfigTabs>
 <TabItem value="ui">

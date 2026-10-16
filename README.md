@@ -22,9 +22,9 @@ Use of a GPU or AI accelerator is highly recommended: accelerators outperform ev
 - Re-streaming via RTSP to reduce the number of connections to your camera
 - WebRTC and MSE for low-latency live view
 
-## This fork: native Windows
+## Native Windows application
 
-`nuipona/frigate-windows` tracks `blakeblackshear/frigate` and adds a native Windows install: Frigate runs as a normal Windows process, with no Docker and no WSL. Frigate itself serves the API, the media endpoints and the web interface, so there is no nginx, no s6 and no `/dev/shm`.
+This distribution is designed exclusively for native 64-bit Windows. Frigate runs as a normal Windows process or SCM service; container, WSL, and Unix runtime paths are not supported. Frigate itself serves the API, media endpoints, and web interface.
 
 Install from an ordinary PowerShell window:
 
@@ -35,7 +35,7 @@ py -3.12 bootstrap_windows.py
 powershell -ExecutionPolicy Bypass -File .\run_frigate.ps1
 ```
 
-The bootstrap script needs 64-bit CPython 3.12. It creates the venv, installs the Windows requirements, fetches pinned FFmpeg and go2rtc builds, builds the web interface when Node.js is available, and writes a launcher that restarts Frigate when Frigate asks to be restarted. Node.js is only needed for that frontend build: the `windows_bundle` release job publishes a zip with `web/dist` already built.
+The bootstrap script needs 64-bit CPython 3.12. It creates the venv, installs the Windows requirements, fetches pinned FFmpeg and go2rtc builds plus the detection and audio models, builds the web interface when Node.js is available, and writes a launcher that restarts Frigate when Frigate asks to be restarted. Node.js is only needed for that frontend build; a packaged bundle can ship `web/dist` prebuilt.
 
 Windows-specific behaviour:
 

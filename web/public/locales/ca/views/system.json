@@ -6,7 +6,6 @@
     "logs": {
       "frigate": "Registres de Frigate - Frigate",
       "go2rtc": "Registres de Go2RTC - Frigate",
-      "nginx": "Registres de Nginix - Frigate",
       "websocket": "Registres de missatges - Frigate"
     },
     "enrichments": "Estadístiques complementàries - Frigate",
@@ -296,7 +295,6 @@
         "detector_stuck": "S'ha reiniciat el detector {{detector}} després que deixés de respondre",
         "model_download_failed": "Ha fallat la baixada de {{file}} per {{model}}: {{error}}",
         "skipped_detections": "La detecció no ha pogut mantenir el {{pct}}% de fotogrames durant més d'un minut",
-        "shm_too_low": "L'assignació /dev/shm ({{total}} MB) s'hauria d'augmentar a com a mínim {{min}} MB",
         "failed_login_one": "Error en l'intent d'inici de sessió de {{user}}",
         "failed_login_other": "Intents d'inici de sessió fallits per {{user}}",
         "update_available": "Frigate {{version}} està disponible",

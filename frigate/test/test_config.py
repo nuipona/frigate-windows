@@ -1,3 +1,4 @@
+import hashlib
 import io
 import json
 import os
@@ -13,8 +14,8 @@ from ruamel.yaml.constructor import DuplicateKeyError
 
 from frigate.config import BirdseyeModeEnum, CameraConfig, FrigateConfig, RetainModeEnum
 from frigate.config.config import (
-    WINDOWS_DEFAULT_MODEL_URL,
-    _ensure_windows_default_cpu_model,
+    DEFAULT_MODEL_URL,
+    _ensure_default_cpu_model,
 )
 from frigate.const import MODEL_CACHE_DIR
 from frigate.detectors import DetectorTypeEnum
@@ -48,7 +49,7 @@ class TestConfig(unittest.TestCase):
             "description": "Fine tuned model",
             "trainDate": "2023-04-28T23:22:01.262Z",
             "type": "ssd",
-            "supportedDetectors": ["cpu", "edgetpu"],
+            "supportedDetectors": ["cpu", "openvino", "onnx"],
             "width": 320,
             "height": 320,
             "inputShape": "nhwc",
@@ -103,22 +104,17 @@ class TestConfig(unittest.TestCase):
         assert detector_config.device == "GPU"
         assert detector_config.model.path == "/etc/hosts"
 
-    @patch("frigate.config.config.IS_WINDOWS", False)
-    @patch("frigate.detectors.device.IS_WINDOWS", False)
+    @patch("frigate.config.config._ensure_default_cpu_model")
     @patch("frigate.detectors.detector_config.load_labels")
-    def test_model_default_paths_per_detector(self, mock_labels):
+    def test_native_detector_default_model_paths(self, mock_labels, _ensure_model):
         mock_labels.return_value = {}
 
-        for devices, expected in (
-            (["cpu"], "/cpu_model.tflite"),
-            (["edgetpu:pci:0"], "/edgetpu_model.tflite"),
-            (["openvino:CPU"], "/openvino-model/ssdlite_mobilenet_v2.xml"),
-        ):
-            config = {"models": [{"devices": devices}]}
-            frigate_config = FrigateConfig(**(deep_merge(config, self.minimal)))
-            assert frigate_config.primary_model.path == expected
+        for devices in (["cpu"], ["openvino:CPU"]):
+            with self.subTest(devices=devices):
+                config = {"models": [{"devices": devices}]}
+                frigate_config = FrigateConfig(**(deep_merge(config, self.minimal)))
+                self.assertEqual(frigate_config.primary_model.path, MODEL_CACHE_DIR + os.sep + "cpu_model.tflite")
 
-    @patch("frigate.config.camera.camera.IS_WINDOWS", True)
     def test_reserved_camera_name_is_rejected_on_windows(self):
         """A device name is not a file name, so the path layer will not use it."""
         inputs = [{"path": "rtsp://10.0.0.1:554/video", "roles": ["detect"]}]
@@ -132,15 +128,6 @@ class TestConfig(unittest.TestCase):
 
                 self.assertIn("reserved device name", str(raised.exception))
 
-    @patch("frigate.config.camera.camera.IS_WINDOWS", False)
-    def test_reserved_camera_name_is_allowed_elsewhere(self):
-        inputs = [{"path": "rtsp://10.0.0.1:554/video", "roles": ["detect"]}]
-        config = CameraConfig.model_validate(
-            {"name": "con", "ffmpeg": {"inputs": inputs}}
-        )
-        self.assertEqual(config.name, "con")
-
-    @patch("frigate.config.config.IS_WINDOWS", True)
     def test_camera_names_that_differ_only_by_case_are_rejected_on_windows(self):
         """NTFS resolves both names to the same directory and cache files."""
         config = deepcopy(self.minimal)
@@ -152,18 +139,6 @@ class TestConfig(unittest.TestCase):
         self.assertIn("differ only by case", str(raised.exception))
 
     @patch("frigate.detectors.detector_config.load_labels")
-    def test_camera_names_that_differ_only_by_case_are_allowed_elsewhere(
-        self, mock_labels
-    ):
-        mock_labels.return_value = {}
-        config = deepcopy(self.minimal)
-        config["cameras"]["BACK"] = deepcopy(config["cameras"]["back"])
-
-        frigate_config = FrigateConfig(**config)
-
-        self.assertEqual(sorted(frigate_config.cameras), ["BACK", "back"])
-
-    @patch("frigate.detectors.detector_config.load_labels")
     def test_unknown_hwaccel_preset_is_rejected(self, mock_labels):
         mock_labels.return_value = {}
         config = deepcopy(self.minimal)
@@ -172,7 +147,7 @@ class TestConfig(unittest.TestCase):
         with self.assertRaises(ValidationError) as raised:
             FrigateConfig(**config)
 
-        self.assertIn("not a known preset", str(raised.exception))
+        self.assertIn("not a supported preset", str(raised.exception))
 
     @patch("frigate.detectors.detector_config.load_labels")
     def test_linux_only_hwaccel_preset_is_rejected_on_windows(self, mock_labels):
@@ -180,9 +155,8 @@ class TestConfig(unittest.TestCase):
         config = deepcopy(self.minimal)
         config["cameras"]["back"]["ffmpeg"]["hwaccel_args"] = "preset-vaapi"
 
-        with patch("frigate.ffmpeg_presets.IS_WINDOWS", True):
-            with self.assertRaises(ValidationError) as raised:
-                FrigateConfig(**config)
+        with self.assertRaises(ValidationError) as raised:
+            FrigateConfig(**config)
 
         self.assertIn("preset-windows-d3d11va", str(raised.exception))
 
@@ -210,15 +184,14 @@ class TestConfig(unittest.TestCase):
         with self.assertRaises(ValidationError) as raised:
             FrigateConfig(**config)
 
-        self.assertIn("not a known preset", str(raised.exception))
+        self.assertIn("not a supported preset", str(raised.exception))
 
     @patch("frigate.detectors.detector_config.load_labels")
-    @patch("frigate.config.config._ensure_windows_default_cpu_model")
+    @patch("frigate.config.config._ensure_default_cpu_model")
     @patch(
-        "frigate.config.config.WINDOWS_DEFAULT_MODEL_PATH",
+        "frigate.config.config.DEFAULT_MODEL_PATH",
         r"C:\Frigate\config\model_cache\cpu_model.tflite",
     )
-    @patch("frigate.config.config.IS_WINDOWS", True)
     def test_windows_cpu_default_uses_a_native_model_path(
         self, ensure_model, mock_labels
     ):
@@ -229,18 +202,22 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(frigate_config.primary_model.path, expected_path)
         ensure_model.assert_called_once_with(expected_path)
 
-    @patch("frigate.config.config.IS_WINDOWS", True)
     @patch("frigate.config.config.urlopen")
     def test_windows_default_cpu_model_download_is_atomic(self, urlopen):
+        weights = b"test model weights"
         with tempfile.TemporaryDirectory() as model_dir:
             model_path = os.path.join(model_dir, "cpu_model.tflite")
-            urlopen.return_value = io.BytesIO(b"test model weights")
+            urlopen.return_value = io.BytesIO(weights)
 
-            _ensure_windows_default_cpu_model(model_path)
+            with patch(
+                "frigate.config.config.DEFAULT_MODEL_SHA256",
+                hashlib.sha256(weights).hexdigest(),
+            ):
+                _ensure_default_cpu_model(model_path)
 
             with open(model_path, "rb") as model_file:
-                self.assertEqual(model_file.read(), b"test model weights")
-            urlopen.assert_called_once_with(WINDOWS_DEFAULT_MODEL_URL, timeout=60)
+                self.assertEqual(model_file.read(), weights)
+            urlopen.assert_called_once_with(DEFAULT_MODEL_URL, timeout=60)
             self.assertEqual(os.listdir(model_dir), ["cpu_model.tflite"])
 
     @patch("frigate.detectors.detector_config.load_labels")
@@ -540,15 +517,6 @@ class TestConfig(unittest.TestCase):
         devices = frigate_config.devices_for_model(frigate_config.primary_model)
 
         assert runner_names(devices) == ["openvino:GPU", "openvino:GPU#2"]
-
-    @patch("frigate.detectors.device.IS_WINDOWS", False)
-    @patch("frigate.detectors.detector_config.load_labels")
-    def test_exclusive_devices_may_not_repeat(self, mock_labels):
-        mock_labels.return_value = {}
-        config = {"models": [{"devices": ["edgetpu:pci:0", "edgetpu:pci:0"]}]}
-
-        with self.assertRaises(ValidationError):
-            FrigateConfig(**(deep_merge(config, self.minimal)))
 
     def test_invalid_mqtt_config(self):
         config = {

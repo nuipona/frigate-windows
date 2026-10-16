@@ -6,7 +6,6 @@
     "logs": {
       "frigate": "Frigate naplók - Frigate",
       "go2rtc": "Go2RTC naplók - Frigate",
-      "nginx": "Nginx naplók - Frigate",
       "websocket": "Üzenet naplók - Frigate"
     },
     "enrichments": "Kiegészítés statisztikák - Frigate"

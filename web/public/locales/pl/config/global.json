@@ -68,8 +68,7 @@
         "description": "Po włączeniu Frigate uruchomi się w trybie awaryjnym z ograniczonymi funkcjami, co ułatwi rozwiązywanie problemów."
     },
     "environment_vars": {
-        "label": "Zmienne środowiskowe",
-        "description": "Pary klucz-wartość zmiennych środowiskowych, które należy ustawić dla procesu Frigate w systemie Home Assistant. Użytkownicy niekorzystający z Home Assistant powinni zamiast tego skorzystać z konfiguracji zmiennych środowiskowych w Dockerze."
+        "label": "Zmienne środowiskowe"
     },
     "logger": {
         "label": "Rejestrowanie",
@@ -1133,7 +1132,6 @@
         },
         "listen": {
             "label": "Konfiguracja portów nasłuchiwania",
-            "description": "Konfiguracja wewnętrznych i zewnętrznych portów nasłuchiwania. Jest to opcja dla zaawansowanych użytkowników. W większości przypadków zaleca się zmianę sekcji ports w pliku Docker Compose.",
             "internal": {
                 "label": "Port wewnętrzny",
                 "description": "Wewnętrzny port nasłuchiwania dla Frigate (domyślnie 5000)."
@@ -1203,8 +1201,7 @@
                 "description": "Włącz monitorowanie przepustowości sieci dla poszczególnych procesów FFmpeg kamer oraz detektorów (wymaga odpowiednich uprawnień capabilities)."
             },
             "intel_gpu_device": {
-                "label": "Urządzenie Intel GPU",
-                "description": "Adres magistrali PCI lub ścieżka urządzenia DRM (np. /dev/dri/card1) używane do przypisania statystyk Intel GPU do konkretnego urządzenia, gdy występuje ich kilka."
+                "label": "Urządzenie Intel GPU"
             }
         },
         "version_check": {

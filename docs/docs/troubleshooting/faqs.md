@@ -3,13 +3,63 @@ id: faqs
 title: Frequently Asked Questions
 ---
 
-### Fatal Python error: Bus error
+# Frequently asked questions
 
-This error message is due to a shm-size that is too small. Try updating your shm-size according to [this guide](../frigate/installation.md#calculating-required-shm-size).
+## Where are Frigate's files?
 
-### How can I get sound or audio in my recordings? {#audio-in-recordings}
+Interactive installs default to `%LOCALAPPDATA%\Frigate`. The Windows service installer defaults to `%ProgramData%\Frigate`. `FRIGATE_BASE_DIR` can select another root before installation. Subdirectories contain config, media, cache, temporary files, logs, models, and tools.
 
-By default, Frigate removes audio from recordings to reduce the likelihood of failing for invalid data. If you would like to include audio, you need to set a [FFmpeg preset](/configuration/ffmpeg_presets) that supports audio:
+## Where are the logs?
+
+Use **System > Logs** or read `logs\frigate.log` and `logs\go2rtc.log` below the data root:
+
+```powershell
+Get-Content "$env:ProgramData\Frigate\logs\frigate.log" -Wait
+```
+
+## Why does `localhost` not reach MQTT or a camera?
+
+`localhost` means the Windows machine running Frigate. Use the broker/camera's LAN address or DNS name when it runs elsewhere. For a local broker, confirm the service is listening on loopback and that the Frigate service account can connect.
+
+## Can I expose port 5000?
+
+No. Port `5000` is an unauthenticated loopback listener for Frigate's own media jobs. Users and integrations connect to the authenticated public listener on port `8971`.
+
+## Why does HTTPS show a warning?
+
+Frigate generates a self-signed certificate when no pair exists. Install a trusted certificate with the correct DNS/IP Subject Alternative Names, or trust a private CA on each client. Do not disable TLS on an untrusted network.
+
+## How do I change or recover the administrator password?
+
+Use the user-management UI while signed in. If access is lost, set `auth.reset_admin_password: true`, restart once, retrieve the generated password from the protected log, then set the option back to `false`.
+
+## What does the config `version` field do?
+
+It records the last configuration format migration. Frigate backs up and rewrites older YAML during migration, then updates the field. Do not manually increase it. Back up `config.yml`, `secrets.yaml`, and `frigate.db` before upgrades.
+
+## Why is the service using different files from an interactive run?
+
+Services do not inherit the signed-in user's `%LOCALAPPDATA%` or PowerShell environment. The installer pins `FRIGATE_BASE_DIR` and supported startup variables in the service registry. Use `install_frigate_service.ps1 -Action Status` to inspect it and `-Action Configure` after changing startup settings.
+
+## Can media be stored on a network share?
+
+Local NTFS is recommended. Never place `frigate.db` on a network share. If media must use SMB, run the service under an account with explicit share and NTFS permissions, use a UNC path rather than a mapped drive, and make the share available at boot. Network interruptions can create recording gaps.
+
+## Why does CPU usage remain high?
+
+Confirm video hardware decoding actually initialized, use a lower-resolution detection stream around 5 FPS, and check detector/enrichment inference. See [High CPU Usage](./cpu.md).
+
+## Why is my GPU not shown?
+
+Update its Windows driver and check **System > Hardware**. Video decode, OpenVINO, DirectML, CUDA, and NVML are separate APIs; success in one does not prove another is available. See [GPU Troubleshooting](./gpu.md).
+
+## Why are recordings missing?
+
+Recording must be enabled and an input must have the `record` role. Retention mode, motion, storage reserve, timestamps, unsupported audio, permissions, or a full volume can remove or prevent segments. See [Recording Troubleshooting](./recordings.md).
+
+## Audio in recordings
+
+The record stream must contain audio and the output arguments must either copy a codec valid in MP4 or transcode it to AAC. G.711 (`pcm_alaw`/`pcm_mulaw`) cannot be copied into MP4. Use the generic AAC recording preset when needed:
 
 ```yaml
 ffmpeg:
@@ -17,181 +67,16 @@ ffmpeg:
     record: preset-record-generic-audio-aac
 ```
 
-### How can I get sound in live view?
+Casting clients may require an audio track even when the camera has no useful sound.
 
-Audio is only supported for live view when go2rtc is configured, see [the live docs](../configuration/live.md) for more information.
+## How do I reduce camera connections?
 
-### I can't view recordings in the Web UI.
+Configure one camera source in go2rtc and use its local RTSP restream for detection, recording, and other clients. Keep the go2rtc management API on loopback.
 
-Ensure your cameras send h264 encoded video, or [transcode them](/configuration/restream.md).
+## Can camera processing be turned off temporarily?
 
-You can open `chrome://media-internals/` in another tab and then try to playback, the media internals page will give information about why playback is failing.
+Yes. Use the camera controls in the UI, Home Assistant, or MQTT. Runtime state persists across Frigate restarts. Set the camera's configured state to Disabled when it should remain administratively unavailable.
 
-### What do I do if my cameras sub stream is not good enough?
+## How do I request help safely?
 
-Frigate generally [recommends cameras with configurable sub streams](/frigate/hardware.md). However, if your camera does not have a sub stream that is a suitable resolution, the main stream can be resized.
-
-To do this efficiently the following setup is required:
-
-1. A GPU or iGPU must be available to do the scaling.
-2. [ffmpeg presets for hwaccel](/configuration/hardware_acceleration_video.md) must be used
-3. Set the desired detection resolution for `detect -> width` and `detect -> height`.
-
-When this is done correctly, the GPU will do the decoding and scaling which will result in a small increase in CPU usage but with better results.
-
-### How can I rotate my camera's video feed?
-
-Rotation is best done in the camera's firmware settings (usually called rotate, flip, or corridor mode) so the video arrives already rotated and no extra processing is needed. Check there first.
-
-If your camera does not support rotation, go2rtc's ffmpeg module can rotate the stream with the `#rotate` parameter (`90`, `180`, `270`, or `-90`), but this is not recommended: rotation requires transcoding (re-encoding) the video, which significantly increases CPU usage, especially for high resolution streams.
-
-```yaml
-go2rtc:
-  streams:
-    my_camera: "ffmpeg:rtsp://user:password@192.168.1.10:554/stream#video=h264#hardware#rotate=90"
-```
-
-Point the camera's inputs at the restream as described in the [restream docs](/configuration/restream.md), and swap `detect -> width` and `detect -> height` to match the rotated resolution.
-
-### Can I add a privacy mask to hide part of my camera's view?
-
-Frigate does not have privacy masks. [Motion masks and object filter masks](../configuration/masks.md) only affect detection, they don't hide anything in live view, recordings, or snapshots.
-
-Privacy masks are best configured in the camera's firmware settings so the area is blacked out before the video ever leaves the camera and no extra processing is needed. Check there first.
-
-If your camera does not support privacy masks, there is no efficient alternative. Frigate copies the camera's video into recordings and live view without decoding it, so part of the image can't be hidden without transcoding (re-encoding) the stream. This can be done with a custom ffmpeg filter in go2rtc, but it is not recommended. Every masked camera needs a continuous re-encode, which significantly increases CPU usage, especially for high resolution streams.
-
-### My mjpeg stream or snapshots look green and crazy
-
-This almost always means that the width/height defined for your camera are not correct. Double check the resolution with VLC or another player. Also make sure you don't have the width and height values backwards.
-
-![mismatched-resolution](/img/mismatched-resolution-min.jpg)
-
-### "[mov,mp4,m4a,3gp,3g2,mj2 @ 0x5639eeb6e140] moov atom not found"
-
-These messages in the logs are expected in certain situations. Frigate checks the integrity of the recordings before storing. Occasionally these cached files will be invalid and cleaned up automatically.
-
-### "MQTT connected" repeats in the logs
-
-If you see repeated "MQTT connected" messages in your logs, check for another instance of Frigate. This happens when multiple Frigate containers are trying to connect to MQTT with the same `client_id`.
-
-### Error: Database Is Locked
-
-SQLite does not work well on a network share, if the `/media` folder is mapped to a network share then [this guide](../configuration/advanced/system.md#database) should be used to move the database to a location on the internal drive.
-
-### Unable to publish to MQTT: client is not connected
-
-If MQTT isn't working in docker try using the IP of the device hosting the MQTT server instead of `localhost`, `127.0.0.1`, or `mosquitto.ix-mosquitto.svc.cluster.local`.
-
-This is because Frigate does not run in host mode so localhost points to the Frigate container and not the host device's network.
-
-### How do I know if my camera is offline
-
-Frigate publishes a per-role health status to [`frigate/<camera_name>/status/<role>`](/integrations/mqtt#frigatecamera_namestatusrole), where `<role>` is each enabled role on the camera (`detect`, `record`, and `audio`). The published value is one of:
-
-- `online`: Frigate's process for that role is running normally
-- `offline`: the process is down and Frigate is restarting it
-- `disabled`: the camera is turned off, either at runtime or in the configuration file
-
-These reflect the state of Frigate's process for that role, not the camera's reachability, so an unreachable camera alternates between `offline` and `online` as the watchdog restarts ffmpeg. Wait for the status to hold steady (for example with Home Assistant's `for:`) rather than acting on a single message.
-
-Because the status is per role, a camera whose substream is fine but whose recording stream has dropped will report `online` for `detect` and `offline` for `record`. The status is republished whenever it changes.
-
-You can also detect an offline camera through `/api/stats`, where `camera_fps` will be 0.
-
-### How can I view the Frigate log files without using the Web UI?
-
-Frigate manages logs internally as well as outputs directly to Docker via standard output. To view these logs using the CLI, follow these steps:
-
-- Open a terminal or command prompt on the host running your Frigate container.
-- Type the following command and press Enter:
-  ```
-  docker logs -f frigate
-  ```
-  This command tells Docker to show you the logs from the Frigate container.
-  Note: If you've given your Frigate container a different name, replace "frigate" in the command with your container's actual name. The "-f" option means the logs will continue to update in real-time as new entries are added. To stop viewing the logs, press `Ctrl+C`. If you'd like to learn more about using Docker logs, including additional options and features, you can explore Docker's [official documentation](https://docs.docker.com/engine/reference/commandline/logs/).
-
-Alternatively, when you create the Frigate Docker container, you can bind a directory on the host to the mountpoint `/dev/shm/logs` to not only be able to persist the logs to disk, but also to be able to query them directly from the host using your favorite log parsing/query utility.
-
-```
-docker run -d \
-  --name frigate \
-  --restart=unless-stopped \
-  --mount type=tmpfs,target=/tmp/cache,tmpfs-size=1000000000 \
-  --device /dev/bus/usb:/dev/bus/usb \
-  --device /dev/dri/renderD128 \
-  --shm-size=64m \
-  -v /path/to/your/storage:/media/frigate \
-  -v /path/to/your/config:/config \
-  -v /etc/localtime:/etc/localtime:ro \
-  -v /path/to/local/log/dir:/dev/shm/logs \
-  -e FRIGATE_RTSP_PASSWORD='password' \
-  -p 5000:5000 \
-  -p 8554:8554 \
-  -p 8555:8555/tcp \
-  -p 8555:8555/udp \
-  ghcr.io/blakeblackshear/frigate:stable
-```
-
-### My RTSP stream works fine in VLC, but it does not work when I put the same URL in my Frigate config. Is this a bug?
-
-No. Frigate uses the TCP protocol to connect to your camera's RTSP URL. VLC automatically switches between UDP and TCP depending on network conditions and stream availability. So a stream that works in VLC but not in Frigate is likely due to VLC selecting UDP as the transfer protocol.
-
-TCP ensures that all data packets arrive in the correct order. This is crucial for video recording, decoding, and stream processing, which is why Frigate enforces a TCP connection. UDP is faster but less reliable, as it does not guarantee packet delivery or order, and VLC does not have the same requirements as Frigate.
-
-You can still configure Frigate to use UDP by using ffmpeg input args or the preset `preset-rtsp-udp`. See the [ffmpeg presets](/configuration/ffmpeg_presets) documentation.
-
-### Frigate is slow to start up with a "probing detect stream" message in the logs
-
-When `detect.width` and `detect.height` are not set, Frigate probes each camera's detect stream on startup (and when saving the config) to auto-detect its resolution. For RTSP streams Frigate probes with ffprobe and automatically retries over TCP if UDP doesn't respond, with a 5 second timeout per attempt. A camera that cannot be reached over either transport will add up to ~10 seconds to startup before Frigate falls through with default dimensions, which may show up as width `0` and height `0` in Camera Probe Info under Health and Metrics.
-
-To skip the probe entirely and make startup instant, set `detect.width` and `detect.height` explicitly in your camera config:
-
-```yaml
-cameras:
-  my_camera:
-    detect:
-      width: 1280
-      height: 720
-```
-
-### What is the `version` key in my config file?
-
-`version` records the config format that your config was last migrated to. On startup Frigate compares it against the format the running version expects, and if it is older it copies your config to `/config/backup_config.yaml`, rewrites it to the new format, and updates `version` as the final step. A config with no `version` key is assumed to predate 0.14 and is migrated from there.
-
-Frigate manages this key for you, so do not set or edit it. Raising it makes Frigate skip migrations your config still needs, and lowering it re-runs migrations against config that has already been converted. Either can leave you with a config that no longer validates.
-
-### Why does Frigate keep creating new tracked objects for my parked car?
-
-Stationary tracking is designed to _prevent_ this: a parked car should remain a single tracked object rather than generating new ones. If you're repeatedly getting new tracked objects for the same car, it's likely that Frigate is losing the object and re-detecting it as a new one.
-
-Open one of the tracked objects in Explore → **Tracking Details**. If the detection scores are low (< 70% or so), the model isn't confident the parked car is a car. This is common with the free [COCO-trained](https://cocodataset.org/#explore) object detection models on steep/top-down angles, partially occluded cars, foliage, or low-light footage. When detections fall below `min_score` for too many frames the tracker loses the object, and the next confident frame creates a brand new one.
-
-What helps:
-
-- **Improve the view**: even a small angle change that gets more of the car visible could lift scores enough to stabilize tracking.
-- **Use a more accurate model**: switching from `mobiledet` to `yolov9`, or stepping up to a larger variant like `yolov9-s` over `yolov9-t`, can help (at the cost of inference time, and still on the COCO dataset). The biggest gains usually come from fine-tuning a model on images from your own cameras so it learns your specific scene. [Frigate+](https://frigate.video/plus) is a paid option that does this - models are trained on security-camera footage and can be fine-tuned on images you submit from your own setup.
-- **Don't set `detect -> stationary -> max_frames` for `car`**: it artificially ends tracking and forces re-detection as a new object. See [Stationary Objects](../configuration/stationary_objects.md).
-- **Restrict alerts to the areas you care about** with `required_zones`. See [Zones](../configuration/zones.md#restricting-alerts-and-detections-to-specific-zones). Make sure those zones use the default `loitering_time: 0` unless you specifically want the review item to stay open until the car leaves.
-- **Filter impossible locations** with [object filter masks](../configuration/masks.md#object-filter-masks) if cars are being detected on rooftops, treetops, etc.
-
-See [Object Filters](../configuration/object_filters.md) for more on tuning `min_score` and `threshold`. Note that raising them too high will make this exact problem worse.
-
-### How do I correct Frigate when it detects something as the wrong object?
-
-Frigate's object detection relies on a machine learning [model](../frigate/glossary.md#model), and the free [COCO-trained](https://cocodataset.org/#explore) models that ship with Frigate can misidentify objects in scenes they weren't trained on. There are two ways to handle this, depending on whether you want to _teach_ the model or just _suppress_ the bad result.
-
-**Train or fine-tune a model with your own images.** The most durable fix is to improve the model itself. The biggest gains usually come from fine-tuning a model on images from your own cameras so it learns your specific scene. Some tools are freely available, and [Frigate+](https://frigate.video/plus) is a paid option that does this - models are trained on security-camera footage and can be fine-tuned on images you submit from your own setup. When Frigate mislabels something, open the tracked object in Explore, select the **Snapshot** tab, and use **Submit to Frigate+** to send the example with the correct label (or mark it as a [false positive](../frigate/glossary.md#false-positive)). Once you've submitted examples and [requested a model](../plus/first_model.md), the retrained model will be more accurate for your cameras. See [Submitting examples to Frigate+](../integrations/plus.md#submit-examples) for the full workflow.
-
-**Suppress the misidentification with filters.** You can use filters to stop a specific false positive from being tracked:
-
-- Tune `min_score` / `threshold`, or add `min_area` / `max_area` / `min_ratio` / `max_ratio` filters. See [Object Filters](../configuration/object_filters.md).
-- If the false positive is always in the same fixed spot (like a statue or mailbox that reads as a person), add an [object filter mask](../configuration/masks.md#object-filter-masks) over that location.
-
-Filters and masks only hide the incorrect result - they don't teach Frigate what the object actually is. For that, fine-tune your own model or use Frigate+.
-
-### Where do I see problems Frigate has detected?
-
-Open System > Health. The Notices list keeps a record of problems Frigate has found. Acknowledge an entry to hide it until the problem happens again, or mute it to hide it for good. Hidden entries stay listed under Show hidden in the filter. Ongoing conditions, such as an offline camera or recordings deleted before their retention period, appear in the status bar for admins until they clear, and the status bar links to the Notices list while it has entries showing. On mobile, tap the warning icon in the bottom navigation bar to see them.
-
-The Hardware section below the notices shows whether the detection hardware, hardware acceleration, and enrichment devices in your config were found and are being used, so a GPU that silently fell back to the CPU shows up as a warning. Run stream checks to probe every camera's streams for the same problems the camera wizard reports.
+Include the Frigate version, Windows build, relevant log excerpt, camera codec/resolution/FPS, selected detector and acceleration preset, and hardware/driver versions. Remove camera credentials, signed URLs, JWTs, API keys, proxy secrets, and private images.

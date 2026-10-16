@@ -5,7 +5,6 @@ import json
 import logging
 import queue
 import socket
-import struct
 import threading
 from collections.abc import Callable
 from typing import Any
@@ -40,7 +39,6 @@ from frigate.const import (
 )
 from frigate.models import User
 from frigate.output.ws_auth import ws_has_camera_access
-from frigate.util.platform import IS_WINDOWS
 
 logger = logging.getLogger(__name__)
 
@@ -88,15 +86,8 @@ WS_SEND_TIMEOUT = 10
 
 
 def _set_websocket_send_timeout(sock: socket.socket) -> None:
-    """Set SO_SNDTIMEO using the platform's expected socket-option format."""
-    if IS_WINDOWS:
-        # Winsock expects a DWORD timeout in milliseconds, not a timeval.
-        timeout: int | bytes = WS_SEND_TIMEOUT * 1000
-    else:
-        # POSIX expects a struct timeval (seconds, microseconds).
-        timeout = struct.pack("ll", WS_SEND_TIMEOUT, 0)
-
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDTIMEO, timeout)
+    """Set the Winsock send timeout in milliseconds."""
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDTIMEO, WS_SEND_TIMEOUT * 1000)
 
 
 def _check_ws_authorization(

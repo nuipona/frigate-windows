@@ -1,37 +1,18 @@
-"""Serve the web app, the media directories and the API without nginx.
+"""Native Windows HTTP gateway for the UI, API, media, and live streams.
 
-The container image puts nginx in front of Frigate. nginx terminates the
-browser connection on port 5000/8971, serves the built web app and the media
-directories, proxies the websocket servers on 5002 and go2rtc on 1984, and runs
-an ``auth_request`` subrequest to ``/auth`` before handing a request to the API,
-injecting the ``Remote-User`` and ``Remote-Role`` headers the API trusts.
+The public listener serves the React application, authenticates protected
+requests in process, exposes static media, creates recorded-video HLS, and
+forwards websocket/live traffic to Frigate and go2rtc. A second listener on
+``127.0.0.1`` serves trusted media requests from Frigate's own FFmpeg jobs.
 
-A native Windows install has no nginx, so this module rebuilds that facade in
-front of the same FastAPI app:
-
-- ``/api/...`` is the API, with the auth result injected the same way nginx
-  would inject it
-- ``/vod/...`` is HLS for recorded video, built by :mod:`frigate.api.vod_native`
-  instead of nginx-vod-module
-- ``/clips``, ``/recordings`` and ``/exports`` are the media directories
-- ``/ws``, ``/live/...`` and ``/go2rtc/...`` are proxied to the websocket
-  servers inside Frigate and to go2rtc
-- everything else is the built web app, with the ``try_files`` fallback nginx
-  uses so client side routes work
-
-Two details are worth calling out because they are easy to get wrong:
-
-- the auth check calls :func:`frigate.api.auth.auth` in process rather than
-  over HTTP. A loopback HTTP request would have to re-enter the server that is
-  handling it, which deadlocks a single threaded server and wastes a socket
-  hint in any other configuration.
-- the check is an ASGI call into the API app, so it sees the same middleware
-  stack, the same ``app`` state and the same database as a real request.
+Authentication runs directly against :func:`frigate.api.auth.auth`, avoiding a
+loopback request and preserving the API app's configuration and database state.
 """
 
 import asyncio
 import logging
 import os
+import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -53,18 +34,18 @@ from frigate.util.platform import (
     get_web_port,
     web_dir_has_build,
 )
+from frigate.util.tls import ensure_tls_certificate
 
 logger = logging.getLogger(__name__)
 
-# upstream services nginx proxies to
+# Native child services reached through loopback.
 MQTT_WS_URL = "http://127.0.0.1:5002"
 JSMEPEG_URL = "http://127.0.0.1:8082"
 GO2RTC_URL = "http://127.0.0.1:1984"
 
-# prefixes nginx runs auth_request for. Everything else, in particular the web
-# app shell, is public. The go2rtc proxy is included even though nginx has no
-# equivalent route: it forwards to go2rtc's own API, which reports the camera
-# URLs (credentials included), so it must never answer anonymously.
+# Protected gateway prefixes. The web-app shell is public so the login route can
+# render. go2rtc's API reports camera URLs containing credentials, so it must
+# never answer anonymously.
 PROTECTED_PREFIXES = (
     "/api/",
     "/vod/",
@@ -78,8 +59,7 @@ PROTECTED_PREFIXES = (
 
 PROTECTED_EXACT = ("/api", "/ws")
 
-# nginx turns auth off for the login flow, which has to work before a session
-# exists, and for the SPA fallbacks
+# The login flow must work before a session exists.
 AUTH_EXEMPT = (
     "/api/login",
     "/api/logout",
@@ -94,11 +74,12 @@ FORWARDED_REQUEST_HEADERS = (
     b"authorization",
     b"cookie",
     b"x-csrf-token",
+    b"x-forwarded-for",
 )
 
 
 def needs_auth(path: str) -> bool:
-    """Whether nginx would run the auth subrequest for a path."""
+    """Whether the native gateway must authenticate a path."""
     # the login flow has to work before a session exists, so the exemptions
     # are checked first: every exempt path also starts with a protected
     # prefix, and checking the prefixes first would make them unreachable
@@ -119,10 +100,9 @@ def needs_auth(path: str) -> bool:
 def build_auth_scope(scope: dict, port: int) -> dict:
     """Build the scope the local auth check runs against.
 
-    Mirrors what nginx passes along: the original method and URL, the port the
-    client connected to, the credentials and the CSRF marker. Client supplied
-    headers are deliberately not forwarded, which is what keeps a spoofed
-    ``Remote-Role`` header from reaching the backend.
+    Preserve the original method and URL, listener port, credentials, and CSRF
+    marker. Only explicitly allowed request headers reach the auth endpoint, so
+    a caller cannot inject a trusted ``Remote-Role`` value.
     """
     headers = [
         (key, value)
@@ -177,6 +157,50 @@ class InProcessAuth:
         auth_scope = build_auth_scope(scope, port)
         auth_scope["app"] = self.api_app
 
+        proxy = self.api_app.frigate_config.proxy
+        configured_secret = str(proxy.auth_secret or "")
+        incoming_headers = {
+            key.lower(): value for key, value in scope.get("headers", [])
+        }
+        supplied_secret = incoming_headers.get(b"x-proxy-secret", b"").decode(
+            "latin-1"
+        )
+
+        mapped_identity_enabled = (
+            not self.api_app.frigate_config.auth.enabled
+            and bool(proxy.header_map.user or proxy.header_map.role)
+        )
+        secret_matches = bool(configured_secret) and secrets.compare_digest(
+            supplied_secret, configured_secret
+        )
+
+        # With native authentication disabled, a configured upstream identity
+        # is the security boundary. Fail closed unless the caller proves it is
+        # the proxy; otherwise proxy.default_role could accidentally authorize
+        # a direct client even though its forged identity headers were stripped.
+        if mapped_identity_enabled and not secret_matches:
+            return 401, [], b""
+
+        # The gateway presents the configured value to the in-process auth
+        # endpoint. Mapped identity headers are copied only after the caller
+        # proved it knows that same value.
+        if configured_secret:
+            auth_scope["headers"].append(
+                (b"x-proxy-secret", configured_secret.encode("utf-8"))
+            )
+
+            if secret_matches:
+                mapped_headers = {
+                    name.casefold().encode("latin-1")
+                    for name in (proxy.header_map.user, proxy.header_map.role)
+                    if name
+                }
+                auth_scope["headers"].extend(
+                    (key, value)
+                    for key, value in scope.get("headers", [])
+                    if key.lower() in mapped_headers
+                )
+
         started = False
         status = 500
         headers: list[tuple[bytes, bytes]] = []
@@ -212,7 +236,7 @@ class InProcessAuth:
 
 
 class NativeAuthMiddleware:
-    """Inject ``Remote-User`` and ``Remote-Role`` like nginx's auth_request.
+    """Authenticate requests and inject trusted identity headers.
 
     A pure ASGI middleware rather than a ``BaseHTTPMiddleware`` because
     websockets need the same treatment: ``BaseHTTPMiddleware`` passes websocket
@@ -251,7 +275,7 @@ class NativeAuthMiddleware:
 
     @staticmethod
     def _injected(headers: list[tuple[bytes, bytes]]) -> list[tuple[bytes, bytes]]:
-        """The headers nginx forwards from the auth response to the backend."""
+        """Copy the identity established by the in-process auth check."""
         wanted = (
             b"remote-user",
             b"remote-role",
@@ -264,11 +288,12 @@ class NativeAuthMiddleware:
 
     @staticmethod
     def _strip_proxy_headers(scope: dict) -> list[tuple[bytes, bytes]]:
-        """Drop client supplied proxy headers so they are never trusted."""
+        """Drop client-supplied identity headers and proxy credentials."""
         return [
             (key, value)
             for key, value in scope.get("headers", [])
             if not key.lower().startswith(b"remote-")
+            and key.lower() != b"x-proxy-secret"
         ]
 
     async def _deny(
@@ -313,11 +338,7 @@ def is_contained_in(path: str, directory: str) -> bool:
 
 
 class SpaFiles:
-    """Static web app files with the nginx ``try_files`` fallback.
-
-    ``try_files $uri $uri.html $uri/ /index.html`` is what makes client side
-    routes such as ``/review`` work, so the same lookup order is reproduced.
-    """
+    """Serve static assets with an ``index.html`` client-route fallback."""
 
     def __init__(self, directory: str) -> None:
         self.directory = directory
@@ -467,9 +488,8 @@ async def vod_playlist(request: Request) -> Response:
 async def vod_clip(request: Request) -> Response:
     """``/vod/clip/{camera}/start/{start}/end/{end}/{index,master}.m3u8``.
 
-    The tracked object player uses this shape. The container answers it with
-    HLS discontinuities enabled; a native playlist has real segment boundaries
-    and does not need them.
+    The tracked-object player uses this route shape. Native playlists use real
+    segment boundaries and therefore do not need synthetic discontinuities.
     """
     camera = request.path_params["camera"]
     start = float(request.path_params["start"])
@@ -545,7 +565,7 @@ async def vod_segment(request: Request) -> Response:
 
 
 def vod_routes() -> list[Route]:
-    """The vod URLs the web player asks for, in nginx-vod's shape."""
+    """Return the VOD routes consumed by the web player."""
     return [
         Route(
             "/clip/{camera}/start/{start:float}/end/{end:float}/{playlist}.m3u8",
@@ -588,7 +608,7 @@ def vod_routes() -> list[Route]:
 
 
 def upstream_for(path: str) -> tuple[str, str] | None:
-    """Map a request path onto the upstream service nginx would use."""
+    """Map a live request path onto its loopback child service."""
     if path == "/ws":
         return MQTT_WS_URL, "/"
 
@@ -780,19 +800,13 @@ async def _startup() -> None:
 
 @asynccontextmanager
 async def _lifespan(app: Starlette) -> AsyncIterator[None]:
-    """Run the startup work through the lifespan API.
-
-    Starlette removed the ``on_startup`` and ``on_shutdown`` arguments, so the
-    native server, which has no nginx in front of it, has to pass a lifespan
-    context manager instead. Without this the app cannot be constructed at all
-    and the Windows install never answers on any port.
-    """
+    """Run native gateway startup work through Starlette's lifespan API."""
     await _startup()
     yield
 
 
 def create_native_web_app(api_app: Any, port: int) -> Starlette:
-    """Build the app that serves Frigate where nginx would.
+    """Build the native Windows gateway application.
 
     Args:
         api_app: the app from :func:`frigate.api.fastapi_app.create_fastapi_app`
@@ -810,11 +824,10 @@ def create_native_web_app(api_app: Any, port: int) -> Starlette:
         )
 
     routes = [
-        # the only API path nginx sends to go2rtc rather than to Frigate
+        # go2rtc handles WebRTC signalling; Frigate handles every other API path
         Route("/api/go2rtc/webrtc", proxy_http, methods=["POST", "OPTIONS"]),
-        # the API, mounted where nginx proxies it
         Mount("/api", app=api_app),
-        # recorded video, built here instead of by nginx-vod-module
+        # Recorded video is packaged into HLS by the native VOD implementation.
         Mount("/vod", app=Starlette(routes=vod_routes())),
         # media directories
         Mount("/clips", app=StaticFiles(directory=CLIPS_DIR, check_dir=False)),
@@ -890,29 +903,53 @@ async def _serve(servers: list, stop_event: Any | None = None) -> None:
 
 
 def run_native_web_server(
-    api_app: Any, internal_port: int, stop_event: Any | None = None
+    api_app: Any,
+    internal_port: int,
+    public_port: int,
+    stop_event: Any | None = None,
+    *,
+    tls_enabled: bool = False,
+    tls_cert_file: str | None = None,
+    tls_key_file: str | None = None,
 ) -> None:
-    """Serve the web interface, the API and the media without nginx.
+    """Serve the authenticated public gateway and trusted loopback listener.
 
     Two things have to be reachable at once:
 
-    - the web interface, on ``FRIGATE_WEB_HOST`` and the port from
-      ``FRIGATE_WEB_PORT``, which defaults to the internal port
+    - the authenticated web interface, on ``FRIGATE_WEB_HOST`` and the port
+      from ``FRIGATE_WEB_PORT``, which defaults to the configured public port;
+      TLS is applied to this listener when enabled
     - the internal port itself, on loopback, because Frigate's own consumers
-      (export, motion search, debug replay) fetch vod playlists from it with
-      ffmpeg and cannot authenticate
+      (export, motion search, debug replay) fetch VOD playlists from it with
+      FFmpeg and cannot authenticate
 
-    When the two ports are the same, which is the default, one listener does
-    both jobs and is treated as internal. Moving the web port to another port
-    turns authentication on for that listener and leaves the internal port on
-    loopback only.
+    The internal listener is loopback-only, plain HTTP, and bypasses
+    authentication for Frigate's own media jobs. The public listener is
+    authenticated by default.
     """
     import uvicorn
 
     host = get_web_host()
-    port = get_web_port(internal_port)
+    port = get_web_port(public_port)
 
-    log_startup_banner(host, port, internal_port)
+    if port == internal_port:
+        raise ValueError(
+            "The public and internal listeners must use different ports; "
+            "change FRIGATE_WEB_PORT or networking.listen.internal."
+        )
+
+    tls_options: dict[str, str] = {}
+    scheme = "http"
+
+    if tls_enabled:
+        if not tls_cert_file or not tls_key_file:
+            raise ValueError("TLS is enabled but certificate paths are not configured")
+
+        cert_file, key_file = ensure_tls_certificate(tls_cert_file, tls_key_file)
+        tls_options = {"ssl_certfile": cert_file, "ssl_keyfile": key_file}
+        scheme = "https"
+
+    log_startup_banner(host, port, internal_port, scheme)
 
     public_server = uvicorn.Server(
         uvicorn.Config(
@@ -920,43 +957,33 @@ def run_native_web_server(
             host=host,
             port=port,
             log_level="error",
+            **tls_options,
         )
     )
 
-    servers = [public_server]
-
-    if port != internal_port:
-        internal_server = uvicorn.Server(
-            uvicorn.Config(
-                create_native_web_app(api_app, internal_port),
-                host="127.0.0.1",
-                port=internal_port,
-                log_level="error",
-                # the public listener already ran the application startup
-                lifespan="off",
-            )
+    internal_server = uvicorn.Server(
+        uvicorn.Config(
+            create_native_web_app(api_app, internal_port),
+            host="127.0.0.1",
+            port=internal_port,
+            log_level="error",
+            # The public listener already ran application startup.
+            lifespan="off",
         )
-        # only one listener may install the process signal handlers
-        internal_server.install_signal_handlers = lambda: None  # type: ignore[method-assign]
-        servers.append(internal_server)
+    )
+    # Only one listener may install process signal handlers.
+    internal_server.install_signal_handlers = lambda: None  # type: ignore[method-assign]
 
-    asyncio.run(_serve(servers, stop_event))
+    asyncio.run(_serve([public_server, internal_server], stop_event))
 
 
-def log_startup_banner(host: str, port: int, internal_port: int) -> None:
+def log_startup_banner(
+    host: str, port: int, internal_port: int, scheme: str = "http"
+) -> None:
     """Explain how the web interface is exposed."""
-    logger.info("Serving the Frigate web interface on http://%s:%s", host, port)
+    logger.info("Serving the Frigate web interface on %s://%s:%s", scheme, host, port)
 
-    if port == internal_port:
-        logger.info(
-            "Port %s is Frigate's internal port, so requests to it are treated "
-            "as internal: anyone who can reach it has admin access without "
-            "logging in. Set FRIGATE_WEB_PORT to serve the interface with "
-            "authentication instead.",
-            port,
-        )
-
-    if host not in ("127.0.0.1", "localhost"):
+    if host not in ("127.0.0.1", "::1", "localhost"):
         logger.info(
             "Binding to %s makes Frigate reachable from other devices on your "
             "network. Set FRIGATE_WEB_HOST=127.0.0.1 to restrict it to this "

@@ -14,8 +14,7 @@
         "description": "При избор, Frigate ще стартира в безопасен режим за отстраняване на неизправности."
     },
     "environment_vars": {
-        "label": "Променливи",
-        "description": "Параметри за стартиране на Frigate в Home Assistant OS. Non-HAOS потребителите трябва да използват Docker конфигурация."
+        "label": "Променливи"
     },
     "logger": {
         "label": "Логове",

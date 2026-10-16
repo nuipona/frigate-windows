@@ -6,7 +6,6 @@
     "logs": {
       "frigate": "Frigate logid - Frigate",
       "go2rtc": "Go2RTC logid - Frigate",
-      "nginx": "Nginx logid - Frigate",
       "websocket": "Sõnumite logid - Frigate"
     },
     "enrichments": "Rikastus statistika - Frigate"

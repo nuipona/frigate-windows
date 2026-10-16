@@ -1,6 +1,7 @@
 """Utilities for stats."""
 
 import logging
+import ntpath
 import re
 import shutil
 import time
@@ -15,14 +16,10 @@ from frigate.config import FrigateConfig
 from frigate.const import CACHE_DIR, CLIPS_DIR, RECORD_DIR
 from frigate.data_processing.types import DataProcessorMetrics
 from frigate.object_detection.base import ObjectDetectProcess
-from frigate.stats.hardware import HardwareStats, get_hardware_temperatures
+from frigate.stats.hardware import HardwareStats
 from frigate.types import StatsTrackingTypes
-from frigate.util.platform import storage_stat_key
-from frigate.util.services import (
-    calculate_shm_requirements,
-    get_bandwidth_stats,
-    get_fs_type,
-)
+from frigate.util.platform import get_fs_type, storage_stat_key
+from frigate.util.services import calculate_shm_requirements
 from frigate.util.version import VERSION
 
 if TYPE_CHECKING:
@@ -110,21 +107,11 @@ def stats_init(
 def get_detector_stats(
     stats_tracking: StatsTrackingTypes,
 ) -> dict[str, dict[str, Any]]:
-    """Get stats for all detectors, including temperatures based on detector type."""
+    """Get process and inference-speed stats for all detectors."""
     detector_stats: dict[str, dict[str, Any]] = {}
-    # detector type -> device -> index into that type's temperatures
-    device_indices: dict[str, dict[str, int]] = {}
 
     for name, detector in stats_tracking["detectors"].items():
         pid = detector.detect_process.pid if detector.detect_process else None
-        detector_type = detector.detector_config.type
-
-        # temperatures are per physical unit, so a repeated device
-        # ("hailo:PCIe#2", see runner_names) shares its unit's reading
-        device = name.partition("#")[0]
-        type_devices = device_indices.setdefault(detector_type, {})
-        current_index = type_devices.setdefault(device, len(type_devices))
-
         detector_stat = {
             "inference_speed": round(detector.avg_inference_speed.value * 1000, 2),  # type: ignore[attr-defined]
             # issue https://github.com/python/typeshed/issues/8799
@@ -134,11 +121,6 @@ def get_detector_stats(
             # from mypy 0.981 onwards
             "pid": pid,
         }
-
-        temps = get_hardware_temperatures(detector_type)
-
-        if current_index < len(temps) and temps[current_index] is not None:
-            detector_stat["temperature"] = round(temps[current_index], 1)
 
         detector_stats[name] = detector_stat
 
@@ -238,9 +220,18 @@ def skipped_percent(skipped_fps: float, camera_fps: float, enabled: bool) -> flo
 
 
 def get_go2rtc_pid(cpu_usages: dict[str, dict[str, Any]]) -> int | None:
-    """Find the pid of the running go2rtc process in the cpu usages."""
+    """Find the PID of the native ``go2rtc.exe`` process."""
     for pid, usage in cpu_usages.items():
-        if usage.get("cmdline", "").split(" ")[0].endswith("/go2rtc"):
+        process_name = str(usage.get("name", ""))
+        if process_name.casefold() == "go2rtc.exe":
+            return int(pid)
+
+        # Keep this tolerant of callers that collected stats without ``name``.
+        command = str(usage.get("cmdline", "")).strip()
+        if not command:
+            continue
+        executable = command.split(maxsplit=1)[0].strip('"')
+        if ntpath.basename(executable).casefold() == "go2rtc.exe":
             return int(pid)
 
     return None
@@ -331,12 +322,6 @@ def stats_snapshot(
 
     hardware_stats.update_stats(stats)
 
-    if config.telemetry.stats.network_bandwidth:
-        bandwidth_stats = get_bandwidth_stats(config)
-
-        if bandwidth_stats:
-            stats["bandwidth_usages"] = bandwidth_stats
-
     storage_maintainer = stats_tracking.get("storage_maintainer")
 
     stats["service"] = {
@@ -376,7 +361,7 @@ def stats_snapshot(
 
     cpu_usages = stats.get("cpu_usages", {})
 
-    # go2rtc is supervised by s6, so its pid changes when s6 restarts it
+    # The native launcher may restart go2rtc with a new process id.
     go2rtc_pid = get_go2rtc_pid(cpu_usages)
 
     if go2rtc_pid is not None:

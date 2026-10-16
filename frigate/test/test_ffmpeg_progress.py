@@ -94,7 +94,6 @@ class TestRunFfmpegWithProgress(unittest.TestCase):
         proc.stderr.read = MagicMock(return_value="")
 
         with (
-            patch("frigate.util.ffmpeg.IS_WINDOWS", True),
             patch("frigate.util.ffmpeg.get_process_priority_class", return_value=0x40),
             patch("subprocess.Popen", return_value=proc) as popen,
         ):

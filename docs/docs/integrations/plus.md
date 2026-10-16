@@ -27,11 +27,18 @@ Once logged in, you can generate an API key for Frigate in Settings.
 
 ### Set your API key
 
-In Frigate, you can use an environment variable or a docker secret named `PLUS_API_KEY` to enable the `Frigate+` buttons on the Explore page. Home Assistant App users can set it under Settings > Apps > Frigate > Configuration > Options (be sure to toggle the "Show unused optional configuration options" switch).
+Set `PLUS_API_KEY` in the Windows process environment to enable Frigate+ actions:
+
+```powershell
+$env:PLUS_API_KEY = '<your API key>'
+.\scripts\start_frigate.ps1
+```
+
+For a service, set it in the elevated PowerShell session before running `install_frigate_service.ps1 -Action Install` or `-Action Configure`. The installer copies it into the service environment.
 
 :::warning
 
-You cannot use the `environment_vars` section of your Frigate configuration file to set this environment variable. It must be defined as an environment variable in the docker config or Home Assistant App config.
+Do not put this key in `config.yml`, source control, or a command transcript. The `environment_vars` section is applied too late for this startup credential.
 
 :::
 
@@ -73,7 +80,7 @@ Model IDs are not secret values and can be shared freely. Access to your model i
 
 :::
 
-Models are downloaded into the `/config/model_cache` folder and only downloaded if needed.
+Models are downloaded on demand into `config\model_cache` beneath the configured Windows data root.
 
 If needed, you can override the labelmap for Frigate+ models. This is not recommended as renaming labels will break the Submit to Frigate+ feature if the labels are not available in Frigate+.
 

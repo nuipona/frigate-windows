@@ -3,7 +3,6 @@
 import datetime
 import logging
 import subprocess as sp
-import threading
 from abc import ABC, abstractmethod
 from multiprocessing import shared_memory as _mpshm
 from string import printable
@@ -12,13 +11,6 @@ from typing import Any, AnyStr
 import cv2
 import numpy as np
 from unidecode import unidecode
-
-try:  # POSIX only: Windows has no resource tracker for shared memory
-    from multiprocessing import resource_tracker as _mprt
-except ImportError:  # pragma: no cover - Windows
-    _mprt = None  # type: ignore[assignment]
-
-from frigate.util.platform import IS_WINDOWS
 
 logger = logging.getLogger(__name__)
 
@@ -1023,9 +1015,13 @@ class FrameManager(ABC):
 
 
 class UntrackedSharedMemory(_mpshm.SharedMemory):
-    # https://github.com/python/cpython/issues/82300#issuecomment-2169035092
+    """Windows named shared memory with the historical ``track`` argument.
 
-    __lock = threading.Lock()
+    Windows releases a named mapping when every process closes its handle and
+    does not use Python's POSIX resource tracker. The argument remains part of
+    this local API because frame-manager call sites use it to describe segment
+    ownership.
+    """
 
     def __init__(
         self,
@@ -1035,37 +1031,8 @@ class UntrackedSharedMemory(_mpshm.SharedMemory):
         *,
         track: bool = False,
     ) -> None:
-        self._track = track
-
-        # if tracking, normal init will suffice. So does an untracked segment
-        # on a platform without a resource tracker, since nothing registers it
-        # in the first place.
-        if track or _mprt is None:
-            return super().__init__(name=name, create=create, size=size)
-
-        # lock so that other threads don't attempt to use the
-        # register function during this time
-        with self.__lock:
-            # temporarily disable registration during initialization
-            orig_register = _mprt.register
-            _mprt.register = self.__tmp_register
-
-            # initialize; ensure original register function is
-            # re-instated
-            try:
-                super().__init__(name=name, create=create, size=size)
-            finally:
-                _mprt.register = orig_register
-
-    @staticmethod
-    def __tmp_register(*args, **kwargs) -> None:
-        return
-
-    def unlink(self) -> None:
-        if _mpshm._USE_POSIX and self._name:
-            _mpshm._posixshmem.shm_unlink(self._name)
-            if self._track and _mprt is not None:
-                _mprt.unregister(self._name, "shared_memory")
+        del track
+        super().__init__(name=name, create=create, size=size)
 
 
 class SharedMemoryFrameManager(FrameManager):
@@ -1076,20 +1043,11 @@ class SharedMemoryFrameManager(FrameManager):
     def _segment_holds(segment: Any, required: int) -> bool:
         """Whether an open segment can back a frame of this many bytes.
 
-        The size has to be exact on POSIX, where it is the size the segment
-        was created with, because that is what tells a stale reference from a
-        same-name recreate apart.
-
-        Windows has no fixed size to compare with: opening a segment another
-        process created reports the size of the mapped region, which is the
-        requested size rounded up to a page. An exact comparison there
-        refuses every frame that is not already page aligned, so only a
-        segment that is too small is refused.
+        Windows reports the mapped region rounded up to an allocation page, so
+        an exact size comparison rejects valid frames. Only a segment that is
+        too small is unusable.
         """
-        if IS_WINDOWS:
-            return segment.size >= required
-
-        return segment.size == required
+        return segment.size >= required
 
     def create(self, name: str, size) -> AnyStr:
         try:

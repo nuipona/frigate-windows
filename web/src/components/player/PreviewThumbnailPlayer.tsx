@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { mediaPathToUrl } from "@/utils/mediaPath";
 import { useApiHost } from "@/api";
 import { isCurrentOrPreviousHour } from "@/utils/dateUtil";
 import {
@@ -140,7 +141,7 @@ export default function PreviewThumbnailPlayer({
   const [playback, setPlayback] = useState(false);
   const [tooltipHovering, setTooltipHovering] = useState(false);
 
-  const thumbnailUrl = `${apiHost}${review.thumb_path.replace("/media/frigate/", "")}`;
+  const thumbnailUrl = `${apiHost}${mediaPathToUrl(review.thumb_path)}`;
 
   // not memoized: depends on the wall clock, and a stale value blanks the card
   // for a whole hour after a rollover

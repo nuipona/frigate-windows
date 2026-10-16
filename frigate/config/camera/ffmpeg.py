@@ -11,7 +11,6 @@ from frigate.ffmpeg_presets import (
 )
 from frigate.util.config import resolve_ffmpeg_path
 from frigate.util.env import EnvString
-from frigate.util.platform import IS_WINDOWS
 
 from ..base import FrigateBaseModel
 
@@ -182,10 +181,10 @@ class CameraInput(FrigateBaseModel):
 
     @field_validator("path")
     @classmethod
-    def validate_path_for_windows(cls, v):
+    def validate_path(cls, v):
         source = v.strip().lower()
 
-        if IS_WINDOWS and source.startswith(("/dev/", "unix:", "v4l2:")):
+        if source.startswith(("/dev/", "unix:", "v4l2:")):
             raise ValueError(
                 "Linux device paths, Unix sockets, and V4L2 inputs cannot be used "
                 "on native Windows. Use a Windows camera source or network stream."

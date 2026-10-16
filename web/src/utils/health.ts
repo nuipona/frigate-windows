@@ -53,18 +53,7 @@ export function runnerNames(models: DetectionModelConfig[]): string[] {
 }
 
 /** detectors the probe reports; anything else cannot be checked for presence */
-export const PROBED_DETECTORS = new Set([
-  "cpu",
-  "edgetpu",
-  "hailo",
-  "memryx",
-  "openvino",
-  "onnx",
-  "tensorrt",
-  "rknn",
-  "axengine",
-  "synaptics",
-]);
+export const PROBED_DETECTORS = new Set(["cpu", "openvino", "onnx"]);
 
 /** detectors that fall back to the CPU when no accelerator is present */
 const CPU_FALLBACK_DETECTORS = new Set(["onnx", "openvino"]);
@@ -74,8 +63,8 @@ export type DevicePresence = "present" | "unverified" | "absent";
 /**
  * Whether a configured device string was found by the hardware probe.
  * "unverified" means the detector's hardware is present but the probe does
- * not enumerate this particular device (openvino:AUTO, rknn:0), so it must
- * not be reported as missing.
+ * not enumerate this particular device (for example, openvino:AUTO), so it
+ * must not be reported as missing.
  */
 export function devicePresence(
   device: string,
@@ -255,16 +244,7 @@ export function detectionRows({
 // ------------------------------------------------------------------ hwaccel
 
 export type HwaccelFamilyKey =
-  | "nvidia"
-  | "vaapi"
-  | "intel-qsv"
-  | "rkmpp"
-  | "jetson"
-  | "rpi"
-  | "apple-silicon"
-  | "windows-nvenc"
-  | "windows-qsv"
-  | "windows-d3d11va";
+  "windows-nvenc" | "windows-qsv" | "windows-d3d11va";
 
 export type HwaccelClass =
   | { kind: "none" }
@@ -278,13 +258,8 @@ const PRESET_FAMILIES: [string, HwaccelFamilyKey][] = [
   ["preset-windows-qsv", "windows-qsv"],
   ["preset-windows-d3d11va", "windows-d3d11va"],
   ["preset-windows-dxva2", "windows-d3d11va"],
-  ["preset-nvidia", "nvidia"],
-  ["preset-vaapi", "vaapi"],
-  ["preset-intel-qsv", "intel-qsv"],
-  ["preset-rk", "rkmpp"],
-  ["preset-jetson", "jetson"],
-  ["preset-rpi", "rpi"],
-  ["preset-apple-silicon", "apple-silicon"],
+  ["preset-windows-amf", "windows-d3d11va"],
+  ["preset-windows-vulkan", "windows-d3d11va"],
 ];
 
 export function hwaccelFamily(value: string | string[]): HwaccelClass {
@@ -303,18 +278,10 @@ export function hwaccelFamily(value: string | string[]): HwaccelClass {
 }
 
 const FAMILY_VENDORS: Record<HwaccelFamilyKey, GpuVendor[]> = {
-  nvidia: ["nvidia"],
-  jetson: ["nvidia"],
-  "intel-qsv": ["intel"],
-  vaapi: ["intel", "amd"],
   "windows-nvenc": ["nvidia"],
   "windows-qsv": ["intel"],
-  // D3D11VA decodes on any Windows GPU that has a driver
+  // D3D11VA decodes on any Windows GPU that has a driver.
   "windows-d3d11va": ["intel", "amd", "nvidia"],
-  rkmpp: ["rockchip"],
-  rpi: ["rpi"],
-  // lighter reports no decoder usage
-  "apple-silicon": [],
 };
 
 function decoderUsage(
@@ -473,11 +440,9 @@ export function hwaccelRows({
 
 const ANY_ACCELERATOR = [
   "onnx:nvidia",
-  "onnx:amd",
+  "onnx:directml",
   "openvino:GPU",
   "openvino:NPU",
-  "rknn",
-  "tensorrt",
 ];
 
 /**
@@ -499,10 +464,10 @@ export function acceleratorKeysFor(
     return ANY_ACCELERATOR;
   }
 
-  // ONNX Runtime puts a plain GPU request on whichever GPU it has; only an
-  // indexed GPU.n names OpenVINO specifically
+  // ONNX Runtime puts a plain GPU request on an available Windows provider;
+  // only an indexed GPU.n names OpenVINO specifically.
   if (upper === "GPU") {
-    return ["openvino:GPU", "onnx:nvidia", "onnx:amd"];
+    return ["openvino:GPU", "onnx:nvidia", "onnx:directml"];
   }
 
   if (/^GPU\.\d+$/.test(upper)) {
@@ -513,12 +478,12 @@ export function acceleratorKeysFor(
     return ["openvino:NPU"];
   }
 
-  if (upper.startsWith("CUDA") || upper.startsWith("TENSORRT")) {
+  if (upper.startsWith("CUDA")) {
     return ["onnx:nvidia"];
   }
 
-  if (upper.startsWith("ROCM") || upper.startsWith("MIGRAPHX")) {
-    return ["onnx:amd"];
+  if (upper.startsWith("DIRECTML") || /^DML(?::|$)/.test(upper)) {
+    return ["onnx:directml"];
   }
 
   return undefined;

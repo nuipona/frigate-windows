@@ -288,14 +288,14 @@ class TestVariableSources(unittest.TestCase):
 
     def test_container_env_beats_config_env_vars(self):
         """A container env var wins over the same key in environment_vars."""
-        with patch.dict(env._CONTAINER_ENV, {"FRIGATE_MQTT_HOST": "from_env"}):
+        with patch.dict(env._PROCESS_ENV, {"FRIGATE_MQTT_HOST": "from_env"}):
             env.apply_config_env_vars({"FRIGATE_MQTT_HOST": "from_config"})
             self.assertEqual(env.FRIGATE_ENV_VARS["FRIGATE_MQTT_HOST"], "from_env")
 
     def test_credentials_dir_beats_container_env(self):
         """A credentials directory file wins over a container env var."""
         with (
-            patch.dict(env._CONTAINER_ENV, {"FRIGATE_MQTT_HOST": "from_env"}),
+            patch.dict(env._PROCESS_ENV, {"FRIGATE_MQTT_HOST": "from_env"}),
             patch.dict(env._CREDENTIALS_DIR, {"FRIGATE_MQTT_HOST": "from_creds"}),
         ):
             env._rebuild()
@@ -310,7 +310,7 @@ class TestVariableSources(unittest.TestCase):
         """environment_vars writes os.environ but must not gain env precedence."""
         env.apply_config_env_vars({"FRIGATE_CAM_PASS": "from_config"})
         self.assertEqual(os.environ["FRIGATE_CAM_PASS"], "from_config")
-        self.assertNotIn("FRIGATE_CAM_PASS", env._CONTAINER_ENV)
+        self.assertNotIn("FRIGATE_CAM_PASS", env._PROCESS_ENV)
 
     def test_non_frigate_config_env_vars_only_set_os_environ(self):
         """Unprefixed environment_vars keys reach os.environ but not substitution."""
@@ -320,7 +320,7 @@ class TestVariableSources(unittest.TestCase):
 
     def test_collision_warns_once_naming_the_winner(self):
         """A key from two sources logs one warning naming the source that won."""
-        with patch.dict(env._CONTAINER_ENV, {"FRIGATE_MQTT_HOST": "from_env"}):
+        with patch.dict(env._PROCESS_ENV, {"FRIGATE_MQTT_HOST": "from_env"}):
             with self.assertLogs("frigate.util.env", level="WARNING") as logs:
                 env.apply_config_env_vars({"FRIGATE_MQTT_HOST": "from_config"})
             self.assertEqual(len(logs.output), 1)
@@ -410,7 +410,7 @@ class TestSecretsFile(unittest.TestCase):
         """The container environment outranks secrets.yaml."""
         self._write("FRIGATE_CAM_PASS: from_secrets\n")
         env._SECRETS_FILE.update(env._load_secrets_file())
-        with patch.dict(env._CONTAINER_ENV, {"FRIGATE_CAM_PASS": "from_env"}):
+        with patch.dict(env._PROCESS_ENV, {"FRIGATE_CAM_PASS": "from_env"}):
             env._rebuild()
             self.assertEqual(env.FRIGATE_ENV_VARS["FRIGATE_CAM_PASS"], "from_env")
 

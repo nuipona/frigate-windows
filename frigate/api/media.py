@@ -70,9 +70,8 @@ from frigate.util.time import get_normalized_tz_name
 logger = logging.getLogger(__name__)
 
 
-# must match the patched MAX_CLIPS in docker/main/build_nginx.sh; a
-# normal hour needs ~360, one clip per recording file
-NGINX_VOD_MAX_CLIPS = 1080
+# Safety limit for VOD mappings; a normal hour needs about 360 clips.
+VOD_MAX_CLIPS = 1080
 
 # tail of ffmpeg's stderr kept for the clip download failure log
 CLIP_STDERR_LOG_BYTES = 8192
@@ -778,9 +777,9 @@ async def _vod_response(
             status_code=404,
         )
 
-    if len(clips) > NGINX_VOD_MAX_CLIPS:
+    if len(clips) > VOD_MAX_CLIPS:
         logger.warning(
-            "VOD: %s needs %d clips between %s and %s, exceeding nginx's "
+            "VOD: %s needs %d clips between %s and %s, exceeding the native VOD "
             "limit of %d; playback of this range will fail. This usually "
             "means the camera produced abnormally short recording segments "
             "(check the stream's timestamps)",
@@ -788,7 +787,7 @@ async def _vod_response(
             len(clips),
             start_ts,
             end_ts,
-            NGINX_VOD_MAX_CLIPS,
+            VOD_MAX_CLIPS,
         )
 
     # segmentation comes from the vod_* nginx directives plus per-clip

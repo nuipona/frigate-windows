@@ -21,10 +21,7 @@ class TestWindowsSqliteVecLoading(unittest.TestCase):
 
         sqlite_vec.loadable_path = loadable_path
 
-        with (
-            patch("frigate.db.sqlitevecq.IS_WINDOWS", True),
-            patch.dict(sys.modules, {"sqlite_vec": sqlite_vec}),
-        ):
+        with patch.dict(sys.modules, {"sqlite_vec": sqlite_vec}):
             database._load_vec_extension(connection)
 
         connection.load_extension.assert_called_once_with(

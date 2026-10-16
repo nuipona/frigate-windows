@@ -11,6 +11,7 @@ from multiprocessing.synchronize import Event as MpEvent
 from typing import Any
 
 import numpy as np
+from ai_edge_litert.interpreter import Interpreter
 
 from frigate.camera import CameraMetrics
 from frigate.comms.detections_updater import DetectionPublisher, DetectionTypeEnum
@@ -47,14 +48,8 @@ from frigate.util.ffmpeg import (
     start_or_restart_ffmpeg,
     stop_ffmpeg,
 )
-from frigate.util.platform import IS_WINDOWS
+from frigate.util.platform import get_audio_labelmap_path, get_audio_model_path
 from frigate.util.process import FrigateProcess
-
-try:
-    from tflite_runtime.interpreter import Interpreter
-except ModuleNotFoundError:
-    from ai_edge_litert.interpreter import Interpreter
-
 
 logger = logging.getLogger(__name__)
 
@@ -68,18 +63,13 @@ AUDIO_PROCESS_SHUTDOWN_TIMEOUT = AUDIO_THREAD_SHUTDOWN_TIMEOUT + 2.0
 
 
 def join_audio_process(process: Process) -> None:
-    """Bound Windows audio-worker shutdown if a native thread is stuck."""
-    if IS_WINDOWS:
-        process.join(timeout=AUDIO_PROCESS_SHUTDOWN_TIMEOUT)
-        if process.is_alive():
-            logger.warning(
-                "Audio process did not exit within %.1f seconds; continuing shutdown",
-                AUDIO_PROCESS_SHUTDOWN_TIMEOUT,
-            )
-    else:
-        # Preserve the existing Linux behavior: the worker is expected to
-        # finish its per-thread cleanup before the app proceeds.
-        process.join()
+    """Bound audio-worker shutdown if a native pipe thread is stuck."""
+    process.join(timeout=AUDIO_PROCESS_SHUTDOWN_TIMEOUT)
+    if process.is_alive():
+        logger.warning(
+            "Audio process did not exit within %.1f seconds; continuing shutdown",
+            AUDIO_PROCESS_SHUTDOWN_TIMEOUT,
+        )
 
 
 def get_ffmpeg_command(ffmpeg: CameraFfmpegConfig) -> list[str]:
@@ -153,10 +143,9 @@ class AudioProcessor(FrigateProcess):
             self.stop_event,  # type: ignore[arg-type]
             self.genai_manager,
         )
-        if IS_WINDOWS:
-            # A stuck native pipe read must not pin the audio worker process
-            # after its stop event.
-            thread.daemon = True
+        # A stuck native pipe read must not pin the audio worker process after
+        # its stop event.
+        thread.daemon = True
 
         self.audio_threads[name] = thread
         thread.start()
@@ -175,29 +164,17 @@ class AudioProcessor(FrigateProcess):
             self.logger.info(f"Audio maintainer stopped for {camera}")
 
     def _stop_audio_threads(self) -> None:
-        """Stop all maintainers, sharing the shutdown wait on Windows."""
+        """Stop all maintainers within one shared shutdown deadline."""
         threads = list(self.audio_threads.values())
-
-        deadline: float | None = None
-        if IS_WINDOWS:
-            deadline = time.monotonic() + AUDIO_THREAD_SHUTDOWN_TIMEOUT
+        deadline = time.monotonic() + AUDIO_THREAD_SHUTDOWN_TIMEOUT
 
         for thread in threads:
             thread.stop()
 
         for thread in threads:
-            if IS_WINDOWS:
-                if thread.is_alive():
-                    self.logger.info(f"Waiting for thread {thread.name:s} to exit")
-                assert deadline is not None
-                remaining = max(0.0, deadline - time.monotonic())
-                thread.join(remaining)
-            else:
-                # Retain the historical per-thread waits on Linux.
-                thread.join(1)
-                if thread.is_alive():
-                    self.logger.info(f"Waiting for thread {thread.name:s} to exit")
-                    thread.join(10)
+            if thread.is_alive():
+                self.logger.info(f"Waiting for thread {thread.name:s} to exit")
+            thread.join(max(0.0, deadline - time.monotonic()))
 
         for thread in threads:
             if thread.is_alive():
@@ -228,9 +205,9 @@ class AudioProcessor(FrigateProcess):
             else:
                 # imported here rather than at module scope: frigate.genai pulls in
                 # numpy, the provider SDKs, frigate.models, and the prompt builders,
-                # and this process runs at PROCESS_PRIORITY_HIGH. built after the
-                # fork because SDK clients hold sockets and TLS state that must not
-                # cross it; clients themselves stay lazy behind the role property.
+                # and this process runs at PROCESS_PRIORITY_HIGH. Build it inside
+                # the spawned worker so SDK sockets and TLS state are created in
+                # their owning process; clients stay lazy behind the role property.
                 from frigate.genai.manager import GenAIClientManager
 
                 self.genai_manager = GenAIClientManager(self.config)
@@ -305,9 +282,7 @@ class AudioEventMaintainer(threading.Thread):
         self.chunk_size = int(round(AUDIO_DURATION * AUDIO_SAMPLE_RATE * 2))
         self.logger = logging.getLogger(f"audio.{self.camera_config.name}")
         self.ffmpeg_cmd = get_ffmpeg_command(self.camera_config.ffmpeg)
-        self.logpipe = LogPipe(
-            f"ffmpeg.{self.camera_config.name}.audio", daemon=IS_WINDOWS
-        )
+        self.logpipe = LogPipe(f"ffmpeg.{self.camera_config.name}.audio", daemon=True)
         self.audio_listener: subprocess.Popen[Any] | None = None
         self.audio_transcription_model_runner = audio_transcription_model_runner
         self.genai_manager = genai_manager
@@ -483,12 +458,9 @@ class AudioEventMaintainer(threading.Thread):
         self.camera_stop_event.set()
 
         if self.audio_listener is not None:
-            if IS_WINDOWS:
-                # This stream carries raw PCM, not a recording. Avoid spending
-                # one quit-poll second per camera before unblocking its reader.
-                request_ffmpeg_stop(self.audio_listener, self.logger, wait_timeout=0.0)
-            else:
-                request_ffmpeg_stop(self.audio_listener, self.logger)
+            # This stream carries raw PCM, not a recording. Avoid spending one
+            # quit-poll second per camera before unblocking its reader.
+            request_ffmpeg_stop(self.audio_listener, self.logger, wait_timeout=0.0)
 
     def run(self) -> None:
         if (
@@ -570,13 +542,13 @@ class AudioTfl:
     ) -> None:
         self.stop_event = stop_event
         self.num_threads = num_threads
-        self._default_labels = load_labels("/audio-labelmap.txt", prefill=521)
+        self._default_labels = load_labels(get_audio_labelmap_path(), prefill=521)
         self.labels: dict[int, str] = {}
         self.update_labelmap(labelmap or {})
         # Suppress TFLite delegate creation messages that bypass Python logging
         with suppress_stderr_during("tflite_interpreter_init"):
             self.interpreter = Interpreter(
-                model_path="/cpu_audio_model.tflite",
+                model_path=get_audio_model_path(),
                 num_threads=self.num_threads,
             )
             self.interpreter.allocate_tensors()

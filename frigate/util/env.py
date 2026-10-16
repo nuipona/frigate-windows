@@ -4,7 +4,6 @@ import logging
 import os
 import re
 from collections.abc import Mapping
-from pathlib import Path
 from typing import Annotated, Any
 
 from pydantic import AfterValidator, ValidationInfo
@@ -23,16 +22,14 @@ class UnknownVariableError(ValueError):
 _CONFIG_ENV_VARS: dict[str, str] = {}
 _SECRETS_FILE: dict[str, str] = {}
 # Snapshot: apply_config_env_vars() writes os.environ after import.
-_CONTAINER_ENV: dict[str, str] = {
+_PROCESS_ENV: dict[str, str] = {
     k: v for k, v in os.environ.items() if k.startswith("FRIGATE_")
 }
-_CREDENTIALS_DIR: dict[str, str] = {}
 
 _SOURCES: tuple[tuple[str, dict[str, str]], ...] = (
     ("environment_vars config block", _CONFIG_ENV_VARS),
     ("secrets.yaml", _SECRETS_FILE),
-    ("container environment", _CONTAINER_ENV),
-    ("credentials directory", _CREDENTIALS_DIR),
+    ("process environment", _PROCESS_ENV),
 )
 
 FRIGATE_ENV_VARS: dict[str, str] = {}
@@ -69,26 +66,6 @@ def _rebuild(warn: bool = True) -> None:
     # In place: tests hold a reference to this dict.
     FRIGATE_ENV_VARS.clear()
     FRIGATE_ENV_VARS.update(merged)
-
-
-def _load_credentials_dir() -> dict[str, str]:
-    """Read FRIGATE_* files from the Docker or systemd credentials directory."""
-    directory = os.environ.get("CREDENTIALS_DIRECTORY", "/run/secrets")
-    values: dict[str, str] = {}
-
-    if not (os.path.isdir(directory) and os.access(directory, os.R_OK)):
-        return values
-
-    for name in os.listdir(directory):
-        if not name.startswith("FRIGATE_"):
-            continue
-
-        try:
-            values[name] = Path(os.path.join(directory, name)).read_text().strip()
-        except (OSError, UnicodeDecodeError):
-            logger.warning("Unable to read %s in %s, skipping", name, directory)
-
-    return values
 
 
 def _secrets_file_path() -> str | None:
@@ -150,9 +127,6 @@ def _load_secrets_file() -> dict[str, str]:
 
 def reload_sources(warn: bool = True) -> None:
     """Re-read the file backed sources and rebuild the namespace."""
-    _CREDENTIALS_DIR.clear()
-    _CREDENTIALS_DIR.update(_load_credentials_dir())
-
     try:
         secrets = _load_secrets_file()
     except ValueError as err:
@@ -165,8 +139,8 @@ def reload_sources(warn: bool = True) -> None:
     _rebuild(warn)
 
 
-# Security overrides that must come from the container environment, which is
-# controlled by the operator, rather than from the config, which admins can edit
+# Security overrides must come from the process environment controlled by the
+# Windows operator, rather than config fields that application admins can edit.
 _PROTECTED_ENV_VARS = frozenset({"GO2RTC_ALLOW_ARBITRARY_EXEC"})
 
 
@@ -179,7 +153,7 @@ def apply_config_env_vars(values: Mapping[str, object]) -> None:
     for key, value in values.items():
         if key.upper() in _PROTECTED_ENV_VARS:
             logger.warning(
-                "Ignoring %s in environment_vars, it must be set in the container environment",
+                "Ignoring %s in environment_vars; set it in the Windows process environment",
                 key,
             )
             continue

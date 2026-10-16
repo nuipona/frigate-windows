@@ -12,7 +12,7 @@ npm install
 npm run start
 ```
 
-`start` and `build` first run `build:config` (generates the Docker Compose generator's TypeScript from `src/components/DockerComposeGenerator/config/config.yaml`) and `regen-docs` (regenerates the HTTP API reference from `static/frigate-api.yaml`), so both are needed before the site compiles.
+`start` and `build` first run `regen-docs`, which regenerates the HTTP API reference from `static/frigate-api.yaml` before Docusaurus compiles the site.
 
 Other useful scripts:
 

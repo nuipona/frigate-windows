@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import logging
@@ -45,8 +46,7 @@ from frigate.util.live_streams import (
     transcode_stream_name,
     transcode_streams,
 )
-from frigate.util.platform import IS_WINDOWS, get_default_labelmap_path
-from frigate.util.runtime_deps import sha256_of
+from frigate.util.platform import get_default_labelmap_path
 from frigate.util.services import auto_detect_hwaccel
 
 from .auth import AuthConfig
@@ -100,27 +100,14 @@ def _default_models() -> list[ModelConfig]:
     return [ModelConfig.model_validate(model) for model in DEFAULT_MODELS]
 
 
-# Used by the OpenVINO branch below and as the Linux new-config model. Native
-# Windows starts with a CPU TFLite model because these assets live in the image.
-DEFAULT_MODEL = {
-    "width": 300,
-    "height": 300,
-    "input_tensor": "nhwc",
-    "input_pixel_format": "bgr",
-    "path": "/openvino-model/ssdlite_mobilenet_v2.xml",
-    "labelmap_path": "/openvino-model/coco_91cl_bkgr.txt",
-}
-WINDOWS_DEFAULT_MODEL_PATH = os.path.join(MODEL_CACHE_DIR, "cpu_model.tflite")
-if IS_WINDOWS:
-    windows_default_model = {
-        "path": WINDOWS_DEFAULT_MODEL_PATH,
-    }
-    windows_labelmap_path = get_default_labelmap_path()
-    if windows_labelmap_path:
-        windows_default_model["labelmap_path"] = windows_labelmap_path
-    NEW_CONFIG_MODELS = [{"devices": ["cpu"], **windows_default_model}]
-else:
-    NEW_CONFIG_MODELS = [{"devices": ["openvino:CPU"], **DEFAULT_MODEL}]
+# The default TFLite model is downloaded into the writable Windows model cache
+# on first use.
+DEFAULT_MODEL_PATH = os.path.join(MODEL_CACHE_DIR, "cpu_model.tflite")
+default_model = {"path": DEFAULT_MODEL_PATH}
+default_labelmap_path = get_default_labelmap_path()
+if default_labelmap_path:
+    default_model["labelmap_path"] = default_labelmap_path
+NEW_CONFIG_MODELS = [{"devices": ["cpu"], **default_model}]
 DEFAULT_DETECT_DIMENSIONS = {"width": 1280, "height": 720}
 
 
@@ -141,15 +128,29 @@ cameras: {{}}  # No cameras defined, UI wizard should be used
 version: {CURRENT_CONFIG_VERSION}
 """
 
-WINDOWS_DEFAULT_MODEL_URL = (
+DEFAULT_MODEL_URL = (
     "https://github.com/google-coral/test_data/raw/release-frogfish/"
     "ssdlite_mobiledet_coco_qat_postprocess.tflite"
 )
+DEFAULT_MODEL_SHA256 = (
+    "90bb33a634e041914cc1819aa5df99818e6c396c4d2db952c0fd7a9cffc4724f"
+)
 
 
-def _ensure_windows_default_cpu_model(model_path: str) -> None:
+def _file_sha256(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as model_file:
+        for chunk in iter(lambda: model_file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _ensure_default_cpu_model(model_path: str) -> None:
     """Download the default CPU model on first use of the native Windows config."""
-    if not IS_WINDOWS or os.path.isfile(model_path):
+    # A file already present at the documented model path may be an
+    # administrator-supplied replacement. Verify downloads made here, but do
+    # not overwrite an existing model.
+    if os.path.isfile(model_path):
         return
 
     model_dir = os.path.dirname(model_path)
@@ -160,11 +161,15 @@ def _ensure_windows_default_cpu_model(model_path: str) -> None:
 
     try:
         with os.fdopen(temp_fd, "wb") as destination:
-            with urlopen(WINDOWS_DEFAULT_MODEL_URL, timeout=60) as response:
+            with urlopen(DEFAULT_MODEL_URL, timeout=60) as response:
                 shutil.copyfileobj(response, destination)
 
-        if os.path.getsize(temp_path) == 0:
-            raise OSError("Downloaded default CPU model is empty")
+        digest = _file_sha256(temp_path)
+        if digest != DEFAULT_MODEL_SHA256:
+            raise OSError(
+                "Downloaded default CPU model failed sha256 verification: "
+                f"got {digest}, expected {DEFAULT_MODEL_SHA256}"
+            )
 
         os.replace(temp_path, model_path)
         logger.info("Downloaded the default Windows CPU detection model")
@@ -601,7 +606,7 @@ class FrigateConfig(FrigateBaseModel):
     environment_vars: EnvVars = Field(
         default_factory=dict,
         title="Environment variables",
-        description="Key/value pairs of environment variables to set for the Frigate process in Home Assistant OS. Non-HAOS users must use Docker environment variable configuration instead.",
+        description="Key/value pairs exposed to Frigate child processes. Security-sensitive startup overrides must be set in the Windows process or service environment instead.",
     )
     logger: LoggerConfig = Field(
         default_factory=LoggerConfig,
@@ -648,7 +653,7 @@ class FrigateConfig(FrigateBaseModel):
     telemetry: TelemetryConfig = Field(
         default_factory=TelemetryConfig,
         title="Telemetry",
-        description="System telemetry and stats options including GPU and network bandwidth monitoring.",
+        description="System statistics and optional NVIDIA NVML telemetry settings.",
     )
     tls: TlsConfig = Field(
         default_factory=TlsConfig,
@@ -881,24 +886,17 @@ class FrigateConfig(FrigateBaseModel):
         model_config = model.model_dump(exclude_unset=True, warnings="none")
 
         if "path" not in model_config:
-            if detector == "cpu":
-                model_config["path"] = (
-                    WINDOWS_DEFAULT_MODEL_PATH if IS_WINDOWS else "/cpu_model.tflite"
+            if detector in ("cpu", "openvino"):
+                model_config["path"] = DEFAULT_MODEL_PATH
+            else:
+                raise ValueError(
+                    f"model.path must be set when using the {detector} detector"
                 )
-            elif detector.endswith("_tfl"):
-                model_config["path"] = "/cpu_model.tflite"
-            elif detector == "edgetpu":
-                model_config["path"] = "/edgetpu_model.tflite"
-            elif detector == "openvino":
-                for default_key, default_value in DEFAULT_MODEL.items():
-                    model_config.setdefault(default_key, default_value)
 
-        if (
-            IS_WINDOWS
-            and detector == "cpu"
-            and model_config.get("path") == WINDOWS_DEFAULT_MODEL_PATH
-        ):
-            _ensure_windows_default_cpu_model(WINDOWS_DEFAULT_MODEL_PATH)
+        if detector in ("cpu", "openvino") and model_config.get(
+            "path"
+        ) == DEFAULT_MODEL_PATH:
+            _ensure_default_cpu_model(DEFAULT_MODEL_PATH)
 
         loaded = ModelConfig.model_validate(model_config)
         loaded.check_and_load_plus_model(self.plus_api, detector)
@@ -1001,7 +999,13 @@ class FrigateConfig(FrigateBaseModel):
 
         def file_hash(path: str) -> str | None:
             if path not in hashes:
-                hashes[path] = sha256_of(path) if os.path.isfile(path) else None
+                if os.path.isfile(path):
+                    with open(path, "rb") as model_file:
+                        hashes[path] = hashlib.file_digest(
+                            model_file, "sha256"
+                        ).hexdigest()
+                else:
+                    hashes[path] = None
 
             return hashes[path]
 
@@ -1539,17 +1543,8 @@ class FrigateConfig(FrigateBaseModel):
 
     @field_validator("cameras")
     @classmethod
-    def ensure_camera_names_are_unique_on_windows(cls, v: dict[str, CameraConfig]):
-        """Reject names NTFS would resolve to the same directory.
-
-        Windows compares paths case insensitively, so cameras named
-        ``Driveway`` and ``driveway`` share one recording directory and one
-        cache file per timestamp. The second camera silently overwrites the
-        first camera's segments instead of failing.
-        """
-        if not IS_WINDOWS:
-            return v
-
+    def ensure_camera_names_are_unique(cls, v: dict[str, CameraConfig]):
+        """Reject names NTFS would resolve to the same directory."""
         seen: dict[str, str] = {}
 
         for name in v:

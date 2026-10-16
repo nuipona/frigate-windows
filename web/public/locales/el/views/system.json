@@ -6,8 +6,7 @@
     "enrichments": "Στατιστικά Εμπλουτισμού - Frigate",
     "logs": {
       "frigate": "Frigate αρχέιο καταγραφών - Frigate",
-      "go2rtc": "Αρχείο καταγραφής Go2RTC - Frigate",
-      "nginx": "Αρχείο καταγραφών Nginx - Frigate"
+      "go2rtc": "Αρχείο καταγραφής Go2RTC - Frigate"
     }
   },
   "title": "Σύστημα",

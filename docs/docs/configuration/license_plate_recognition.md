@@ -254,7 +254,7 @@ These rules must be defined at the global level of your `lpr` config.
 
 Navigate to <NavPath path="Settings > Enrichments > License plate recognition" />.
 
-- **Save debug plates**: Set to on to save captured text on plates for debugging. These images are stored in `/media/frigate/clips/lpr`, organized into subdirectories by `<camera>/<event_id>`, and named based on the capture timestamp.
+- **Save debug plates**: Set to on to save captured text on plates for debugging. Images are stored under `clips\lpr` in the Windows media directory, organized by camera and event ID.
 
 </TabItem>
 <TabItem value="yaml">
@@ -467,7 +467,7 @@ An example configuration for a dedicated LPR camera using the secondary pipeline
 <ConfigTabs>
 <TabItem value="ui">
 
-Navigate to <NavPath path="Settings > Enrichments > License plate recognition" /> and set **Enable LPR** to on. Set **Device** to `CPU` (can also be `GPU` if available and the correct Docker image is used). Set **Detection threshold** to `0.7` (change if necessary).
+Navigate to <NavPath path="Settings > Enrichments > License plate recognition" /> and enable LPR. Set **Device** to `CPU`, or `GPU` when a supported native Windows provider is available. Start with a detection threshold of `0.7` and tune it from results.
 
 Navigate to <NavPath path="Settings > Camera configuration > License plate recognition" /> for your dedicated LPR camera.
 
@@ -523,7 +523,7 @@ Navigate to <NavPath path="Settings > Camera configuration > Review" />.
 # LPR global configuration
 lpr:
   enabled: True
-  device: CPU # can also be GPU if available and correct Docker image is used
+  device: CPU # use GPU only when a supported Windows provider is available
   detection_threshold: 0.7 # change if necessary
 
 # Dedicated LPR camera configuration
@@ -698,7 +698,7 @@ lpr:
 
 4. Ensure the characters on detected plates are being _recognized_.
    - Check the **Plate recognition** inference time in Enrichment metrics (<NavPath path="Health and Metrics > Enrichments" />). High inference times (> 100ms) could lead to poor recognition results, especially for dedicated LPR cameras where the plate crosses the frame quickly.
-   - Enable `debug_save_plates` to save images of detected text on plates to the clips directory (`/media/frigate/clips/lpr`). Ensure these images are readable and the text is clear.
+   - Enable `debug_save_plates` to save detected plate text images under `clips\lpr` in the Windows media directory. Ensure the text is clear.
    - Watch the debug view to see plates recognized in real-time. For non-dedicated LPR cameras, the vehicle's label will change to the recognized plate when LPR is enabled and working.
    - Adjust `recognition_threshold` settings per the suggestions [above](#advanced-configuration).
 

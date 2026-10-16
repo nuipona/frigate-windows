@@ -223,12 +223,14 @@ For security reasons, the `echo:`, `expr:`, and `exec:` stream sources are disab
 
 If you attempt to use these sources in your configuration, the streams will be removed and an error message will be printed in the logs.
 
-To enable these sources, you must set the environment variable `GO2RTC_ALLOW_ARBITRARY_EXEC=true`. This can be done in your Docker Compose file or container environment, or for Home Assistant App users with the `go2rtc_allow_arbitrary_exec` option in the App's configuration. The `environment_vars` section of the Frigate config can't enable it:
+To enable these sources, set the protected startup variable before launching Frigate. The `environment_vars` section of `config.yml` cannot enable it:
 
-```yaml
-environment:
-  - GO2RTC_ALLOW_ARBITRARY_EXEC=true
+```powershell
+$env:GO2RTC_ALLOW_ARBITRARY_EXEC = 'true'
+.\scripts\start_frigate.ps1
 ```
+
+For a service, set the variable in the elevated PowerShell session before running `install_frigate_service.ps1 -Action Install` or `-Action Configure`; the installer copies this explicit opt-in into the service environment.
 
 :::warning
 
@@ -251,6 +253,7 @@ NOTE: RTSP output will need to be passed with two curly braces `{{output}}`, whe
 ```yaml
 go2rtc:
   streams:
-    stream1: exec:ffmpeg -hide_banner -re -stream_loop -1 -i /media/BigBuckBunny.mp4 -c copy -rtsp_transport tcp -f rtsp {{output}}
-    stream2: exec:rpicam-vid -t 0 --libav-format h264 -o -
+    sample: 'exec:ffmpeg.exe -hide_banner -re -stream_loop -1 -i "C:\FrigateSamples\camera.mp4" -c copy -rtsp_transport tcp -f rtsp {{output}}'
 ```
+
+The Frigate service account must be able to read the executable and input file. Prefer normal go2rtc URL sources; arbitrary commands run with all permissions granted to the Frigate service.

@@ -1,6 +1,6 @@
 """Windows SCM service wrapper for Frigate, using pywin32.
 
-pywin32 is part of docker/main/requirements-windows.txt, so a native install
+pywin32 is part of requirements.txt, so a native install
 already has the SCM modules this imports.
 
 Install: powershell -ExecutionPolicy Bypass -File scripts/install_frigate_service.ps1 -Action Install
@@ -47,6 +47,7 @@ from frigate.util.platform import (
     BASE_DIR_VAR,
     SERVICE_STOP_EVENT_VAR,
     get_base_dir,
+    get_source_root,
 )
 
 try:
@@ -269,6 +270,14 @@ class FrigateService(win32serviceutil.ServiceFramework if IS_SERVICE else object
         try:
             return subprocess.Popen(
                 cmd,
+                # The SCM starts services in System32. Frigate's database
+                # migration router discovers ``migrations/`` relative to the
+                # working directory, so leaving the inherited directory here
+                # creates an empty database and startup later fails on the
+                # first table access. A console launch and the generated
+                # shortcut both start in the checkout; make service mode do
+                # the same explicitly.
+                cwd=get_source_root(),
                 stdin=subprocess.DEVNULL,
                 stdout=None,
                 stderr=None,
@@ -318,7 +327,7 @@ if __name__ == "__main__":
     if not IS_SERVICE:
         print("pywin32 is not installed, so the SCM service cannot be used.")
         print("It is part of the native Windows requirements:")
-        print("    pip install -r docker/main/requirements-windows.txt")
+        print("    pip install -r requirements.txt")
         print("Then install the service with:")
         print("    scripts/install_frigate_service.ps1 -Action Install")
         sys.exit(1)

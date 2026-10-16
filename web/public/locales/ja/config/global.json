@@ -4,8 +4,7 @@
         "description": "有効にすると、トラブルシューティングのため機能を制限したセーフモードでFrigateを起動します。"
     },
     "environment_vars": {
-        "label": "環境変数",
-        "description": "Home Assistant OS の Frigate プロセスに設定する環境変数のキー/値ペア。HAOS をご利用でない場合は、代わりに Docker の環境変数設定を使用してください。"
+        "label": "環境変数"
     },
     "audio": {
         "label": "音声検知",
@@ -330,8 +329,7 @@
                 "description": "カメラの ffmpeg プロセスと検出器のプロセスごとのネットワーク帯域監視を有効にします（capabilities が必要）。"
             },
             "intel_gpu_device": {
-                "label": "Intel GPU デバイス",
-                "description": "複数の Intel GPU が存在する場合、特定のデバイスに統計を絞り込むための PCI バスアドレスまたは DRM デバイスパス（例: /dev/dri/card1）。"
+                "label": "Intel GPU デバイス"
             }
         },
         "version_check": {
@@ -372,7 +370,6 @@
         },
         "listen": {
             "label": "待ち受けポート設定",
-            "description": "内部・外部の待ち受けポートの設定。上級者向け。多くの場合 Docker compose ファイルの ports セクションを変更することを推奨します。",
             "internal": {
                 "label": "内部ポート",
                 "description": "Frigate の内部待ち受けポート（デフォルト 5000）。"

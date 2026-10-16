@@ -4,7 +4,7 @@ import tempfile
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from unittest import TestCase
+from unittest import TestCase, skipUnless
 from unittest.mock import patch
 
 import cv2
@@ -259,6 +259,7 @@ async def _noop_sleep(*_args, **_kwargs) -> None:
     return
 
 
+@skipUnless(file_util.msvcrt is not None, "msvcrt locking requires native Windows")
 class TestFileLockAcrossProcesses(TestCase):
     """FileLock against a genuinely separate interpreter process.
 

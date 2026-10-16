@@ -1603,15 +1603,6 @@
       "selectPreset": "Выберыце прэсет",
       "manualPlaceholder": "Увядзіце аргументы FFmpeg",
       "presetLabels": {
-        "preset-rpi-64-h264": "Raspberry Pi (H.264)",
-        "preset-rpi-64-h265": "Raspberry Pi (H.265)",
-        "preset-vaapi": "VAAPI (GPU Intel/AMD)",
-        "preset-intel-qsv-h264": "Intel QuickSync (H.264)",
-        "preset-intel-qsv-h265": "Intel QuickSync (H.265)",
-        "preset-nvidia": "GPU NVIDIA",
-        "preset-jetson-h264": "NVIDIA Jetson (H.264)",
-        "preset-jetson-h265": "NVIDIA Jetson (H.265)",
-        "preset-rkmpp": "Rockchip RKMPP",
         "preset-http-jpeg-generic": "HTTP JPEG (агульны)",
         "preset-http-mjpeg-generic": "HTTP MJPEG (агульны)",
         "preset-http-reolink": "HTTP - камеры Reolink",
@@ -1626,9 +1617,7 @@
         "preset-record-generic-audio-aac": "Запіс (агульны + гук у AAC)",
         "preset-record-mjpeg": "Запіс - камеры MJPEG",
         "preset-record-jpeg": "Запіс - камеры JPEG",
-        "preset-record-ubiquiti": "Запіс - камеры Ubiquiti",
-        "preset-apple-silicon-h264": "Apple Silicon (H.264)",
-        "preset-apple-silicon-h265": "Apple Silicon (H.265)"
+        "preset-record-ubiquiti": "Запіс - камеры Ubiquiti"
       },
       "sameAsRecord": "Тое самае, што выходныя аргументы запісу"
     },
@@ -1934,11 +1923,8 @@
       "audioExclude": "Выключыць",
       "hardwareNone": "Без апаратнага паскарэння",
       "hardwareAuto": "Аўтаматычна (рэкамендуецца)",
-      "hardwareVaapi": "VAAPI",
       "hardwareCuda": "CUDA",
-      "hardwareV4l2m2m": "V4L2 M2M",
       "hardwareDxva2": "DXVA2",
-      "hardwareVideotoolbox": "VideoToolbox",
       "addVideoCodec": "Дадаць відэакодэк",
       "addAudioCodec": "Дадаць аўдыякодэк",
       "removeCodec": "Прыбраць кодэк"
@@ -2111,8 +2097,7 @@
       "countRecommended_many": "Рэкамендуецца для {{count}} камер",
       "unrecognized": "Гэтая мадэль наладжана для абсталявання, якога няма ў сістэме: {{devices}}",
       "description": "Абсталяванне, на якім гэтая мадэль выконвае дэтэктаванне.",
-      "detectorCountDescription": "Колькі працэсаў дэтэктавання запускаць на гэтым абсталяванні. Большая колькасць дэтэктараў спраўляецца з большай колькасцю камер, але займае больш памяці прылады.",
-      "unitsDescription": "Кожны блок выконвае свой працэс дэтэктавання. Блок, які нельга дзяліць, напрыклад Coral, можа выкарыстоўваць толькі адна мадэль."
+      "detectorCountDescription": "Колькі працэсаў дэтэктавання запускаць на гэтым абсталяванні. Большая колькасць дэтэктараў спраўляецца з большай колькасцю камер, але займае больш памяці прылады."
     },
     "tabs": {
       "plus": "Frigate+",

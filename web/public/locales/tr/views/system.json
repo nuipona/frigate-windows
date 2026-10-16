@@ -3,7 +3,6 @@
     "logs": {
       "frigate": "Frigate Günlükleri - Frigate",
       "go2rtc": "Go2RTC Günlükleri - Frigate",
-      "nginx": "Nginx Günlükleri - Frigate",
       "websocket": "Mesaj Günlükleri - Frigate"
     },
     "general": "Genel İstatistikler - Frigate",
@@ -296,7 +295,6 @@
         "detector_stuck": "{{detector}} algılayıcısı yanıt vermeyi durdurunca yeniden başlatıldı",
         "model_download_failed": "{{model}} için {{file}} dosyasının indirilmesi başarısız oldu: {{error}}",
         "skipped_detections": "Algılama yetişemedi ve bir dakikadan uzun bir süre boyunca görüntü karelerinin %{{pct}} kadarı atlandı",
-        "shm_too_low": "/dev/shm tahsisi ({{total}} MB) en az {{min}} MB olacak şekilde artırılmalı",
         "failed_login_one": "{{user}} kullanıcısı için başarısız oturum açma girişimi",
         "failed_login_other": "{{user}} kullanıcısı için başarısız oturum açma girişimleri",
         "update_available": "Frigate {{version}} sürümü çıkmış",

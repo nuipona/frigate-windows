@@ -104,13 +104,10 @@ class TestCpuAverage(unittest.TestCase):
 class TestEmitterNotices(unittest.TestCase):
     def setUp(self):
         raise_patch = patch.object(emitter, "raise_notice")
-        resolve_patch = patch.object(emitter, "resolve_notice")
         flush_patch = patch.object(emitter, "flush_notices")
         self.raise_notice = raise_patch.start()
-        resolve_patch.start()
         self.flush_notices = flush_patch.start()
         self.addCleanup(raise_patch.stop)
-        self.addCleanup(resolve_patch.stop)
         self.addCleanup(flush_patch.stop)
 
     def _emitter(self) -> emitter.StatsEmitter:

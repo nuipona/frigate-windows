@@ -1,205 +1,26 @@
-"""
-Object classification investigation script.
+r"""Analyze a Frigate custom object-classification dataset on Windows.
 
-Standalone replica of Frigate's custom object classification inference pipeline
-(see frigate/data_processing/real_time/custom_classification.py and
-frigate/util/classification.py) for analyzing a training dataset outside the
-running service. Useful for:
+The script reads ``<clips-dir>\<model-name>\dataset`` and the deployed
+``model.tflite``/``labelmap.txt`` below ``<model-cache>\<model-name>``. Its
+defaults follow the active ``FRIGATE_BASE_DIR`` layout.
 
-  - Diagnosing why a class produces false positives / misidentifications
-  - Finding the training images that the deployed model itself misclassifies
-    (these are the worst offenders — usually mislabeled or low-quality crops)
-  - Inspecting borderline-correct images that sit near the decision boundary
-  - Spotting class-pair confusion (which classes get mixed up)
+Examples from the repository root in PowerShell::
 
-Layout:
-  - Core pipeline: load_tflite, preprocess_for_inference, classify_image —
-    all mirroring CustomObjectClassificationProcessor exactly
-  - Default run: scan the dataset, classify every image with the deployed
-    model.tflite, report misclassified + borderline images per class, and
-    print a confusion matrix
-  - Optional diagnostics (flags): image-quality breakdown, scoring an
-    unlabeled "negative" folder, cross-class contamination analysis (find
-    training images in class A that visually look like class B and pull
-    inference toward A), and copying worst offenders out for review
+    .\.venv\Scripts\python.exe testing-scripts\object_dataset.py `
+      --name front_gate --top-n 25 --quality
 
-Recommended workflow when troubleshooting misclassifications:
+    .\.venv\Scripts\python.exe testing-scripts\object_dataset.py `
+      --name front_gate --negative 'D:\FrigateSamples\misfires' `
+      --threshold 0.8
 
-  1. Run the basic scan first (no extra flags). Read top-down:
-       - Class balance ratio. If > 3x, balance counts before anything else.
-         The dominant class will absorb borderline predictions otherwise.
-       - Per-class accuracy. Any class < 50% needs attention.
-       - Confusion matrix. If multiple classes all over-predict the same
-         class (e.g. Buddy->Rex, Bailey->Rex, none->Rex), you have
-         feature collapse, not "a few bad photos." Don't bother with
-         contamination analysis yet — fix the collapse first.
+For cross-class embedding analysis, download MobileNetV2 ONNX into the model
+cache and pass its absolute Windows path with ``--embedding-model``. Use
+``--confuses source:target`` or ``--confuses auto`` and optionally
+``--save-misclassified`` to copy review candidates.
 
-  2. Check for "degenerate blob" upsampling. Look at the SHAPE column on
-     worst-offender rows. If most misclassified crops are < 80x80, the
-     small originals are being stretched 3-7x to fit the 224x224 model
-     input. Upsampled crops collapse to a similar region of feature space
-     regardless of identity — the model can't tell them apart and defaults
-     them to whichever class has the most of them.
-
-     Fix: quarantine every image where min(w, h) < 80 (or 100 for a
-     stricter cut) and retrain. This works when the named class has
-     plenty of non-small examples to fall back on AND the small crops
-     are mostly degenerate blobs (target unrecognizable at that size).
-
-     CAVEAT — sometimes small crops ARE the signal, not the noise: if
-     your target naturally appears small at the camera distance (cats
-     indoors, distant subjects, wide-FOV setups), the small crops in
-     the named class ARE the typical inference-time input. Removing them
-     leaves the model unable to recognize the target at its natural
-     detection size, and accuracy on the named class collapses after
-     retraining. If that happens — named-class accuracy drops sharply
-     after size cut + retrain — restore the quarantine and switch to
-     visual review of just the misclassified small crops instead of
-     bulk size filtering. The size threshold is a tool for "tons of
-     accidental tiny blobs polluting a class with otherwise large
-     examples," not a universal cleanup.
-
-  3. Verify the "none" class exists and is healthy. Without a strong
-     "none" class, every unknown crop at inference gets forced into one of
-     your real classes — the model has no "I don't know" option. Aim for:
-       - Count similar to your other classes (don't let it be the smallest)
-       - Images >= 100x100, well-framed
-       - Visual variety: other dogs/objects, partial views, empty scenes,
-         not just one type of negative
-
-  4. Look for cross-class duplicates from the same Frigate event. If the
-     same timestamp prefix appears across multiple class folders (e.g.
-     "1772052999.x" present in Buddy AND Bailey AND Rex AND none), those
-     crops came from one moment in time. Either they were extracted from a
-     multi-object frame and labeled inconsistently, or they're near-
-     duplicates of one scene cropped slightly differently. Inspect them as
-     a group and decide together.
-
-  5. Only after (1)-(4) are clean, run --confuses <source>:<target> for
-     targeted contamination analysis. The "ringleaders" section at the
-     bottom is the actionable part: a short list of images appearing
-     repeatedly as nearest neighbors of the wrong class. Those are the
-     few photos doing most of the damage.
-
-  6. Stop deleting when the contamination delta column shows ALL negative
-     values for the source class. That means dataset images in <source>
-     are already visually distinct from <target> in fixed-backbone
-     embedding space — the trained model just hasn't learned to use that
-     separation. The fix from that point is to ADD more training data for
-     the underperforming class, not delete more. Aim for at least 20 well-
-     framed images per class.
-
-The dataset must be the same layout Frigate trains from:
-  <clips>/<model_name>/dataset/<class>/*.{webp,png,jpg,jpeg}
-
-The model must already be trained:
-  <model_cache>/<model_name>/model.tflite
-  <model_cache>/<model_name>/labelmap.txt
-
-Command-line examples (mirror the workflow steps above):
-
-  One-time setup — download the ImageNet-pretrained MobileNetV2 backbone
-  that --confuses uses for model-independent embeddings:
-
-    curl -L -o /config/model_cache/mobilenetv2-7.onnx \\
-      https://github.com/onnx/models/raw/main/validated/vision/classification/mobilenet/model/mobilenetv2-7.onnx
-
-  Step 1 — Basic scan. Always start here. Reads class balance, accuracy,
-  confusion matrix, and per-class worst offenders:
-
-    python3 object_dataset.py --name "<model_name>" --top-n 25
-
-  Step 2 — Same scan plus image-quality stats (blur, brightness, aspect
-  distortion) for correct vs misclassified rows. Use when you suspect
-  systematic quality issues are driving the misses:
-
-    python3 object_dataset.py --name "<model_name>" --top-n 25 --quality
-
-  Step 2 (cleanup) — Quarantine crops below 80x80 (the upsampling-blob
-  fix). Mirrors the class folder structure so individual images can be
-  restored. Change `threshold = 80` to 64 (looser) or 100 (stricter):
-
-    python3 - <<'EOF'
-    import cv2
-    from pathlib import Path
-    dataset = Path("/media/frigate/clips/<model_name>/dataset")
-    quarantine = Path("/media/frigate/clips/<model_name>/quarantine_small")
-    threshold = 80
-    moved = 0
-    for cls_dir in sorted(dataset.iterdir()):
-        if not cls_dir.is_dir():
-            continue
-        for img_path in sorted(cls_dir.iterdir()):
-            if img_path.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
-                continue
-            img = cv2.imread(str(img_path))
-            if img is None:
-                continue
-            h, w = img.shape[:2]
-            if min(h, w) < threshold:
-                dest_dir = quarantine / cls_dir.name
-                dest_dir.mkdir(parents=True, exist_ok=True)
-                img_path.rename(dest_dir / img_path.name)
-                moved += 1
-    print(f"moved {moved} images")
-    EOF
-
-  Revert any quarantine directory (puts everything back into dataset/):
-
-    python3 - <<'EOF'
-    from pathlib import Path
-    quarantine = Path("/media/frigate/clips/<model_name>/quarantine_small")
-    dataset = Path("/media/frigate/clips/<model_name>/dataset")
-    for cls_dir in sorted(quarantine.iterdir()):
-        if not cls_dir.is_dir():
-            continue
-        target = dataset / cls_dir.name
-        target.mkdir(parents=True, exist_ok=True)
-        for img_path in sorted(cls_dir.iterdir()):
-            img_path.rename(target / img_path.name)
-    EOF
-
-  Step 4 — Inspect a same-timestamp cluster across all classes (replace
-  TIMESTAMP with the prefix you saw in worst-offenders, e.g. "1772052999"):
-
-    mkdir -p /tmp/timestamp_cluster
-    cd "/media/frigate/clips/<model_name>/dataset"
-    for f in */*TIMESTAMP*; do
-        cls=$(dirname "$f"); fn=$(basename "$f")
-        cp "$f" "/tmp/timestamp_cluster/${cls}__${fn}"
-    done
-
-  Step 5 — Cross-class contamination. Lists specific <source> images that
-  look like <target>, plus a ringleader summary of the few worst offenders.
-  Also copies all misclassified images into a flat browse-able folder
-  bucketed by (true_class)__as__(predicted_class):
-
-    python3 object_dataset.py --name "<model_name>" \\
-      --embedding-model /config/model_cache/mobilenetv2-7.onnx \\
-      --confuses Rex:Buddy --top-n 15 \\
-      --save-misclassified /tmp/<model_name>_offenders
-
-  Or let the script pick the worst-confused class pair from the matrix:
-
-    python3 object_dataset.py --name "<model_name>" \\
-      --embedding-model /config/model_cache/mobilenetv2-7.onnx \\
-      --confuses auto
-
-  Score an unlabeled folder of runtime crops against the trained model —
-  useful for analyzing why specific inference-time misfires happened.
-  Prints full per-class probability vectors and threshold-pass status:
-
-    python3 object_dataset.py --name "<model_name>" \\
-      --negative /path/to/runtime_misfires --threshold 0.8
-
-Full flag reference:
-    python3 object_dataset.py \\
-        --name <model_name> \\
-        [--clips-dir /media/frigate/clips] \\
-        [--model-cache /config/model_cache] \\
-        [--threshold 0.8] [--top-n 15] \\
-        [--quality] [--negative <folder>] [--save-misclassified <dir>] \\
-        [--confuses <source>:<target>] [--embedding-model <path.onnx>]
+The analysis reports class balance, confusion, misclassified and borderline
+images. Review results before moving training files; small crops can be either
+noise or the representative signal for a distant object.
 """
 
 from __future__ import annotations
@@ -212,6 +33,8 @@ from dataclasses import dataclass
 
 import cv2
 import numpy as np
+
+from frigate.util.platform import get_media_dir, get_model_cache_dir
 
 try:
     from tflite_runtime.interpreter import Interpreter
@@ -240,7 +63,7 @@ def load_tflite(model_path: str) -> tuple[Interpreter, list[dict], list[dict]]:
 
 def load_labelmap(path: str) -> dict[int, str]:
     """Mirror util.builtin.load_labels(prefill=0, indexed=False)."""
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         lines = [line.strip() for line in f.readlines() if line.strip()]
     return {idx: line for idx, line in enumerate(lines)}
 
@@ -869,12 +692,12 @@ def main() -> int:
     )
     ap.add_argument(
         "--clips-dir",
-        default="/media/frigate/clips",
+        default=os.path.join(get_media_dir(), "clips"),
         help="Frigate clips directory; dataset is read from <clips>/<name>/dataset",
     )
     ap.add_argument(
         "--model-cache",
-        default="/config/model_cache",
+        default=get_model_cache_dir(),
         help="Frigate model_cache; model is read from <cache>/<name>/model.tflite",
     )
     ap.add_argument(
@@ -919,10 +742,8 @@ def main() -> int:
         default=None,
         help=(
             "Path to ONNX MobileNetV2 file for model-independent embeddings "
-            "(required by --confuses). Download once with: curl -L -o "
-            "/config/model_cache/mobilenetv2-7.onnx https://github.com/onnx/"
-            "models/raw/main/validated/vision/classification/mobilenet/model/"
-            "mobilenetv2-7.onnx"
+            "(required by --confuses). Download mobilenetv2-7.onnx from "
+            "the ONNX model repository into the Windows model cache."
         ),
     )
     args = ap.parse_args()

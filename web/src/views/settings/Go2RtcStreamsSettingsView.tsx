@@ -952,11 +952,8 @@ function StreamUrlEntry({
   const hardwareLabels: Record<FfmpegHardwareOption, string> = {
     none: t("go2rtcStreams.ffmpeg.hardwareNone"),
     auto: t("go2rtcStreams.ffmpeg.hardwareAuto"),
-    vaapi: t("go2rtcStreams.ffmpeg.hardwareVaapi"),
     cuda: t("go2rtcStreams.ffmpeg.hardwareCuda"),
-    v4l2m2m: t("go2rtcStreams.ffmpeg.hardwareV4l2m2m"),
     dxva2: t("go2rtcStreams.ffmpeg.hardwareDxva2"),
-    videotoolbox: t("go2rtcStreams.ffmpeg.hardwareVideotoolbox"),
   };
 
   return (

@@ -40,7 +40,6 @@ from frigate.models import Export, Previews, Recordings, ReviewSegment
 from frigate.output.preview import is_camera_preview_frame
 from frigate.util.config import default_ffmpeg_binary
 from frigate.util.ffmpeg import run_ffmpeg_with_progress
-from frigate.util.ownership import chown_to_runtime
 from frigate.util.platform import (
     ffmpeg_concat_file_line,
     ffmpeg_stdin_input,
@@ -641,12 +640,10 @@ class RecordingExporter(threading.Thread):
             f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
             f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1"
         )
-        # deliberately software-encoded. The vaapi and nvidia encode presets
-        # set -hwaccel_output_format, which leaves decoded frames in GPU
-        # memory where scale/pad cannot reach them; making this pass use the
-        # GPU means per-preset hwdownload/hwupload chains (see the birdseye
-        # vaapi preset). Codec-mixed ranges are rare enough to eat the CPU
-        # cost rather than ship an untested filter graph
+        # Deliberately software-encoded. Windows accelerator presets can leave
+        # decoded frames in GPU memory where this generic scale/pad graph cannot
+        # reach them. Codec-mixed ranges are rare enough to accept the CPU cost
+        # rather than ship a separate untested graph for every Windows backend.
         cmd = parse_preset_hardware_acceleration_encode(
             self.config.ffmpeg.ffmpeg_path,
             None,
@@ -666,10 +663,10 @@ class RecordingExporter(threading.Thread):
         """Render each run to its own temp file, one stream type at a time.
 
         This is what makes a mixed-resolution export work. Handing the
-        merged playlist straight to ffmpeg looks like it should work,
-        since nginx-vod marks the stream change with a discontinuity and a
-        fresh EXT-X-MAP, but ffmpeg's HLS demuxer binds the track's
-        parameter sets from the *first* init segment only. Every sample
+        merged playlist straight to FFmpeg looks like it should work,
+        since the native HLS playlist marks the stream change with a
+        discontinuity and a fresh EXT-X-MAP, but FFmpeg's HLS demuxer binds
+        the track's parameter sets from the *first* init segment only. Every sample
         after the hand-off is then decoded against the wrong SPS, which is
         what freezes the sub-resolution stretches of the output.
 
@@ -738,9 +735,9 @@ class RecordingExporter(threading.Thread):
             base = 100.0 * completed / total_duration
 
             # claim the path before ffmpeg can write to it. ffmpeg removes
-            # its own output on a clean error exit, but a killed one (OOM,
-            # container stop) leaves whatever it had already muxed, and a
-            # path that was never recorded is a partial file nothing
+            # its own output on a clean error exit, but a force-terminated
+            # process leaves whatever it had already muxed, and a path that
+            # was never recorded is a partial file nothing
             # deletes
             self.staged_runs.append(dest)
 
@@ -876,9 +873,8 @@ class RecordingExporter(threading.Thread):
         )
 
     def get_datetime_from_timestamp(self, timestamp: int) -> str:
-        # return in iso format using the configured ui.timezone when set,
-        # so the auto-generated export name reflects local time rather
-        # than the container's UTC clock
+        # Return in ISO format using ui.timezone when set so an automatically
+        # generated export name reflects the configured local time.
         tz_name = self.config.ui.timezone
         if tz_name:
             try:
@@ -1468,10 +1464,11 @@ class RecordingExporter(threading.Thread):
         if self.user_provided_name:
             video_path = export_video_path(self.user_provided_name, self.export_id)
         else:
-            video_path = f"{EXPORT_DIR}/{self.camera}_{filename_start_datetime}-{filename_end_datetime}_{cleaned_export_id}.mp4"
+            video_path = os.path.join(
+                EXPORT_DIR,
+                f"{self.camera}_{filename_start_datetime}-{filename_end_datetime}_{cleaned_export_id}.mp4",
+            )
         thumb_path = self.save_thumbnail(self.export_id)
-        if thumb_path:
-            chown_to_runtime(thumb_path)
 
         export_values = {
             Export.id: self.export_id,
@@ -1575,7 +1572,6 @@ class RecordingExporter(threading.Thread):
             self._discard_failed_export(video_path, thumb_path)
             return
         else:
-            chown_to_runtime(video_path)
             self._emit_progress("finalizing", 100.0)
             Export.update({Export.in_progress: False}).where(
                 Export.id == self.export_id

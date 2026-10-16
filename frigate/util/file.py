@@ -14,20 +14,14 @@ from typing import Any
 import cv2
 from numpy import ndarray
 
-try:  # POSIX
-    import fcntl
-except ImportError:  # pragma: no cover - Windows
-    fcntl = None  # type: ignore[assignment]
-
-try:  # Windows
+try:
     import msvcrt
-except ImportError:  # pragma: no cover - POSIX
+except ImportError:  # pragma: no cover - import-only tooling off Windows
     msvcrt = None  # type: ignore[assignment]
 
 from frigate.const import CLIPS_DIR, THUMB_DIR
 from frigate.models import Event
 from frigate.util.image import get_snapshot_bytes, relative_box_to_absolute
-from frigate.util.platform import IS_WINDOWS
 
 logger = logging.getLogger(__name__)
 
@@ -321,16 +315,7 @@ def trim_oldest_files(folder: str, max_files: int) -> None:
 
 
 def _try_lock(fd: int) -> bool:
-    """Take an exclusive, non blocking lock on an open file descriptor.
-
-    ``fcntl.flock`` is used on POSIX. Windows has no flock; the closest
-    equivalent that works across processes is ``msvcrt.locking`` on a one byte
-    region, which is why the file is locked at offset zero.
-    """
-    if fcntl is not None:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return True
-
+    """Take an exclusive non-blocking Win32 byte-range lock."""
     if msvcrt is not None:
         os.lseek(fd, 0, os.SEEK_SET)
         msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
@@ -341,10 +326,6 @@ def _try_lock(fd: int) -> bool:
 
 def _unlock(fd: int) -> None:
     """Release a lock taken by :func:`_try_lock`."""
-    if fcntl is not None:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        return
-
     if msvcrt is not None:
         os.lseek(fd, 0, os.SEEK_SET)
         msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
@@ -354,8 +335,8 @@ class FileLock:
     """
     A file-based lock for coordinating access to resources across processes.
 
-    Uses fcntl.flock() on Linux and msvcrt.locking() on Windows. Supports
-    timeouts, stale lock detection, and can be used as a context manager.
+    Uses ``msvcrt.locking`` across Windows processes. Supports timeouts, stale
+    lock detection, and context-manager use.
 
     Example:
         ```python
@@ -573,11 +554,8 @@ def is_held_by_another_process(err: OSError) -> bool:
     if getattr(err, "winerror", None) in WINDOWS_SHARING_ERRORS:
         return True
 
-    if IS_WINDOWS:
-        # CPython maps a sharing violation onto EACCES as well as winerror
-        return err.errno in (errno.EACCES, errno.EBUSY)
-
-    return err.errno == errno.EBUSY
+    # CPython maps a Win32 sharing violation onto EACCES as well as winerror.
+    return err.errno in (errno.EACCES, errno.EBUSY)
 
 
 def _run_with_retry(operation, attempts: int, delay: float, description: str) -> None:

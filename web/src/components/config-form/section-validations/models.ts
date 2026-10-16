@@ -3,27 +3,17 @@ import type { TFunction } from "i18next";
 import { isJsonObject } from "@/lib/utils";
 import { DEFAULT_SCENE, getSceneLabel } from "@/utils/modelUtil";
 
-/** The model the backend loads for a detector when no path is configured. */
+/** The model the backend loads when no path is configured. */
 function defaultModelPath(detector: string): string | undefined {
-  if (detector === "cpu" || detector.endsWith("_tfl")) {
-    return "/cpu_model.tflite";
-  }
-
-  if (detector === "edgetpu") {
-    return "/edgetpu_model.tflite";
-  }
-
-  if (detector === "openvino") {
-    return "/openvino-model/ssdlite_mobilenet_v2.xml";
-  }
-
-  return undefined;
+  return detector === "cpu" || detector === "openvino"
+    ? "__frigate_default_cpu_model__"
+    : undefined;
 }
 
 /**
- * Collapse `//`, `.`, and `..` so spellings of one file path compare equal,
- * as the backend's realpath does. Symlinks and copies can only be seen by the
- * backend, which still combines them at startup.
+ * Collapse Windows separators, `.`, and `..` and compare paths without case.
+ * Symlinks and copies can only be seen by the backend, which still combines
+ * them at startup.
  */
 function normalizeModelPath(path: string): string {
   // plus://<id> and other URLs are compared as written
@@ -31,21 +21,23 @@ function normalizeModelPath(path: string): string {
     return path;
   }
 
+  const windowsPath = path.replaceAll("\\", "/");
   const segments: string[] = [];
 
-  for (const segment of path.split("/")) {
+  for (const segment of windowsPath.split("/")) {
     if (segment === "" || segment === ".") {
       continue;
     }
 
     if (segment === ".." && segments.length && segments.at(-1) !== "..") {
       segments.pop();
-    } else if (segment !== ".." || !path.startsWith("/")) {
+    } else if (segment !== ".." || !windowsPath.startsWith("/")) {
       segments.push(segment);
     }
   }
 
-  return `${path.startsWith("/") ? "/" : ""}${segments.join("/")}`;
+  const prefix = windowsPath.startsWith("/") ? "/" : "";
+  return `${prefix}${segments.join("/")}`.toLocaleLowerCase();
 }
 
 /**

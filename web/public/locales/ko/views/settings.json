@@ -1565,15 +1565,6 @@
       "selectPreset": "프리셋 선택",
       "manualPlaceholder": "FFmpeg 인수 입력",
       "presetLabels": {
-        "preset-rpi-64-h264": "라즈베리 파이 (H.264)",
-        "preset-rpi-64-h265": "라즈베리 파이 (H.265)",
-        "preset-vaapi": "VAAPI (Intel/AMD GPU)",
-        "preset-intel-qsv-h264": "Intel QuickSync (H.264)",
-        "preset-intel-qsv-h265": "Intel QuickSync (H.265)",
-        "preset-nvidia": "NVIDIA GPU",
-        "preset-jetson-h264": "NVIDIA Jetson (H.264)",
-        "preset-jetson-h265": "NVIDIA Jetson (H.265)",
-        "preset-rkmpp": "Rockchip RKMPP",
         "preset-http-jpeg-generic": "HTTP JPEG (범용)",
         "preset-http-mjpeg-generic": "HTTP MJPEG (범용)",
         "preset-http-reolink": "HTTP - Reolink 카메라",
@@ -1588,9 +1579,7 @@
         "preset-record-generic-audio-aac": "녹화 (범용 + 오디오 AAC 변환)",
         "preset-record-mjpeg": "녹화 - MJPEG 카메라",
         "preset-record-jpeg": "녹화 - JPEG 카메라",
-        "preset-record-ubiquiti": "녹화 - Ubiquiti 카메라",
-        "preset-apple-silicon-h264": "Apple Silicon (H.264)",
-        "preset-apple-silicon-h265": "Apple Silicon (H.265)"
+        "preset-record-ubiquiti": "녹화 - Ubiquiti 카메라"
       },
       "sameAsRecord": "녹화 출력 인수와 동일"
     },
@@ -1888,11 +1877,8 @@
       "audioExclude": "제외",
       "hardwareNone": "하드웨어 가속 없음",
       "hardwareAuto": "자동 (권장)",
-      "hardwareVaapi": "VAAPI",
       "hardwareCuda": "CUDA",
-      "hardwareV4l2m2m": "V4L2 M2M",
       "hardwareDxva2": "DXVA2",
-      "hardwareVideotoolbox": "VideoToolbox",
       "addVideoCodec": "비디오 코덱 추가",
       "addAudioCodec": "오디오 코덱 추가",
       "removeCodec": "코덱 제거"
@@ -2061,8 +2047,7 @@
       "countRecommended_other": "{{count}}개 카메라에 권장",
       "unrecognized": "이 모델은 시스템에서 찾을 수 없는 하드웨어로 구성되어 있습니다: {{devices}}",
       "description": "이 모델이 감지를 실행할 하드웨어입니다.",
-      "detectorCountDescription": "이 하드웨어에서 실행할 감지 프로세스 수입니다. 감지기 수가 많을수록 더 많은 카메라를 처리할 수 있지만 추가 장치 메모리가 소모됩니다.",
-      "unitsDescription": "각 장치 단위는 자체 감지 프로세스를 실행합니다. Coral처럼 공유할 수 없는 장치 단위는 하나의 모델에서만 사용할 수 있습니다."
+      "detectorCountDescription": "이 하드웨어에서 실행할 감지 프로세스 수입니다. 감지기 수가 많을수록 더 많은 카메라를 처리할 수 있지만 추가 장치 메모리가 소모됩니다."
     },
     "tabs": {
       "plus": "Frigate+",

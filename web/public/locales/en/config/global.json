@@ -9,7 +9,7 @@
   },
   "environment_vars": {
     "label": "Environment variables",
-    "description": "Key/value pairs of environment variables to set for the Frigate process in Home Assistant OS. Non-HAOS users must use Docker environment variable configuration instead."
+    "description": "Key/value pairs exposed to Frigate child processes. Security-sensitive startup overrides must be set in the Windows process or service environment instead."
   },
   "logger": {
     "label": "Logging",
@@ -40,7 +40,7 @@
     },
     "cookie_secure": {
       "label": "Secure cookie flag",
-      "description": "Set the secure flag on the auth cookie; should be true when using TLS."
+      "description": "Set the Secure flag on the authentication cookie. Disable only when the public listener intentionally uses plain HTTP."
     },
     "session_length": {
       "label": "Session length",
@@ -164,22 +164,22 @@
     "description": "Network-related settings such as IPv6 enablement for Frigate endpoints.",
     "ipv6": {
       "label": "IPv6 configuration",
-      "description": "IPv6-specific settings for Frigate network services.",
+      "description": "IPv6 support for the native Windows listener.",
       "enabled": {
         "label": "Enable IPv6",
-        "description": "Enable IPv6 support for Frigate services (API and UI) where applicable."
+        "description": "Allow an IPv6 address in FRIGATE_WEB_HOST."
       }
     },
     "listen": {
       "label": "Listening ports configuration",
-      "description": "Configuration for internal and external listening ports. This is for advanced users. For the majority of use cases it's recommended to change the ports section of your Docker compose file.",
+      "description": "The loopback-only internal port and authenticated public Windows web port. FRIGATE_WEB_PORT may override the public listener.",
       "internal": {
         "label": "Internal port",
-        "description": "Internal listening port for Frigate (default 5000)."
+        "description": "Loopback-only port for Frigate media jobs. Requests on this port are trusted and never exposed to the LAN."
       },
       "external": {
         "label": "External port",
-        "description": "External listening port for Frigate (default 8971)."
+        "description": "Authenticated Windows web-interface port."
       }
     }
   },
@@ -208,7 +208,7 @@
     },
     "auth_secret": {
       "label": "Proxy secret",
-      "description": "Optional secret checked against the X-Proxy-Secret header to verify trusted proxies."
+      "description": "Secret checked against X-Proxy-Secret. Required when proxy identity or role headers are mapped."
     },
     "default_role": {
       "label": "Default role",
@@ -221,34 +221,18 @@
   },
   "telemetry": {
     "label": "Telemetry",
-    "description": "System telemetry and stats options including GPU and network bandwidth monitoring.",
-    "network_interfaces": {
-      "label": "Network interfaces",
-      "description": "List of network interface name prefixes to monitor for bandwidth statistics."
-    },
+    "description": "System statistics and optional NVIDIA NVML telemetry settings.",
     "stats": {
       "label": "System stats",
-      "description": "Options to enable/disable collection of various system and GPU statistics.",
-      "amd_gpu_stats": {
-        "label": "AMD GPU stats",
-        "description": "Enable collection of AMD GPU statistics if an AMD GPU is present."
-      },
-      "intel_gpu_stats": {
-        "label": "Intel GPU stats",
-        "description": "Enable collection of Intel GPU statistics if an Intel GPU is present."
-      },
-      "network_bandwidth": {
-        "label": "Network bandwidth",
-        "description": "Enable per-process network bandwidth monitoring for camera ffmpeg processes and detectors (requires capabilities)."
-      },
-      "intel_gpu_device": {
-        "label": "Intel GPU device",
-        "description": "PCI bus address or DRM device path (e.g. /dev/dri/card1) used to pin Intel GPU stats to a specific device when multiple are present."
+      "description": "Native Windows hardware-statistics options.",
+      "nvidia_gpu_stats": {
+        "label": "NVIDIA GPU stats",
+        "description": "Collect utilization, encoder, decoder, memory, and temperature through NVML when an NVIDIA GPU is present."
       }
     },
     "version_check": {
       "label": "Version check",
-      "description": "Enable an outbound check to detect if a newer Frigate version is available."
+      "description": "Enable an outbound check to detect if a newer application version is available."
     }
   },
   "tls": {
@@ -256,7 +240,15 @@
     "description": "TLS settings for Frigate's web endpoints (port 8971).",
     "enabled": {
       "label": "Enable TLS",
-      "description": "Enable TLS for Frigate's web UI and API on the configured TLS port."
+      "description": "Enable TLS for Frigate's authenticated public Windows web listener."
+    },
+    "cert_file": {
+      "label": "Certificate file",
+      "description": "PEM certificate chain for the public listener. A self-signed certificate is generated here when both TLS files are absent."
+    },
+    "key_file": {
+      "label": "Private key file",
+      "description": "Unencrypted PEM private key for the public listener."
     }
   },
   "ui": {
@@ -284,7 +276,7 @@
     },
     "devices": {
       "label": "Detection hardware",
-      "description": "Hardware this model runs on, as '<detector>' or '<detector>:<device>' (for example 'edgetpu:pci:0' or 'openvino:GPU'). Listing the same device more than once runs additional inference processes on it."
+      "description": "Hardware this model runs on, as '<detector>' or '<detector>:<device>' (for example 'onnx:0' or 'openvino:GPU'). Listing the same device more than once runs additional inference processes on it."
     },
     "path": {
       "label": "Custom object detector model path",

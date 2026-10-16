@@ -7,7 +7,6 @@
     "logs": {
       "frigate": "Журналы Frigate - Frigate",
       "go2rtc": "Журналы go2rtc - Frigate",
-      "nginx": "Журналы Nginx - Frigate",
       "websocket": "Журналы паведамленняў - Frigate"
     },
     "health": "Стан - Frigate"
@@ -296,7 +295,6 @@
         "detector_stuck": "Дэтэктар {{detector}} перазапушчаны пасля таго, як перастаў адказваць",
         "model_download_failed": "Не ўдалося спампаваць {{file}} для {{model}}: {{error}}",
         "skipped_detections": "Дэтэктаванне не паспявала і больш за хвіліну прапускала {{pct}}% кадраў",
-        "shm_too_low": "Выдзеленую памяць /dev/shm ({{total}} МБ) трэба павялічыць прынамсі да {{min}} МБ",
         "failed_login_one": "Няўдалая спроба ўваходу для {{user}}",
         "failed_login_other": "Няўдалыя спробы ўваходу для {{user}}",
         "update_available": "Даступная Frigate {{version}}",

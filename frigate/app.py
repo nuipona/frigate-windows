@@ -10,8 +10,6 @@ from multiprocessing.managers import DictProxy, SyncManager
 from multiprocessing.synchronize import Event as MpEvent
 from pathlib import Path
 
-import psutil
-import uvicorn
 from peewee import SqliteDatabase
 from peewee_migrate import Router
 
@@ -51,7 +49,6 @@ from frigate.debug_replay import (
     DebugReplayManager,
     cleanup_replay_cameras,
 )
-from frigate.detectors.detector_types import api_types
 from frigate.detectors.device import build_detector_config, runner_names
 from frigate.embeddings import EmbeddingProcess, EmbeddingsContext
 from frigate.events.audio import AudioProcessor, join_audio_process
@@ -99,10 +96,7 @@ from frigate.util.go2rtc_config import (
 )
 from frigate.util.go2rtc_process import Go2rtcProcess
 from frigate.util.image import UntrackedSharedMemory
-from frigate.util.ownership import chown_to_runtime
-from frigate.util.platform import INTERNAL_API_PORT, serves_web_app
 from frigate.util.process import FrigateProcess
-from frigate.util.runtime_deps import RuntimeDependencyError
 from frigate.util.services import set_file_limit
 from frigate.util.version import VERSION
 from frigate.watchdog import FrigateWatchdog
@@ -150,7 +144,7 @@ class FrigateApp:
             CONFIG_DIR,
             RECORD_DIR,
             THUMB_DIR,
-            f"{CLIPS_DIR}/cache",
+            os.path.join(CLIPS_DIR, "cache"),
             CACHE_DIR,
             MODEL_CACHE_DIR,
             EXPORT_DIR,
@@ -166,7 +160,6 @@ class FrigateApp:
             if not os.path.exists(d) and not os.path.islink(d):
                 logger.info(f"Creating directory: {d}")
                 os.makedirs(d, exist_ok=True)
-                chown_to_runtime(d)
             else:
                 logger.debug(f"Skipping directory: {d}")
 
@@ -205,7 +198,7 @@ class FrigateApp:
                 with open(f"{CONFIG_DIR}/.vacuum", "w") as f:
                     f.write(str(datetime.datetime.now().timestamp()))
             except PermissionError:
-                logger.error("Unable to write to /config to save DB state")
+                logger.error("Unable to write to %s to save DB state", CONFIG_DIR)
 
         # Migrate DB schema
         migrate_db = SqliteDatabase(self.config.database.path)
@@ -243,35 +236,11 @@ class FrigateApp:
 
         migrate_db.close()
 
-        # a root frigate service creates these as root; wal and shm recreated
-        # later in the run are realigned by the per-boot /config sweep
-        for db_file in (
-            self.config.database.path,
-            f"{self.config.database.path}-wal",
-            f"{self.config.database.path}-shm",
-            self.config.database.path.replace("frigate.db", "backup.db"),
-        ):
-            if os.path.exists(db_file):
-                chown_to_runtime(db_file)
-
     def init_go2rtc(self) -> None:
-        if serves_web_app():
-            self.start_native_go2rtc()
-            return
-
-        for proc in psutil.process_iter(["pid", "name"]):
-            if proc.info["name"] == "go2rtc":
-                logger.info(f"go2rtc process pid: {proc.info['pid']}")
-                self.processes["go2rtc"] = proc.info["pid"]
+        self.start_native_go2rtc()
 
     def start_native_go2rtc(self) -> None:
-        """Stage go2rtc's config and start it.
-
-        The container has an s6 service doing this before Frigate starts. A
-        native install has no supervisor, so the config is generated and the
-        binary started here, which keeps ``python -m frigate`` the only command
-        a user needs to run.
-        """
+        """Generate go2rtc's config and start the managed Windows child process."""
         path = go2rtc_config_path()
 
         # go2rtc reads the config once at startup, so a stale file from a
@@ -356,7 +325,7 @@ class FrigateApp:
                 with open(f"{CONFIG_DIR}/.exports", "w") as f:
                     f.write(str(datetime.datetime.now().timestamp()))
             except PermissionError:
-                logger.error("Unable to write to /config to save export state")
+                logger.error("Unable to write export state to the Windows config directory")
 
             migrate_exports(self.config.ffmpeg, list(self.config.cameras.keys()))
 
@@ -411,26 +380,6 @@ class FrigateApp:
             self.config, self.inter_config_updater, self.dispatcher
         )
         self.dispatcher.profile_manager = self.profile_manager
-
-    def ensure_detector_dependencies(self) -> None:
-        """Install runtimes for the configured detector types.
-
-        Runs before any detector process starts so one install serves them
-        all and the user site is on sys.path before the forkserver copies it.
-        A failure is logged and startup continues; the detector process then
-        fails on its own with a clear import error.
-        """
-        detector_types = {
-            spec.detector
-            for model in self.config.models
-            for spec in self.config.devices_for_model(model)
-        }
-
-        for detector_type in sorted(detector_types):
-            try:
-                api_types[detector_type].ensure_dependencies()
-            except RuntimeDependencyError as err:
-                logger.error("Unable to prepare the %s runtime: %s", detector_type, err)
 
     def start_detectors(self) -> None:
         model_cameras: dict[str, list[str]] = {
@@ -672,7 +621,6 @@ class FrigateApp:
 
         # Ensure global state.
         self.ensure_dirs()
-        self.ensure_detector_dependencies()
 
         # Set soft file limits.
         set_file_limit()
@@ -749,29 +697,23 @@ class FrigateApp:
         )
 
         try:
-            if serves_web_app():
-                # no reverse proxy in front of us, so the API, the web app, the
-                # media directories and recorded video are all served here
-                run_native_web_server(
-                    app, self.config.networking.listen.internal_port, self.stop_event
-                )
-            else:
-                # nginx is the only client, and it reaches the API directly
-                uvicorn.run(
-                    app,
-                    host="127.0.0.1",
-                    port=INTERNAL_API_PORT,
-                    log_level="error",
-                )
+            run_native_web_server(
+                app,
+                self.config.networking.listen.internal_port,
+                self.config.networking.listen.external_port,
+                self.stop_event,
+                tls_enabled=self.config.tls.enabled,
+                tls_cert_file=self.config.tls.cert_file,
+                tls_key_file=self.config.tls.key_file,
+            )
         finally:
             self.stop()
 
     def stop(self) -> None:
         logger.info("Stopping...")
 
-        # used by the docker healthcheck. On other platforms this is a marker
-        # in the runtime directory so a launcher can tell a clean stop from a
-        # crash.
+        # The launcher can use this runtime marker to distinguish a clean stop
+        # from a crash.
         stopping_flag = Path(TMP_DIR) / ".frigate-is-stopping"
 
         try:

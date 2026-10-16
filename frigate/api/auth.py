@@ -11,7 +11,6 @@ import secrets
 import threading
 import time
 from datetime import datetime
-from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
 import requests
@@ -304,59 +303,53 @@ class FailedLoginTracker:
 failed_logins = FailedLoginTracker()
 
 
-def get_remote_addr(request: Request):
-    # fall back to the direct TCP peer when no proxy chain is present
-    direct_addr = request.client.host if request.client else None
+def get_remote_addr(request: Request) -> str:
+    """Resolve the client address without trusting caller-supplied proxy data."""
+    direct_addr = request.client.host if request.client else "127.0.0.1"
+    trusted_proxies: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
 
-    forwarded_for = request.headers.get("x-forwarded-for")
-    if not forwarded_for:
-        return direct_addr or "127.0.0.1"
-
-    route = list(reversed(forwarded_for.split(",")))
-    logger.debug(f"IP Route: {[r for r in route]}")
-    trusted_proxies = []
     for proxy in request.app.frigate_config.auth.trusted_proxies:
         try:
-            network = ipaddress.ip_network(proxy)
+            trusted_proxies.append(ipaddress.ip_network(proxy))
         except ValueError:
-            logger.warning(f"Unable to parse trusted network: {proxy}")
-            continue
-        trusted_proxies.append(network)
+            logger.warning("Unable to parse trusted network: %s", proxy)
 
-    # return the first remote address that is not trusted
-    for addr in route:
+    def is_trusted(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+        for network in trusted_proxies:
+            comparable = address
+            if network.version == 4 and address.version == 6:
+                comparable = address.ipv4_mapped  # type: ignore[assignment]
+                if comparable is None:
+                    continue
+            if comparable.version == network.version and comparable in network:
+                return True
+        return False
+
+    try:
+        direct_ip = ipaddress.ip_address(direct_addr)
+    except ValueError:
+        return direct_addr
+
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if not forwarded_for or not is_trusted(direct_ip):
+        return str(direct_ip)
+
+    # Start with the proxy connected to us, then walk the forwarding chain from
+    # nearest to furthest. The first untrusted hop is the client address.
+    route = [direct_addr, *reversed(forwarded_for.split(","))]
+    logger.debug("IP route: %s", route)
+
+    for raw_address in route:
         try:
-            ip = ipaddress.ip_address(addr.strip())
+            address = ipaddress.ip_address(raw_address.strip())
         except ValueError:
             logger.debug("Invalid address in X-Forwarded-For header")
-            return direct_addr or "127.0.0.1"
+            return str(direct_ip)
 
-        logger.debug(f"Checking {ip} (v{ip.version})")
-        trusted = False
-        for trusted_proxy in trusted_proxies:
-            logger.debug(
-                f"Checking against trusted proxy: {trusted_proxy} (v{trusted_proxy.version})"
-            )
-            if trusted_proxy.version == 4:
-                ipv4 = ip.ipv4_mapped if ip.version == 6 else ip
-                if ipv4 is not None and ipv4 in trusted_proxy:
-                    trusted = True
-                    logger.debug(f"Trusted: {str(ip)} by {str(trusted_proxy)}")
-                    break
-            elif trusted_proxy.version == 6 and ip.version == 6:
-                if ip in trusted_proxy:
-                    trusted = True
-                    logger.debug(f"Trusted: {str(ip)} by {str(trusted_proxy)}")
-                    break
-        if trusted:
-            logger.debug(f"{ip} is trusted")
-            continue
-        else:
-            logger.debug(f"First untrusted IP: {str(ip)}")
-            return str(ip)
+        if not is_trusted(address):
+            return str(address)
 
-    # every hop in the route was trusted, so fall back to the direct peer
-    return direct_addr or "127.0.0.1"
+    return str(direct_ip)
 
 
 def _cleanup_first_load_seen() -> None:
@@ -376,20 +369,6 @@ def get_jwt_secret() -> str:
             f"Using jwt secret from {JWT_SECRET_ENV_VAR} environment variable."
         )
         jwt_secret = os.environ.get(JWT_SECRET_ENV_VAR)
-    # check docker secrets
-    elif os.path.isfile(os.path.join("/run/secrets", JWT_SECRET_ENV_VAR)):
-        logger.debug(f"Using jwt secret from {JWT_SECRET_ENV_VAR} docker secret file.")
-        jwt_secret = (
-            Path(os.path.join("/run/secrets", JWT_SECRET_ENV_VAR)).read_text().strip()
-        )
-    # check for the add-on options file
-    elif os.path.isfile("/data/options.json"):
-        with open("/data/options.json") as f:
-            raw_options = f.read()
-        logger.debug("Using jwt secret from Home Assistant Add-on options file.")
-        options = json.loads(raw_options)
-        jwt_secret = options.get("jwt_secret")
-
     if jwt_secret is None:
         jwt_secret_file = os.path.join(CONFIG_DIR, ".jwt_secret")
         # check .jwt_secrets file
@@ -691,11 +670,9 @@ def auth(request: Request):
 
     success_response = Response("", status_code=202)
 
-    # dont require auth if the request is on the internal port
-    # this header is set by Frigate's nginx proxy, so it cant be spoofed.
-    # the port is the boot-time snapshot rather than the live config value:
-    # nginx's listeners are fixed at container start, so an in-memory config
-    # change must never move the port that is trusted here
+    # Do not require a session on the loopback-only internal listener. The
+    # native gateway sets this header itself, and the boot-time snapshot keeps
+    # an in-memory config edit from moving the trust boundary before restart.
     if (
         int(request.headers.get("x-server-port", default=0))
         == request.app.auth_internal_port
@@ -1262,12 +1239,9 @@ def _is_existing_go2rtc_stream(request: Request, stream_name: str) -> bool:
         return False
 
 
-# nginx proxies these paths straight to go2rtc with authentication-only checks
-# (see auth_request.conf). Each names the desired stream via the `src` query
-# param, so the camera-level check must happen here in the `/auth` subrequest —
-# `require_go2rtc_stream_access` only guards the REST `/go2rtc/streams/{name}`
-# endpoint, not these proxied live-stream paths. The nginx locations are prefix
-# matches, so anything under these paths is proxied too.
+# The native gateway sends these paths directly to go2rtc. Each names the
+# desired stream through the ``src`` query parameter, so camera-level access is
+# checked during authentication; the REST dependency covers a different route.
 GO2RTC_STREAM_PROXY_PATHS = frozenset(
     {
         "/live/mse/api/ws",
@@ -1290,11 +1264,7 @@ def _split_request_uri(request_uri: str) -> tuple[str, str]:
 
 
 def _normalize_request_path(path: str) -> str:
-    """Normalize a raw request path the way nginx does before matching locations.
-
-    nginx percent-decodes the path, merges repeated slashes and resolves dot
-    segments, while `X-Original-URL` carries the raw `$request_uri`.
-    """
+    """Decode and normalize a raw gateway request path before route matching."""
     segments: list[str] = []
     for segment in unquote(path).split("/"):
         if segment in ("", "."):
@@ -1308,12 +1278,7 @@ def _normalize_request_path(path: str) -> str:
     return "/" + "/".join(segments)
 
 
-def _is_go2rtc_stream_proxy_request(path: str, request: Request) -> bool:
-    # nginx marks requests routed through the go2rtc stream locations, and the
-    # normalized path catches them if that marker is ever missing
-    if request.headers.get("x-go2rtc-stream-proxy") == "1":
-        return True
-
+def _is_go2rtc_stream_proxy_request(path: str) -> bool:
     normalized = _normalize_request_path(path)
     return any(normalized.startswith(p) for p in GO2RTC_STREAM_PROXY_PATHS)
 
@@ -1334,7 +1299,7 @@ def deny_response_for_go2rtc_stream(
         return None
 
     path, query = _split_request_uri(original_url)
-    if not _is_go2rtc_stream_proxy_request(path, request):
+    if not _is_go2rtc_stream_proxy_request(path):
         return None
 
     frigate_config = request.app.frigate_config

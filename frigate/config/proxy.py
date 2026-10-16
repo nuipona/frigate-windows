@@ -1,4 +1,4 @@
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from frigate.util.env import EnvString
 
@@ -8,13 +8,15 @@ __all__ = ["ProxyConfig", "HeaderMappingConfig"]
 
 
 class HeaderMappingConfig(FrigateBaseModel):
-    user: str = Field(
+    user: str | None = Field(
         default=None,
+        pattern=r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$",
         title="User header",
         description="Header containing the authenticated username provided by the upstream proxy.",
     )
-    role: str = Field(
+    role: str | None = Field(
         default=None,
+        pattern=r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$",
         title="Role header",
         description="Header containing the authenticated user's role or groups from the upstream proxy.",
     )
@@ -39,7 +41,10 @@ class ProxyConfig(FrigateBaseModel):
     auth_secret: EnvString | None = Field(
         default=None,
         title="Proxy secret",
-        description="Optional secret checked against the X-Proxy-Secret header to verify trusted proxies.",
+        description=(
+            "Secret checked against X-Proxy-Secret. Required when proxy "
+            "identity or role headers are mapped."
+        ),
     )
     default_role: str | None = Field(
         default="viewer",
@@ -51,6 +56,14 @@ class ProxyConfig(FrigateBaseModel):
         title="Separator character",
         description="Character used to split multiple values provided in proxy headers.",
     )
+
+    @model_validator(mode="after")
+    def require_secret_for_identity_headers(self) -> "ProxyConfig":
+        if (self.header_map.user or self.header_map.role) and not self.auth_secret:
+            raise ValueError(
+                "proxy.auth_secret is required when proxy identity headers are mapped"
+            )
+        return self
 
     @field_validator("default_role", mode="before")
     @classmethod

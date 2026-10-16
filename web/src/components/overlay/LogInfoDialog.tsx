@@ -130,36 +130,13 @@ function useHelpfulLinks(content: string | undefined) {
     }
 
     if (
-      content.includes(
-        "/usr/lib/x86_64-linux-gnu/dri/iHD_drv_video.so init failed",
-      ) ||
-      content.includes(
-        "/usr/lib/x86_64-linux-gnu/dri/i965_drv_video.so init failed",
-      ) ||
-      content.includes(
-        "/usr/lib/x86_64-linux-gnu/dri/i965_drv_video.so init failed",
-      ) ||
-      content.includes("No VA display found for device /dev/dri/renderD128")
+      content.includes("Failed to create D3D11 device") ||
+      content.includes("No device available for decoder") ||
+      content.includes("Error creating a MFX session")
     ) {
       links.push({
         link: getLocaleDocUrl("configuration/hardware_acceleration_video"),
-        text: "Verify Hardware Acceleration Setup",
-      });
-    }
-
-    if (content.includes("No EdgeTPU was detected")) {
-      links.push({
-        link: getLocaleDocUrl("troubleshooting/edgetpu"),
-        text: "Troubleshoot Coral",
-      });
-    }
-
-    if (content.includes("The current SHM size of")) {
-      links.push({
-        link: getLocaleDocUrl(
-          "frigate/installation/#calculating-required-shm-size",
-        ),
-        text: "Calculate Correct SHM Size",
+        text: "Verify Windows Hardware Acceleration Setup",
       });
     }
 

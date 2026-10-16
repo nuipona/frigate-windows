@@ -7,7 +7,6 @@
     "logs": {
       "frigate": "Frigate 로그 - Frigate",
       "go2rtc": "Go2RTC 로그 - Frigate",
-      "nginx": "Nginx 로그 - Frigate",
       "websocket": "메시지 로그 - Frigate"
     },
     "health": "시스템지표 - Frigate"
@@ -296,7 +295,6 @@
         "detector_stuck": "감지기 {{detector}}의 응답이 없어 재시작되었습니다",
         "model_download_failed": "{{model}}의 {{file}} 다운로드 실패: {{error}}",
         "skipped_detections": "감지 처리가 지연되어 1분 이상 프레임의 {{pct}}%를 건너뛰었습니다",
-        "shm_too_low": "/dev/shm 할당량({{total}} MB)을 최소 {{min}} MB 이상으로 늘려야 합니다",
         "failed_login_one": "{{user}} 계정 로그인 시도 실패",
         "failed_login_other": "{{user}} 계정 로그인 시도 실패",
         "update_available": "Frigate {{version}} 버전을 사용할 수 있습니다",

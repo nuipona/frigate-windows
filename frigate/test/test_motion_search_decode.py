@@ -26,17 +26,26 @@ def _fake_camera_config(
 
 
 class TestResolveMotionDecodeArgs(unittest.TestCase):
-    def test_vaapi_preset_is_accelerated(self):
-        args = resolve_motion_decode_args(_fake_camera_config("preset-vaapi"))
-        self.assertIn("-hwaccel", args)
-        self.assertIn("vaapi", args)
+    def test_qsv_preset_is_accelerated(self):
+        args = resolve_motion_decode_args(
+            _fake_camera_config("preset-windows-qsv-h264")
+        )
+        self.assertIn("-hwaccel_output_format", args)
+        self.assertIn("qsv", args)
+
+    def test_nvenc_preset_is_accelerated(self):
+        args = resolve_motion_decode_args(_fake_camera_config("preset-windows-nvenc"))
+        self.assertIn("-hwaccel_output_format", args)
+        self.assertIn("cuda", args)
 
     def test_non_nv12_preset_falls_back_to_software(self):
-        # rkmpp produces drm_prime surfaces that do not download to nv12, so it
-        # must resolve to software decode (empty args) rather than risk corrupt
-        # frames.
+        # D3D11VA transfers directly to system memory rather than exposing an
+        # nv12 hardware surface for the fixed motion-search download filter.
         self.assertEqual(
-            resolve_motion_decode_args(_fake_camera_config("preset-rkmpp")), []
+            resolve_motion_decode_args(
+                _fake_camera_config("preset-windows-d3d11va")
+            ),
+            [],
         )
 
     def test_custom_args_fall_back_to_software(self):
@@ -47,19 +56,9 @@ class TestResolveMotionDecodeArgs(unittest.TestCase):
             [],
         )
 
-    def test_nvidia_codec_preset_is_accelerated(self):
-        # Codec-specific nvidia presets resolve to the same cuda decode args as
-        # the bare preset, so eligibility is derived from -hwaccel_output_format
-        # rather than a hardcoded list that omitted these aliases.
-        args = resolve_motion_decode_args(_fake_camera_config("preset-nvidia-h264"))
-        self.assertIn("-hwaccel_output_format", args)
-        self.assertIn("cuda", args)
-
-    def test_software_only_preset_falls_back_to_software(self):
-        # A preset with no -hwaccel_output_format (decoder-based, no GPU surface)
-        # cannot use the nv12 download step, so it decodes in software.
+    def test_unsupported_preset_falls_back_to_software(self):
         self.assertEqual(
-            resolve_motion_decode_args(_fake_camera_config("preset-rpi-64-h264")), []
+            resolve_motion_decode_args(_fake_camera_config("preset-vaapi")), []
         )
 
 

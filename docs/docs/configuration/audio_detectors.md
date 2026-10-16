@@ -392,7 +392,7 @@ With `model: whisper`, recorded `speech` events always use a `whisper` model, re
 
    If you hear speech that's actually important and worth saving/indexing for the future, **just press the transcribe button (the microphone icon) in Explore** on that specific `speech` event - that keeps things explicit, reliable, and under your control.
 
-   Other options are being considered for future versions of Frigate to add transcription options that support external `whisper` Docker containers. A single transcription service could then be shared by Frigate and other applications (for example, Home Assistant Voice), and run on more powerful machines when available.
+   Remote transcription through a configured GenAI provider can move this work to another machine and share a capable service with other applications.
 
 2. Why don't you save live transcription text and use that for `speech` events?
 

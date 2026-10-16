@@ -1,4 +1,5 @@
 import TimeAgo from "../dynamic/TimeAgo";
+import { mediaPathToUrl } from "@/utils/mediaPath";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
@@ -205,7 +206,7 @@ export function AnimatedEventCard({
                     "h-full w-auto min-w-10 select-none object-contain",
                     isSafari && !isLoaded ? "hidden" : "visible",
                   )}
-                  src={`${apiHost}${event.thumb_path.replace("/media/frigate/", "")}`}
+                  src={`${apiHost}${mediaPathToUrl(event.thumb_path)}`}
                   loading={isSafari ? "eager" : "lazy"}
                   onLoad={() => setIsLoaded(true)}
                 />

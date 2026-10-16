@@ -67,6 +67,6 @@ If your stream won't play, has no audio, uses excessive CPU, or otherwise misbeh
 
 ## Homekit Configuration
 
-To export camera streams to HomeKit, Frigate must be configured in docker to use `host` networking mode. HomeKit settings are stored in `/config/go2rtc_homekit.yml` rather than in your Frigate config, and are edited through the go2rtc config editor at `http://<frigate_host>:1984/editor.html`. Pairings are saved back to that file automatically.
+To export streams to HomeKit, store writable pairing state in `go2rtc_homekit.yml` in the Windows config directory. Edit it through the authenticated go2rtc editor at `https://<frigate_host>:8971/go2rtc/editor.html`. See [HomeKit](/integrations/homekit) for firewall, stream, and persistence requirements.
 
 See the [HomeKit integration docs](/integrations/homekit) for the full setup, including the video and audio requirements HomeKit places on the stream.

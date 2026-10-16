@@ -62,7 +62,7 @@ export function buildTranslationPath(
  * Resolve a translated label or description for a config form field.
  *
  * Tries keys in priority order:
- *   1. Type-specific prefixed key (e.g. "detectors.edgetpu.device.label")
+ *   1. Type-specific prefixed key (e.g. "detectors.onnx.device.label")
  *   2. Shared prefixed key with type stripped (e.g. "detectors.device.label")
  *   3. Unprefixed key (e.g. "device.label")
  *
@@ -82,12 +82,12 @@ export function resolveConfigTranslation(
     sectionI18nPrefix &&
     !translationPath.startsWith(`${sectionI18nPrefix}.`)
   ) {
-    // 1. Type-specific prefixed key (e.g. detectors.edgetpu.device.label)
+    // 1. Type-specific prefixed key (e.g. detectors.onnx.device.label)
     const prefixed = `${sectionI18nPrefix}.${translationPath}.${suffix}`;
     if (i18n.exists(prefixed, opts)) return t(prefixed, opts);
 
     // 2. Shared prefixed key — strip leading type segment
-    //    e.g. detectors.edgetpu.model.path → detectors.model.path
+    //    e.g. detectors.onnx.model.path → detectors.model.path
     const dot = translationPath.indexOf(".");
     if (dot !== -1) {
       const shared = `${sectionI18nPrefix}.${translationPath.substring(dot + 1)}.${suffix}`;

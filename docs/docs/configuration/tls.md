@@ -3,76 +3,51 @@ id: tls
 title: TLS
 ---
 
-import ConfigTabs from "@site/src/components/ConfigTabs";
-import TabItem from "@theme/TabItem";
-import NavPath from "@site/src/components/NavPath";
-
 # TLS
 
-Frigate's integrated NGINX server supports TLS certificates. By default Frigate will generate a self signed certificate that will be used for port 8971, stored in `/config/tls` so it survives container recreation. Frigate is designed to make it easy to use whatever tool you prefer to manage certificates.
-
-Frigate is often running behind a reverse proxy that manages TLS certificates for multiple services. You will likely need to set your reverse proxy to allow self signed certificates or you can disable TLS in Frigate's config. However, if you are running on a dedicated device that's separate from your proxy or if you expose Frigate directly to the internet, you may want to configure TLS with valid certificates.
-
-In many deployments, TLS will be unnecessary. Disable it as follows:
-
-<ConfigTabs>
-<TabItem value="ui">
-
-Navigate to <NavPath path="Settings > System > TLS" />.
-
-- Set **Enable TLS** to off if running behind a reverse proxy that handles TLS (default: on)
-
-</TabItem>
-<TabItem value="yaml">
+Frigate's native Windows gateway can serve HTTPS directly on the authenticated public listener (port `8971` by default).
 
 ```yaml
 tls:
-  enabled: False
+  enabled: true
 ```
 
-</TabItem>
-</ConfigTabs>
+On first startup, Frigate creates a self-signed certificate beneath the Windows configuration directory. Browsers will warn until that certificate or its issuing authority is trusted.
 
-## Certificates
+## Custom certificate
 
-TLS certificates can be mounted at `/etc/letsencrypt/live/frigate` using a bind mount or docker volume.
+Configure an unencrypted PEM certificate chain and private key, then restart Frigate:
 
-```yaml {3-4}
-frigate:
-  ...
-  volumes:
-    - /path/to/your/certificate_folder:/etc/letsencrypt/live/frigate:ro
-  ...
+```yaml
+tls:
+  enabled: true
+  cert_file: 'C:\ProgramData\Frigate\config\tls\fullchain.pem'
+  key_file: 'C:\ProgramData\Frigate\config\tls\privkey.pem'
 ```
 
-Within the folder, the private key is expected to be named `privkey.pem` and the certificate is expected to be named `fullchain.pem`. Mounted certificates take precedence over the self signed pair in `/config/tls`.
+When both configured files are absent, Frigate generates a self-signed pair. If only one exists, startup fails rather than overwriting certificate material. The service account must have read access to the private key; other local users should not.
 
-`privkey.pem` must be readable by the runtime user that runs NGINX. Frigate hands it over at startup when the mount is writable; on a `:ro` mount, make it readable by uid 1000 (or your `PUID`) yourself. See [Running as a non-root user](/configuration/non_root).
+A certificate should include every DNS name or IP address clients use in its Subject Alternative Name extension. Keep an unencrypted deployment key only when its ACL is restricted to Administrators, SYSTEM, and the Frigate service account.
 
-Note that certbot uses symlinks, and those can't be followed by the container unless it has access to the targets as well, so if using certbot you'll also have to mount the `archive` folder for your domain, e.g.:
+## Reverse-proxy TLS
 
-```yaml {3-5}
-frigate:
-  ...
-  volumes:
-    - /etc/letsencrypt/live/your.fqdn.net:/etc/letsencrypt/live/frigate:ro
-    - /etc/letsencrypt/archive/your.fqdn.net:/etc/letsencrypt/archive/your.fqdn.net:ro
-  ...
+A trusted Windows reverse proxy may terminate TLS instead. In that design:
 
+- proxy only to Frigate's authenticated public listener unless the proxy runs on the same host and the loopback trust boundary is intentional;
+- preserve WebSocket upgrades and streaming responses;
+- configure proxy identity mapping only with a shared `proxy.auth_secret`;
+- strip client-supplied forwarded identity and secret headers;
+- restrict Frigate's public firewall rule to the proxy when possible.
+
+## Disabling TLS
+
+```yaml
+tls:
+  enabled: false
 ```
 
-Frigate automatically compares the fingerprint of the certificate it loaded, from either location, against the fingerprint of the TLS cert in NGINX every minute. If these differ, the NGINX config is reloaded to pick up the updated certificate.
+Disabling TLS does not disable authentication. Use plain HTTP only on loopback or a trusted network behind a TLS-terminating proxy. Credentials and session cookies are otherwise exposed in transit.
 
-If you issue Frigate valid certificates you will likely want to configure it to run on port 443 so you can access it without a port number like `https://your-frigate-domain.com` by mapping 8971 to 443.
+## Certificate renewal
 
-```yaml {3-4}
-frigate:
-  ...
-  ports:
-    - "443:8971"
-  ...
-```
-
-## ACME Challenge
-
-Frigate also supports hosting the acme challenge files for the HTTP challenge method if needed. The challenge files should be mounted at `/etc/letsencrypt/www`. With a read-only root filesystem this has to be a mounted volume, since Frigate cannot create the directory itself.
+Renew custom certificates before expiration, replace the files atomically, and restart the Windows service. Verify the complete certificate chain from another machine after renewal.

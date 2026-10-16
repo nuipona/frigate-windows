@@ -6,8 +6,7 @@
     "enrichments": "Bagātināšanas statistika - Frigate",
     "logs": {
       "frigate": "Frigate konfigurācija - Frigate",
-      "go2rtc": "Logi Go2RTC - Frigate",
-      "nginx": "Logi Nginx - Frigate"
+      "go2rtc": "Logi Go2RTC - Frigate"
     }
   },
   "stats": {

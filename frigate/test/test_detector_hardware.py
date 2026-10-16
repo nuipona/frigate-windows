@@ -1,169 +1,31 @@
-"""Tests for detection hardware discovery."""
+"""Tests for native Windows detection-hardware discovery."""
 
-import os
-import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
 from frigate.detectors import hardware
-from frigate.detectors.detector_types import config_types
-from frigate.detectors.hardware import HardwareProber
+from frigate.detectors.hardware import HardwareProber, HardwareUnit
 
 
-def write(path: str, content: str = "") -> None:
-    """Create a file and any parent directories."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+class TestCpuHardware(unittest.TestCase):
+    def test_cpu_is_always_available(self):
+        cpu = hardware.detect_cpu()
 
-    with open(path, "w") as f:
-        f.write(content)
-
-
-class HardwareProbeTestCase(unittest.TestCase):
-    """Points every probe at an empty fixture tree, so nothing is found by default."""
-
-    def setUp(self):
-        self.root = tempfile.TemporaryDirectory()
-        self.addCleanup(self.root.cleanup)
-
-        for name in ("SYS_ROOT", "DEV_ROOT", "PROC_ROOT", "ETC_ROOT", "LIB_ROOT"):
-            sub = os.path.join(self.root.name, name.split("_")[0].lower())
-            os.makedirs(sub, exist_ok=True)
-            patcher = patch.object(hardware, name, sub)
-            patcher.start()
-            self.addCleanup(patcher.stop)
-            setattr(self, name.lower(), sub)
-
-        drm = patch.object(hardware, "enumerate_drm_devices", return_value={})
-        self.drm = drm.start()
-        self.addCleanup(drm.stop)
-
-    def probe(self) -> dict[str, hardware.DetectionHardware]:
-        return {found.key: found for found in HardwareProber().probe()}
+        self.assertEqual(cpu.key, "cpu")
+        self.assertEqual(cpu.detector, "cpu")
+        self.assertEqual(cpu.count, 1)
+        self.assertEqual(cpu.units, [HardwareUnit(device="cpu", label="CPU")])
+        self.assertTrue(cpu.unlimited)
 
 
-class TestNoHardware(HardwareProbeTestCase):
-    def test_only_the_cpu_is_reported(self):
-        self.assertEqual(list(self.probe()), ["cpu"])
-
-    def test_the_cpu_is_unlimited(self):
-        self.assertTrue(self.probe()["cpu"].unlimited)
-
-
-class TestCoral(HardwareProbeTestCase):
-    def test_each_apex_device_is_a_unit(self):
-        for name in ("apex_0", "apex_1"):
-            os.makedirs(os.path.join(self.sys_root, "class", "apex", name))
-
-        coral = self.probe()["edgetpu:pci"]
-
-        self.assertEqual(coral.count, 2)
-        self.assertEqual(
-            [unit.device for unit in coral.units],
-            ["edgetpu:pci:0", "edgetpu:pci:1"],
-        )
-
-    def test_a_coral_is_not_unlimited(self):
-        os.makedirs(os.path.join(self.sys_root, "class", "apex", "apex_0"))
-
-        self.assertFalse(self.probe()["edgetpu:pci"].unlimited)
-
-    def test_usb_corals_are_found_by_their_usb_ids(self):
-        usb = os.path.join(self.sys_root, "bus", "usb", "devices")
-        # a Coral reports as Global Unichip before its firmware loads
-        write(os.path.join(usb, "1-1", "idVendor"), "1a6e")
-        write(os.path.join(usb, "1-1", "idProduct"), "089a")
-        # and as Google afterwards
-        write(os.path.join(usb, "1-2", "idVendor"), "18d1")
-        write(os.path.join(usb, "1-2", "idProduct"), "9302")
-
-        coral = self.probe()["edgetpu:usb"]
-
-        self.assertEqual(coral.count, 2)
-        self.assertEqual(coral.units[0].device, "edgetpu:usb:0")
-
-    def test_other_usb_devices_are_ignored(self):
-        usb = os.path.join(self.sys_root, "bus", "usb", "devices")
-        write(os.path.join(usb, "1-1", "idVendor"), "046d")
-        write(os.path.join(usb, "1-1", "idProduct"), "0825")
-
-        self.assertNotIn("edgetpu:usb", self.probe())
-
-
-class TestGpus(HardwareProbeTestCase):
-    def test_a_single_intel_gpu_is_the_unnumbered_device(self):
-        self.drm.return_value = {"0000:00:02.0": "i915"}
-
-        gpu = self.probe()["openvino:GPU"]
-
-        self.assertEqual([unit.device for unit in gpu.units], ["openvino:GPU"])
-        self.assertTrue(gpu.unlimited)
-
-    def test_multiple_intel_gpus_are_numbered(self):
-        self.drm.return_value = {"0000:00:02.0": "i915", "0000:03:00.0": "xe"}
-
-        gpu = self.probe()["openvino:GPU"]
-
-        self.assertEqual(
-            [unit.device for unit in gpu.units],
-            ["openvino:GPU.0", "openvino:GPU.1"],
-        )
-
-    def test_non_gpu_drm_devices_are_ignored(self):
-        self.drm.return_value = {"0000:00:02.0": "virtio-mmio"}
-
-        self.assertNotIn("openvino:GPU", self.probe())
-
-    def test_amd_gpus_run_through_onnx(self):
-        self.drm.return_value = {"0000:03:00.0": "amdgpu"}
-
-        self.assertEqual(self.probe()["onnx:amd"].units[0].device, "onnx")
-
-    def test_an_intel_npu_is_found_by_its_driver(self):
-        accel = os.path.join(self.sys_root, "class", "accel", "accel0", "device")
-        os.makedirs(accel)
-        os.symlink("/drivers/intel_vpu", os.path.join(accel, "driver"))
-
-        self.assertEqual(self.probe()["openvino:NPU"].units[0].device, "openvino:NPU")
-
-    def test_other_accel_devices_are_ignored(self):
-        accel = os.path.join(self.sys_root, "class", "accel", "accel0", "device")
-        os.makedirs(accel)
-        os.symlink("/drivers/something_else", os.path.join(accel, "driver"))
-
-        self.assertNotIn("openvino:NPU", self.probe())
-
-
-class TestWindowsOpenVINODevices(unittest.TestCase):
-    def test_hardware_prober_skips_linux_only_probes(self):
-        linux_probe = MagicMock(name="detect_coral_pci")
-        windows_probe = MagicMock(
-            name="detect_cpu",
-            return_value=hardware._hardware(
-                "cpu", "cpu", "CPU", [hardware.HardwareUnit(device="cpu", label="CPU")]
-            ),
-        )
-
-        with (
-            patch.object(hardware, "IS_WINDOWS", True),
-            patch.object(hardware, "PROBES", (linux_probe,)),
-            patch.object(hardware, "WINDOWS_PROBES", (windows_probe,)),
-        ):
-            found = HardwareProber().probe()
-
-        linux_probe.assert_not_called()
-        windows_probe.assert_called_once()
-        self.assertEqual([item.key for item in found], ["cpu"])
-
-    def test_openvino_devices_are_discovered_without_linux_sysfs(self):
-        available = ["CPU", "GPU.0", "GPU.1", "NPU"]
-        with (
-            patch.object(hardware, "IS_WINDOWS", True),
-            patch.object(
-                hardware, "_openvino_available_devices", return_value=available
-            ),
-        ):
-            gpu = hardware.detect_intel_gpu()
-            npu = hardware.detect_intel_npu()
+class TestOpenVinoHardware(unittest.TestCase):
+    @patch(
+        "frigate.detectors.hardware._openvino_available_devices",
+        return_value=["CPU", "GPU.0", "GPU.1", "NPU"],
+    )
+    def test_devices_are_discovered_through_openvino(self, _available):
+        gpu = hardware.detect_intel_gpu()
+        npu = hardware.detect_intel_npu()
 
         self.assertEqual(
             [unit.device for unit in gpu.units],
@@ -173,166 +35,136 @@ class TestWindowsOpenVINODevices(unittest.TestCase):
         self.assertEqual(gpu.detector, "openvino")
         self.assertEqual(npu.detector, "openvino")
 
-    def test_missing_openvino_devices_are_ignored(self):
-        with (
-            patch.object(hardware, "IS_WINDOWS", True),
-            patch.object(hardware, "_openvino_available_devices", return_value=["CPU"]),
-        ):
-            self.assertIsNone(hardware.detect_intel_gpu())
-            self.assertIsNone(hardware.detect_intel_npu())
+    @patch(
+        "frigate.detectors.hardware._openvino_available_devices",
+        return_value=["CPU"],
+    )
+    def test_missing_accelerators_are_ignored(self, _available):
+        self.assertIsNone(hardware.detect_intel_gpu())
+        self.assertIsNone(hardware.detect_intel_npu())
+
+    @patch("openvino.Core", side_effect=RuntimeError("runtime unavailable"))
+    def test_openvino_enumeration_failure_is_empty(self, _core):
+        self.assertEqual(hardware._openvino_available_devices(), [])
 
 
-class TestNvidia(HardwareProbeTestCase):
-    def _add_gpu(self, address: str, model: str) -> None:
-        write(
-            os.path.join(
-                self.proc_root, "driver", "nvidia", "gpus", address, "information"
-            ),
-            f"Model: \t {model}\nIRQ:   \t 62\n",
+class TestDirectMlHardware(unittest.TestCase):
+    @patch(
+        "frigate.detectors.hardware.get_display_adapters",
+        return_value=["Intel Arc", "AMD Radeon"],
+    )
+    @patch(
+        "frigate.detectors.hardware._onnx_providers",
+        return_value={"DmlExecutionProvider", "CPUExecutionProvider"},
+    )
+    def test_directml_adapters_are_indexed(self, _providers, _adapters):
+        gpu = hardware.detect_directml_gpu()
+
+        self.assertEqual(gpu.key, "onnx:directml")
+        self.assertEqual(
+            [unit.device for unit in gpu.units], ["onnx:0", "onnx:1"]
+        )
+        self.assertEqual(
+            [unit.label for unit in gpu.units], ["Intel Arc", "AMD Radeon"]
         )
 
-    def test_the_model_name_is_read_from_proc(self):
-        self._add_gpu("0000:01:00.0", "NVIDIA GeForce RTX 3060")
+    @patch("frigate.detectors.hardware.get_display_adapters")
+    @patch(
+        "frigate.detectors.hardware._onnx_providers",
+        return_value={"CPUExecutionProvider"},
+    )
+    def test_directml_is_ignored_without_provider(self, _providers, adapters):
+        self.assertIsNone(hardware.detect_directml_gpu())
+        adapters.assert_not_called()
 
-        gpu = self.probe()["onnx:nvidia"]
+    @patch("frigate.detectors.hardware.get_display_adapters", return_value=[])
+    @patch(
+        "frigate.detectors.hardware._onnx_providers",
+        return_value={"DmlExecutionProvider"},
+    )
+    def test_directml_is_ignored_without_display_adapters(
+        self, _providers, _adapters
+    ):
+        self.assertIsNone(hardware.detect_directml_gpu())
 
-        self.assertEqual(gpu.name, "NVIDIA GeForce RTX 3060")
-        self.assertEqual(gpu.units[0].device, "onnx:0")
 
-    def test_multiple_gpus_are_indexed(self):
-        self._add_gpu("0000:01:00.0", "NVIDIA GeForce RTX 3060")
-        self._add_gpu("0000:02:00.0", "NVIDIA GeForce RTX 4090")
+class TestNvidiaHardware(unittest.TestCase):
+    @patch(
+        "frigate.detectors.hardware._onnx_providers",
+        return_value={"CPUExecutionProvider"},
+    )
+    def test_nvidia_is_ignored_without_cuda_provider(self, _providers):
+        self.assertIsNone(hardware.detect_nvidia_gpu())
 
-        gpu = self.probe()["onnx:nvidia"]
+    @patch(
+        "frigate.detectors.hardware._onnx_providers",
+        return_value={"CUDAExecutionProvider"},
+    )
+    @patch("py3nvml.py3nvml.nvmlDeviceGetName", side_effect=[b"RTX 3060", "RTX 4090"])
+    @patch("py3nvml.py3nvml.nvmlDeviceGetHandleByIndex", side_effect=["gpu0", "gpu1"])
+    @patch("py3nvml.py3nvml.nvmlDeviceGetCount", return_value=2)
+    @patch("py3nvml.py3nvml.nvmlInit")
+    def test_nvidia_devices_are_indexed(
+        self, _init, _count, _handle, _name, _providers
+    ):
+        gpu = hardware.detect_nvidia_gpu()
 
+        self.assertEqual(gpu.key, "onnx:nvidia")
         self.assertEqual(gpu.name, "NVIDIA GPU")
-        self.assertEqual([unit.device for unit in gpu.units], ["onnx:0", "onnx:1"])
-        self.assertEqual(gpu.units[1].label, "NVIDIA GeForce RTX 4090")
-
-    def test_a_jetson_runs_through_tensorrt(self):
-        write(os.path.join(self.etc_root, "nv_tegra_release"), "# R36 (release)")
-
-        self.assertEqual(self.probe()["tensorrt"].units[0].device, "tensorrt:0")
-
-
-class TestAccelerators(HardwareProbeTestCase):
-    def test_the_neural_engine_is_found_by_lighters_provider_library(self):
-        write(os.path.join(self.lib_root, "lighter", "liblighter_ane_ep.so"))
-
-        with patch.dict(os.environ, clear=False) as env:
-            env.pop("LIGHTER_ANE_EP", None)
-            ane = self.probe()["onnx:lighter"]
-
-        self.assertEqual(ane.detector, "onnx")
-        self.assertEqual(ane.units[0].device, "onnx")
-        self.assertEqual(ane.units[0].label, "Neural Engine")
-
-    def test_the_neural_engine_is_found_where_lighter_ane_ep_points(self):
-        library = os.path.join(self.root.name, "elsewhere", "liblighter_ane_ep.so")
-        write(library)
-
-        with patch.dict(os.environ, {"LIGHTER_ANE_EP": library}):
-            self.assertIn("onnx:lighter", self.probe())
-
-    def test_no_neural_engine_is_reported_without_the_library(self):
-        with patch.dict(os.environ, clear=False) as env:
-            env.pop("LIGHTER_ANE_EP", None)
-            self.assertNotIn("onnx:lighter", self.probe())
-
-    def test_hailo_is_found_by_its_device_node(self):
-        write(os.path.join(self.dev_root, "hailo0"))
-
-        self.assertEqual(self.probe()["hailo"].units[0].device, "hailo:PCIe")
-
-    def test_each_memryx_node_is_a_unit(self):
-        write(os.path.join(self.dev_root, "memx0"))
-        write(os.path.join(self.dev_root, "memx1"))
-
-        memryx = self.probe()["memryx"]
-
         self.assertEqual(
-            [unit.device for unit in memryx.units],
-            ["memryx:PCIe:0", "memryx:PCIe:1"],
+            [unit.device for unit in gpu.units], ["onnx:0", "onnx:1"]
         )
-        self.assertFalse(memryx.unlimited)
-
-    def test_each_deepx_node_is_a_unit(self):
-        write(os.path.join(self.dev_root, "dxrt0"))
-        write(os.path.join(self.dev_root, "dxrt1"))
-
-        deepx = self.probe()["deepx"]
-
         self.assertEqual(
-            [unit.device for unit in deepx.units],
-            ["deepx:PCIe:0", "deepx:PCIe:1"],
+            [unit.label for unit in gpu.units], ["RTX 3060", "RTX 4090"]
         )
 
-    def test_a_deepx_npu_is_unlimited(self):
-        # the host daemon multiplexes, so one module takes several processes
-        write(os.path.join(self.dev_root, "dxrt0"))
+    @patch(
+        "frigate.detectors.hardware._onnx_providers",
+        return_value={"CUDAExecutionProvider"},
+    )
+    @patch("py3nvml.py3nvml.nvmlInit", side_effect=RuntimeError("driver missing"))
+    def test_nvml_failure_is_ignored(self, _init, _providers):
+        self.assertIsNone(hardware.detect_nvidia_gpu())
 
-        self.assertTrue(self.probe()["deepx"].unlimited)
 
-    def test_no_deepx_is_reported_without_a_node(self):
-        self.assertNotIn("deepx", self.probe())
-
-    def test_a_supported_rockchip_soc_is_reported(self):
-        write(
-            os.path.join(self.proc_root, "device-tree", "compatible"),
-            "rockchip,rk3588\x00",
+class TestHardwareProber(unittest.TestCase):
+    def test_uses_only_native_windows_probes(self):
+        first = MagicMock(
+            return_value=hardware._hardware(
+                "cpu", "cpu", "CPU", [HardwareUnit(device="cpu", label="CPU")]
+            )
         )
+        second = MagicMock(return_value=None)
 
-        self.assertEqual(self.probe()["rknn"].units[0].device, "rknn")
+        with patch.object(hardware, "WINDOWS_PROBES", (first, second)):
+            found = HardwareProber().probe()
 
-    def test_an_unsupported_soc_is_ignored(self):
-        write(
-            os.path.join(self.proc_root, "device-tree", "compatible"),
-            "nvidia,tegra\x00",
-        )
-
-        self.assertNotIn("rknn", self.probe())
-
-    def test_axengine_is_found_by_its_control_node(self):
-        write(os.path.join(self.dev_root, "axcl_host"))
-
-        self.assertEqual(self.probe()["axengine"].units[0].device, "axengine")
-
-    def test_synaptics_is_found_by_its_device_node(self):
-        write(os.path.join(self.dev_root, "synap"))
-
-        self.assertEqual(self.probe()["synaptics"].units[0].device, "synaptics")
-
-
-class TestProber(HardwareProbeTestCase):
-    def test_the_result_is_cached_until_refreshed(self):
-        prober = HardwareProber()
-        self.assertNotIn("edgetpu:pci", {found.key for found in prober.probe()})
-
-        os.makedirs(os.path.join(self.sys_root, "class", "apex", "apex_0"))
-
-        self.assertNotIn("edgetpu:pci", {found.key for found in prober.probe()})
-        self.assertIn(
-            "edgetpu:pci", {found.key for found in prober.probe(refresh=True)}
-        )
+        first.assert_called_once_with()
+        second.assert_called_once_with()
+        self.assertEqual([item.key for item in found], ["cpu"])
 
     def test_a_failing_probe_does_not_break_the_rest(self):
-        with patch.object(hardware, "detect_hailo", side_effect=OSError("boom")):
-            self.assertIn("cpu", self.probe())
+        broken = MagicMock(side_effect=RuntimeError("probe failed"))
+        broken.__name__ = "broken_probe"
+        cpu = MagicMock(return_value=hardware.detect_cpu())
 
-    def test_unlimited_tracks_the_detector_shareable_flag(self):
-        for name in ("apex_0",):
-            os.makedirs(os.path.join(self.sys_root, "class", "apex", name))
-        write(os.path.join(self.dev_root, "memx0"))
-        self.drm.return_value = {"0000:00:02.0": "i915"}
+        with patch.object(hardware, "WINDOWS_PROBES", (broken, cpu)):
+            found = HardwareProber().probe()
 
-        for found in self.probe().values():
-            config_class = config_types.get(found.detector)
+        self.assertEqual([item.key for item in found], ["cpu"])
 
-            if config_class is None:
-                continue
+    def test_result_is_cached_until_refreshed(self):
+        probe = MagicMock(return_value=hardware.detect_cpu())
 
-            with self.subTest(hardware=found.key):
-                self.assertEqual(found.unlimited, config_class.shareable)
+        with patch.object(hardware, "WINDOWS_PROBES", (probe,)):
+            prober = HardwareProber()
+            first = prober.probe()
+            second = prober.probe()
+            refreshed = prober.probe(refresh=True)
+
+        self.assertIs(first, second)
+        self.assertIsNot(second, refreshed)
+        self.assertEqual(probe.call_count, 2)
 
 
 if __name__ == "__main__":

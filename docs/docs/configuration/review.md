@@ -27,7 +27,7 @@ Not every segment of video captured by Frigate may be of the same level of inter
 
 :::note
 
-Alerts and detections categorize the tracked objects in review items, but Frigate must first detect those objects with your configured object detector (Coral, OpenVINO, etc). By default, the object tracker only detects `person`. Setting `labels` for `alerts` and `detections` does not automatically enable detection of new objects. To detect more than `person`, you should add more labels via <NavPath path="Settings > Global configuration > Objects" /> or <NavPath path="Settings > Camera configuration > Objects" /> and select your camera. Alternatively, add the following to your config:
+Alerts and detections categorize the tracked objects in review items, but Frigate must first detect those objects with your configured CPU, OpenVINO, ONNX, or ZMQ object detector. By default, the object tracker only detects `person`. Setting `labels` for `alerts` and `detections` does not automatically enable detection of new objects. To detect more than `person`, you should add more labels via <NavPath path="Settings > Global configuration > Objects" /> or <NavPath path="Settings > Camera configuration > Objects" /> and select your camera. Alternatively, add the following to your config:
 
 ```yaml
 objects:

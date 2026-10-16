@@ -11,7 +11,7 @@ This is the answer to the common question _"how do I stop Frigate from deleting 
 
 :::tip
 
-Exports are stored under `/media/frigate/exports`, separate from your recordings, and are not counted against or removed by recording retention. They remain on disk until you delete them, so be aware that they accumulate over time.
+Exports are stored in the `exports` folder beneath the configured Windows media directory, separate from recordings. Recording retention does not remove them; they remain until you delete them.
 
 :::
 

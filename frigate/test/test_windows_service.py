@@ -85,6 +85,47 @@ class TestModuleSurface(unittest.TestCase):
         self.assertEqual(FrigateService._svc_name_, "Frigate")
 
 
+class TestFrigateServiceStart(unittest.TestCase):
+    def test_child_starts_in_source_root(self):
+        """The SCM's System32 cwd must not hide database migrations."""
+        service = FrigateService.__new__(FrigateService)
+        process = Mock()
+        env = {"FRIGATE_SERVICE_MODE": "1"}
+        source_root = os.path.join("C:\\", "Frigate")
+
+        with (
+            patch.object(windows_service, "frigate_python", return_value="python.exe"),
+            patch.object(windows_service, "get_source_root", return_value=source_root),
+            patch.object(
+                windows_service.subprocess, "Popen", return_value=process
+            ) as popen,
+        ):
+            started = service._start_frigate(Mock(), env)
+
+        self.assertIs(started, process)
+        popen.assert_called_once_with(
+            ["python.exe", "-m", "frigate"],
+            cwd=source_root,
+            stdin=sp.DEVNULL,
+            stdout=None,
+            stderr=None,
+            env=env,
+        )
+
+    def test_start_failure_is_reported(self):
+        service = FrigateService.__new__(FrigateService)
+        logger = Mock()
+
+        with patch.object(
+            windows_service.subprocess,
+            "Popen",
+            side_effect=OSError("cannot start"),
+        ):
+            self.assertIsNone(service._start_frigate(logger, {}))
+
+        logger.error.assert_called_once()
+
+
 class TestFrigateServiceStopLifecycle(unittest.TestCase):
     def _service(self) -> FrigateService:
         service = FrigateService.__new__(FrigateService)

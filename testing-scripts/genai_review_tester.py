@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Interactive tester for GenAI review description prompts.
 
 Reuses Frigate's GenAI provider plugins and prompt builders so results match

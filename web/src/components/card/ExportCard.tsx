@@ -1,4 +1,5 @@
 import ActivityIndicator from "../indicators/activity-indicator";
+import { mediaPathToUrl } from "@/utils/mediaPath";
 import { Button } from "../ui/button";
 import { Progress } from "../ui/progress";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -69,7 +70,7 @@ export function CaseCard({
       {firstExport && (
         <img
           className="absolute inset-0 size-full object-cover"
-          src={`${baseUrl}${firstExport.thumb_path.replace("/media/frigate/", "")}`}
+          src={`${baseUrl}${mediaPathToUrl(firstExport.thumb_path)}`}
           alt=""
         />
       )}
@@ -310,7 +311,7 @@ export function ExportCard({
             {exportedRecording.thumb_path.length > 0 ? (
               <img
                 className="absolute inset-0 aspect-video size-full rounded-lg object-cover md:rounded-2xl"
-                src={`${baseUrl}${exportedRecording.thumb_path.replace("/media/frigate/", "")}`}
+                src={`${baseUrl}${mediaPathToUrl(exportedRecording.thumb_path)}`}
                 onLoad={() => setLoading(false)}
               />
             ) : (
@@ -349,7 +350,7 @@ export function ExportCard({
                 >
                   <a
                     download
-                    href={`${baseUrl}${exportedRecording.video_path.replace("/media/frigate/", "")}`}
+                    href={`${baseUrl}${mediaPathToUrl(exportedRecording.video_path)}`}
                     onClick={(e) => e.stopPropagation()}
                   >
                     {t("tooltip.downloadVideo")}

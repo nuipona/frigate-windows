@@ -1,4 +1,5 @@
 import { baseUrl } from "@/api/baseUrl";
+import { mediaPathToUrl } from "@/utils/mediaPath";
 import { useJobStatus } from "@/api/ws";
 import {
   ActiveExportJobCard,
@@ -700,7 +701,7 @@ function Exports() {
             }
           >
             <source
-              src={`${baseUrl}${selected?.video_path?.replace("/media/frigate/", "")}`}
+              src={`${baseUrl}${mediaPathToUrl(selected?.video_path)}`}
               type="video/mp4"
             />
           </video>

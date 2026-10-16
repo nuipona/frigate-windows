@@ -7,7 +7,6 @@
     "logs": {
       "frigate": "Frigate 日誌 - Frigate",
       "go2rtc": "Go2RTC 日誌 - Frigate",
-      "nginx": "Nginx 日誌 - Frigate",
       "websocket": "訊息日誌 - Frigate"
     }
   },

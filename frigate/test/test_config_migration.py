@@ -12,7 +12,6 @@ from frigate.util.config import (
     CURRENT_CONFIG_VERSION,
     migrate_frigate_config,
     migrate_models,
-    rename_hailo_detector,
 )
 
 
@@ -26,7 +25,7 @@ class TestMigrateModels(unittest.TestCase):
     def test_model_settings_are_carried_over(self):
         migrated = migrate_models(
             {
-                "detectors": {"coral": {"type": "edgetpu", "device": "pci:0"}},
+                "detectors": {"ov": {"type": "openvino", "device": "GPU"}},
                 "model": {"path": "plus://abc", "width": 320},
             }
         )
@@ -38,25 +37,11 @@ class TestMigrateModels(unittest.TestCase):
                     "scene": "default",
                     "path": "plus://abc",
                     "width": 320,
-                    "devices": ["edgetpu:pci:0"],
+                    "devices": ["openvino:GPU"],
                 }
             ],
         )
         self.assertNotIn("model", migrated)
-
-    def test_multiple_corals_become_multiple_devices(self):
-        migrated = migrate_models(
-            {
-                "detectors": {
-                    "coral1": {"type": "edgetpu", "device": "pci:0"},
-                    "coral2": {"type": "edgetpu", "device": "pci:1"},
-                }
-            }
-        )
-
-        self.assertEqual(
-            migrated["models"][0]["devices"], ["edgetpu:pci:0", "edgetpu:pci:1"]
-        )
 
     def test_several_detectors_on_one_device_stay_separate(self):
         # a repeated device is now what running two inference processes on one
@@ -73,51 +58,6 @@ class TestMigrateModels(unittest.TestCase):
         self.assertEqual(
             migrated["models"][0]["devices"], ["openvino:GPU", "openvino:GPU"]
         )
-
-    def test_repeated_exclusive_devices_are_collapsed(self):
-        # two detectors both grabbing the first TPU was never really two TPUs
-        migrated = migrate_models(
-            {
-                "detectors": {
-                    "coral_0": {"type": "edgetpu", "device": "usb"},
-                    "coral_1": {"type": "edgetpu", "device": "usb"},
-                }
-            }
-        )
-
-        self.assertEqual(migrated["models"][0]["devices"], ["edgetpu:usb"])
-
-    def test_detectors_that_named_the_device_field_differently(self):
-        migrated = migrate_models(
-            {
-                "detectors": {
-                    "rk": {"type": "rknn", "num_cores": 2},
-                }
-            }
-        )
-
-        self.assertEqual(migrated["models"][0]["devices"], ["rknn:2"])
-
-    def test_empty_edgetpu_device_is_kept(self):
-        # an empty device selects a native Coral, which is not the same as
-        # letting the delegate pick
-        migrated = migrate_models(
-            {"detectors": {"coral": {"type": "edgetpu", "device": ""}}}
-        )
-
-        self.assertEqual(migrated["models"][0]["devices"], ["edgetpu:"])
-
-    def test_model_path_overrides_the_model(self):
-        migrated = migrate_models(
-            {
-                "detectors": {
-                    "coral": {"type": "edgetpu", "model_path": "/custom.tflite"}
-                },
-                "model": {"path": "/ignored.tflite", "width": 320},
-            }
-        )
-
-        self.assertEqual(migrated["models"][0]["path"], "/custom.tflite")
 
     def test_no_detectors_falls_back_to_cpu(self):
         migrated = migrate_models({"model": {"width": 320}})
@@ -150,7 +90,7 @@ class TestMigrateModels(unittest.TestCase):
                 {
                     "detectors": {
                         "ov": {"type": "openvino", "device": "GPU"},
-                        "coral": {"type": "edgetpu", "device": "pci:0"},
+                        "cpu": {"type": "cpu", "num_threads": 3},
                     }
                 }
             )
@@ -163,61 +103,6 @@ class TestMigrateModels(unittest.TestCase):
         )
 
         self.assertEqual(migrated["mqtt"], {"host": "mqtt"})
-
-
-class TestMigrateRenamedDetectors(unittest.TestCase):
-    def test_a_hailo_detector_is_renamed(self):
-        migrated = migrate_models(
-            {"detectors": {"hailo": {"type": "hailo8l", "device": "PCIe"}}}
-        )
-
-        self.assertEqual(migrated["models"][0]["devices"], ["hailo:PCIe"])
-
-    def test_a_hailo_detector_without_a_device(self):
-        migrated = migrate_models({"detectors": {"hailo": {"type": "hailo8l"}}})
-
-        self.assertEqual(migrated["models"][0]["devices"], ["hailo"])
-
-    def test_two_hailo_detectors_stay_separate(self):
-        # the shareable lookup has to resolve through the renamed key
-        migrated = migrate_models(
-            {
-                "detectors": {
-                    "hailo1": {"type": "hailo8l", "device": "PCIe"},
-                    "hailo2": {"type": "hailo8l", "device": "PCIe"},
-                }
-            }
-        )
-
-        self.assertEqual(migrated["models"][0]["devices"], ["hailo:PCIe", "hailo:PCIe"])
-
-
-class TestRenameHailoDetector(unittest.TestCase):
-    def test_a_renamed_detector_is_updated(self):
-        migrated = rename_hailo_detector(
-            {"models": [{"devices": ["hailo8l:PCIe", "hailo8l"]}]}
-        )
-
-        self.assertEqual(migrated["models"][0]["devices"], ["hailo:PCIe", "hailo"])
-
-    def test_other_detectors_are_untouched(self):
-        migrated = rename_hailo_detector(
-            {"models": [{"devices": ["openvino:GPU", "cpu"]}]}
-        )
-
-        self.assertEqual(migrated["models"][0]["devices"], ["openvino:GPU", "cpu"])
-
-    def test_renaming_is_idempotent(self):
-        once = rename_hailo_detector({"models": [{"devices": ["hailo8l:PCIe"]}]})
-        twice = rename_hailo_detector(once)
-
-        self.assertEqual(twice["models"][0]["devices"], ["hailo:PCIe"])
-
-    def test_a_config_without_models_is_left_alone(self):
-        self.assertEqual(
-            rename_hailo_detector({"mqtt": {"enabled": False}}),
-            {"mqtt": {"enabled": False}},
-        )
 
 
 class TestMigrateConfigFile(unittest.TestCase):
@@ -300,38 +185,6 @@ class TestMigrateConfigFile(unittest.TestCase):
         self.assertFalse(
             os.path.exists(os.path.join(self.temp_dir.name, "backup_config.yaml"))
         )
-
-    def test_a_legacy_hailo_detector_lands_on_the_hailo_key(self):
-        # the detectors key is folded into models after the version chain has
-        # run, so the rename has to happen there too
-        migrated = self._migrate(
-            "mqtt:\n"
-            "  enabled: false\n"
-            "detectors:\n"
-            "  hailo:\n"
-            "    type: hailo8l\n"
-            "    device: PCIe\n"
-            "cameras: {}\n"
-            "version: 0.18-0\n"
-        )
-
-        self.assertEqual(migrated["models"][0]["devices"], ["hailo:PCIe"])
-        self.assertNotIn("detectors", migrated)
-
-    def test_a_hailo8l_device_is_renamed_at_the_current_version(self):
-        migrated = self._migrate(
-            "mqtt:\n"
-            "  enabled: false\n"
-            "models:\n"
-            "  - scene: default\n"
-            "    devices:\n"
-            "      - hailo8l:PCIe\n"
-            "cameras: {}\n"
-            f"version: {CURRENT_CONFIG_VERSION}\n"
-        )
-
-        self.assertEqual(migrated["models"][0]["devices"], ["hailo:PCIe"])
-
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -1533,15 +1533,6 @@
       "none": "Niciunul",
       "useGlobalSetting": "Moștenește din setarea globală",
       "presetLabels": {
-        "preset-rpi-64-h264": "Raspberry Pi (H.264)",
-        "preset-rpi-64-h265": "Raspberry Pi (H.265)",
-        "preset-vaapi": "VAAPI (GPU Intel/AMD)",
-        "preset-intel-qsv-h264": "Intel QuickSync (H.264)",
-        "preset-intel-qsv-h265": "Intel QuickSync (H.265)",
-        "preset-nvidia": "GPU NVIDIA",
-        "preset-jetson-h264": "NVIDIA Jetson (H.264)",
-        "preset-jetson-h265": "NVIDIA Jetson (H.265)",
-        "preset-rkmpp": "Rockchip RKMPP",
         "preset-http-jpeg-generic": "HTTP JPEG (Generic)",
         "preset-http-mjpeg-generic": "HTTP MJPEG (Generic)",
         "preset-http-reolink": "HTTP - Camere Reolink",
@@ -1556,9 +1547,7 @@
         "preset-record-generic-audio-aac": "Înregistrare (Generic + Audio în AAC)",
         "preset-record-mjpeg": "Înregistrare - Camere MJPEG",
         "preset-record-jpeg": "Înregistrare - Camere JPEG",
-        "preset-record-ubiquiti": "Înregistrare - Camere Ubiquiti",
-        "preset-apple-silicon-h264": "Apple Silicon (H.264)",
-        "preset-apple-silicon-h265": "Apple Silicon (H.265)"
+        "preset-record-ubiquiti": "Înregistrare - Camere Ubiquiti"
       },
       "sameAsRecord": "La fel ca argumentele de ieșire pentru înregistrare"
     },
@@ -1923,11 +1912,8 @@
       "audioExclude": "Exclude",
       "hardwareNone": "Fără accelerare hardware",
       "hardwareAuto": "Automat (recomandat)",
-      "hardwareVaapi": "VAAPI",
       "hardwareCuda": "CUDA",
-      "hardwareV4l2m2m": "V4L2 M2M",
       "hardwareDxva2": "DXVA2",
-      "hardwareVideotoolbox": "VideoToolbox",
       "addVideoCodec": "Adaugă codec video",
       "addAudioCodec": "Adaugă codec audio",
       "removeCodec": "Elimină codecul"
@@ -2112,8 +2098,7 @@
       "countRecommended_other": "Recomandat pentru {{count}} de camere",
       "unrecognized": "Acest model este configurat pentru hardware care nu a fost găsit pe acest sistem: {{devices}}",
       "description": "Hardware-ul pe care acest model își rulează detecția.",
-      "detectorCountDescription": "Câte procese de detecție să ruleze pe acest hardware. Mai mulți detectori fac față mai multor camere, cu consum suplimentar de memorie.",
-      "unitsDescription": "Fiecare unitate rulează propriul proces de detecție. O unitate care nu poate fi partajată, cum ar fi un Coral, poate fi utilizată de un singur model."
+      "detectorCountDescription": "Câte procese de detecție să ruleze pe acest hardware. Mai mulți detectori fac față mai multor camere, cu consum suplimentar de memorie."
     },
     "tabs": {
       "plus": "Frigate+",

@@ -45,9 +45,9 @@ export default function StorageMetrics({
     }
 
     const totalStorage = {
-      used: stats.service.storage["/media/frigate/recordings"]["used"],
+      used: stats.service.storage["recordings"]["used"],
       camera: 0,
-      total: stats.service.storage["/media/frigate/recordings"]["total"],
+      total: stats.service.storage["recordings"]["total"],
     };
 
     Object.values(cameraStorage).forEach(
@@ -96,7 +96,7 @@ export default function StorageMetrics({
       return undefined;
     }
 
-    const shmFrameCount = stats.service.storage["/dev/shm"]?.shm_frame_count;
+    const shmFrameCount = stats.service.storage["memory"]?.shm_frame_count;
 
     if (!shmFrameCount || shmFrameCount <= 0) {
       return undefined;
@@ -123,7 +123,7 @@ export default function StorageMetrics({
   // on Windows and macOS shared memory is backed by the page file, so it
   // grows on demand and there is no fixed size the user can raise
   const pageFileBacked =
-    stats?.service.storage["/dev/shm"]?.page_file_backed ?? false;
+    stats?.service.storage["memory"]?.page_file_backed ?? false;
 
   if (!cameraStorage || !stats || !totalStorage || !config) {
     return (
@@ -215,8 +215,8 @@ export default function StorageMetrics({
                 </Popover>
               )}
               {!pageFileBacked &&
-                stats.service.storage["/dev/shm"]["total"] <
-                  (stats.service.storage["/dev/shm"]["min_shm"] ?? 0) && (
+                stats.service.storage["memory"]["total"] <
+                  (stats.service.storage["memory"]["min_shm"] ?? 0) && (
                   <Popover>
                     <PopoverTrigger asChild>
                       <button
@@ -232,8 +232,8 @@ export default function StorageMetrics({
                     <PopoverContent className="w-80">
                       <div className="space-y-2">
                         {t("storage.shm.warning", {
-                          total: stats.service.storage["/dev/shm"]["total"],
-                          min_shm: stats.service.storage["/dev/shm"]["min_shm"],
+                          total: stats.service.storage["memory"]["total"],
+                          min_shm: stats.service.storage["memory"]["min_shm"],
                         })}
                         <div className="mt-2 flex items-center text-primary">
                           <Link
@@ -256,8 +256,8 @@ export default function StorageMetrics({
           </div>
           <StorageGraph
             graphId="general-shared-memory"
-            used={stats.service.storage["/dev/shm"]["used"]}
-            total={stats.service.storage["/dev/shm"]["total"]}
+            used={stats.service.storage["memory"]["used"]}
+            total={stats.service.storage["memory"]["total"]}
           />
         </div>
       </div>

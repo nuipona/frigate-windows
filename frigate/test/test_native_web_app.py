@@ -7,9 +7,12 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from starlette.requests import Request
+from starlette.responses import Response
 
 from frigate.api.auth import deny_response_for_go2rtc_stream
 from frigate.api.web import (
+    InProcessAuth,
+    NativeAuthMiddleware,
     _serve,
     build_auth_scope,
     create_native_web_app,
@@ -120,6 +123,90 @@ class TestNativeWebApp(unittest.TestCase):
 
             with TestClient(app):
                 sweep.assert_called_once()
+
+
+class TestNativeProxyIdentity(unittest.IsolatedAsyncioTestCase):
+    def _api_app(self):
+        return SimpleNamespace(
+            frigate_config=SimpleNamespace(
+                auth=SimpleNamespace(enabled=False),
+                proxy=SimpleNamespace(
+                    auth_secret="proxy-secret",
+                    header_map=SimpleNamespace(
+                        user="x-auth-user",
+                        role="x-auth-groups",
+                    ),
+                ),
+            )
+        )
+
+    @staticmethod
+    def _scope(secret: str | None = None) -> dict:
+        headers = [(b"host", b"frigate.local"), (b"x-auth-user", b"alice")]
+        if secret is not None:
+            headers.append((b"x-proxy-secret", secret.encode()))
+        return {
+            "type": "http",
+            "method": "GET",
+            "scheme": "https",
+            "path": "/api/config",
+            "raw_path": b"/api/config",
+            "query_string": b"",
+            "headers": headers,
+        }
+
+    async def test_mapped_identity_requires_the_proxy_secret(self) -> None:
+        auth = InProcessAuth(self._api_app())
+
+        with patch("frigate.api.web.auth_check") as auth_check:
+            for supplied in (None, "wrong-secret"):
+                with self.subTest(secret=supplied):
+                    status, headers, body = await auth(self._scope(supplied), 8971)
+                    self.assertEqual((status, headers, body), (401, [], b""))
+            auth_check.assert_not_called()
+
+    async def test_valid_proxy_secret_forwards_only_configured_identity(self) -> None:
+        auth = InProcessAuth(self._api_app())
+        observed_headers: dict[str, str] = {}
+
+        def authorize(request: Request) -> Response:
+            nonlocal observed_headers
+            observed_headers = dict(request.headers)
+            return Response(
+                status_code=202,
+                headers={"remote-user": request.headers["x-auth-user"]},
+            )
+
+        scope = self._scope("proxy-secret")
+        scope["headers"].extend(
+            [
+                (b"remote-role", b"admin"),
+                (b"x-unrelated-identity", b"spoofed"),
+            ]
+        )
+        with patch("frigate.api.web.auth_check", side_effect=authorize):
+            status, headers, _body = await auth(scope, 8971)
+
+        self.assertEqual(status, 202)
+        self.assertIn((b"remote-user", b"alice"), headers)
+        self.assertEqual(observed_headers["x-proxy-secret"], "proxy-secret")
+        self.assertEqual(observed_headers["x-auth-user"], "alice")
+        self.assertNotIn("remote-role", observed_headers)
+        self.assertNotIn("x-unrelated-identity", observed_headers)
+
+    def test_client_proxy_headers_are_removed_before_dispatch(self) -> None:
+        scope = self._scope("proxy-secret")
+        scope["headers"].extend(
+            [(b"remote-user", b"mallory"), (b"remote-role", b"admin")]
+        )
+
+        stripped = NativeAuthMiddleware._strip_proxy_headers(scope)
+        names = {name.lower() for name, _value in stripped}
+
+        self.assertNotIn(b"x-proxy-secret", names)
+        self.assertNotIn(b"remote-user", names)
+        self.assertNotIn(b"remote-role", names)
+        self.assertIn(b"x-auth-user", names)
 
 
 class TestNeedsAuth(unittest.TestCase):

@@ -3,14 +3,14 @@ import type { SectionConfigOverrides } from "./types";
 const tls: SectionConfigOverrides = {
   base: {
     sectionDocs: "/configuration/tls",
-    restartRequired: ["enabled"],
-    fieldOrder: ["enabled", "cert", "key"],
-    advancedFields: [],
+    restartRequired: ["enabled", "cert_file", "key_file"],
+    fieldOrder: ["enabled", "cert_file", "key_file"],
+    advancedFields: ["cert_file", "key_file"],
     uiSchema: {
-      cert: {
+      cert_file: {
         "ui:options": { size: "md" },
       },
-      key: {
+      key_file: {
         "ui:options": { size: "md" },
       },
     },

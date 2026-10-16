@@ -811,8 +811,7 @@
         "description": "Quan està activat, arrenca la Frigate en mode segur amb funcions reduïdes per a la resolució de problemes."
     },
     "environment_vars": {
-        "label": "Variables d'entorn",
-        "description": "Parells clau/valor de les variables d'entorn a establir per al procés Frigate al sistema operatiu Home Assistant. Els usuaris que no són usuaris de HAOS han d'utilitzar la configuració de la variable d'entorn Docker."
+        "label": "Variables d'entorn"
     },
     "logger": {
         "label": "Registre",
@@ -1019,7 +1018,6 @@
         },
         "listen": {
             "label": "S'està escoltant la configuració dels ports",
-            "description": "Configuració per a ports d'escolta interns i externs. Això és per a usuaris avançats. Per a la majoria de casos d'ús es recomana canviar la secció de ports del fitxer Docker.",
             "internal": {
                 "label": "Port intern",
                 "description": "Port d'escolta intern per a la Frigate (predeterminat 5000)."
@@ -1089,8 +1087,7 @@
                 "description": "Habilita el monitoratge d'amplada de banda per procés per als processos i detectors de ffmpeg de càmera (requereix capacitats)."
             },
             "intel_gpu_device": {
-                "label": "Dispositiu GPU d'Intel",
-                "description": "Adreça de bus PCI o camí del dispositiu DRM (p. ex. /dev/dri/card1) utilitzat per fixar les estadístiques de GPU d'Intel a un dispositiu específic quan hi ha múltiples."
+                "label": "Dispositiu GPU d'Intel"
             }
         },
         "version_check": {
@@ -1508,8 +1505,7 @@
             "description": "Un nom per a l'entorn de la càmera per al qual s'utilitza aquest model, com ara «termal». Les càmeres seleccionen un model establint detect.scene a un valor coincident, i el model «predeterminat» és utilitzat per qualsevol càmera que no n'estableixi un."
         },
         "devices": {
-            "label": "hardware de detecció",
-            "description": "Aquest model funciona com a '<detector>' o '<detector>:<device>' (per exemple 'edgetpu:pci:0' o 'openvino:GPU'). La llista del mateix dispositiu més d'una vegada executa processos d'inferència addicionals."
+            "label": "hardware de detecció"
         },
         "path": {
             "label": "Ruta del model de detector d'objectes personalitzat",

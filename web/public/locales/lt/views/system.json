@@ -5,7 +5,6 @@
     "logs": {
       "frigate": "Frigate Žurnalas - Frigate",
       "go2rtc": "Go2RTC Žurnalas - Frigate",
-      "nginx": "Nginx Žurnalas - Frigate",
       "websocket": "Žinučių Išrašas - Frigate"
     },
     "general": "Bendroji Statistika - Frigate",

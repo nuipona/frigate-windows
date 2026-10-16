@@ -2,7 +2,6 @@
   "documentTitle": {
     "general": "Algemene Statistieken - Frigate",
     "logs": {
-      "nginx": "Nginx Logboeken - Frigate",
       "go2rtc": "Go2RTC Logboeken - Frigate",
       "frigate": "Frigate Logboek - Frigate",
       "websocket": "Berichten Logboeken - Frigate"

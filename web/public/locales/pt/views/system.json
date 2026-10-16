@@ -5,8 +5,7 @@
     "enrichments": "Frigate - Estatísticas de Enriquecimento",
     "logs": {
       "frigate": "Frigate - Registos de Eventos do Frigate",
-      "go2rtc": "Frigate - Registos de Eventos do Go2RTC",
-      "nginx": "Frigate - Registos de Eventos do Nginx"
+      "go2rtc": "Frigate - Registos de Eventos do Go2RTC"
     },
     "cameras": "Frigate - Estatísticas das Câmaras"
   },

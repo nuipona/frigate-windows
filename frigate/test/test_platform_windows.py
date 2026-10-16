@@ -114,16 +114,6 @@ class TestWindowsFfmpegPaths(unittest.TestCase):
                     command = f"-hide_banner -i {quote_ffmpeg_arg(value)}"
                     self.assertEqual(split_ffmpeg_command(command)[2], value)
 
-    def test_posix_quoting_is_unchanged(self):
-        with patch("frigate.util.platform.IS_WINDOWS", False):
-            self.assertEqual(
-                quote_ffmpeg_arg("/media/frigate/a b.mp4"), "'/media/frigate/a b.mp4'"
-            )
-            self.assertEqual(
-                split_ffmpeg_command("-i '/media/frigate/a b.mp4'"),
-                ["-i", "/media/frigate/a b.mp4"],
-            )
-
     def test_low_priority_maps_to_windows_idle_class(self):
         psutil = MagicMock()
         psutil.IDLE_PRIORITY_CLASS = 0x40
@@ -192,10 +182,6 @@ class TestWindowsLongPaths(unittest.TestCase):
             self.assertIsNone(long_path_warning(["driveway"]))
 
         self.assertLess(len("C:\\Frigate\\media\\recordings"), MAX_PATH_LIMIT)
-
-    def test_no_warning_off_windows(self):
-        with patch("frigate.util.platform.IS_WINDOWS", False):
-            self.assertIsNone(long_path_warning(["driveway"]))
 
 
 class TestWebPort(unittest.TestCase):

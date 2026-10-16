@@ -35,7 +35,7 @@ export default function SetupRecording({
 
   const { data: stats } = useSWR("stats", { revalidateOnFocus: false });
 
-  const storageInfo = stats?.service?.storage?.["/tmp/frigate/recordings"];
+  const storageInfo = stats?.service?.storage?.["recordings"];
   const freeGb = storageInfo ? Math.round(storageInfo.free / 1024) : null;
   const cameraCount = cameraNames.length;
   // Rough estimate: ~2 Mbps per camera continuous recording

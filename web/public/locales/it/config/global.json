@@ -4,8 +4,7 @@
         "description": "Quando abilitata, avvia Frigate in modalità sicura con funzionalità ridotte per la risoluzione dei problemi."
     },
     "environment_vars": {
-        "label": "Variabili d'ambiente",
-        "description": "Coppie chiave/valore di variabili d'ambiente da impostare per il processo Frigate in Home Assistant OS. Gli utenti non HAOS devono utilizzare la configurazione delle variabili d'ambiente di Docker."
+        "label": "Variabili d'ambiente"
     },
     "version": {
         "label": "Versione configurazione attuale",
@@ -1051,7 +1050,6 @@
         },
         "listen": {
             "label": "Configurazione delle porte di ascolto",
-            "description": "Configurazione per le porte di ascolto interne ed esterne. Questa sezione è destinata agli utenti esperti. Per la maggior parte dei casi, si consiglia di modificare la sezione relativa alle porte nel file Docker Compose.",
             "internal": {
                 "label": "Porta interna",
                 "description": "Porta di ascolto interna per Frigate (predefinita 5000)."
@@ -1093,8 +1091,7 @@
                 "description": "Abilita il monitoraggio della larghezza di banda di rete per singolo processo per i processi ffmpeg della telecamera e per i rilevatori (richiede capability specifiche)."
             },
             "intel_gpu_device": {
-                "label": "Dispositivo GPU Intel",
-                "description": "Indirizzo bus PCI o percorso del dispositivo DRM (es. /dev/dri/card1) utilizzato per associare le statistiche della GPU Intel a un dispositivo specifico quando ne sono presenti molteplici."
+                "label": "Dispositivo GPU Intel"
             }
         },
         "version_check": {

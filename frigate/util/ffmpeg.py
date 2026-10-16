@@ -9,7 +9,7 @@ from typing import Any
 
 from frigate.const import PROCESS_PRIORITY_LOW
 from frigate.log import LogPipe
-from frigate.util.platform import IS_WINDOWS, get_process_priority_class
+from frigate.util.platform import get_process_priority_class
 
 #: how long to wait for ffmpeg after asking it to stop before killing it
 FFMPEG_STOP_TIMEOUT = 30
@@ -26,17 +26,10 @@ FFMPEG_QUIT_POLL = 1.0
 def ffmpeg_popen_kwargs() -> dict[str, Any]:
     """Popen arguments that make an ffmpeg process stoppable, not just killable.
 
-    On POSIX that is a new session, which keeps ffmpeg out of the terminal's
-    process group. On Windows it is ``CREATE_NEW_PROCESS_GROUP``: a console
-    control event can only be aimed at a process *group*, so ffmpeg has to be
-    a group leader for ``CTRL_BREAK_EVENT`` to reach it and give it the chance
-    to close the file it is writing. ``start_new_session`` is a POSIX-only
-    argument and does nothing on Windows.
+    ``CREATE_NEW_PROCESS_GROUP`` makes ffmpeg a group leader so a targeted
+    ``CTRL_BREAK_EVENT`` can ask it to finalize the file it is writing.
     """
-    if IS_WINDOWS:
-        return {"creationflags": sp.CREATE_NEW_PROCESS_GROUP}
-
-    return {"start_new_session": True}
+    return {"creationflags": sp.CREATE_NEW_PROCESS_GROUP}
 
 
 def request_ffmpeg_stop(
@@ -46,9 +39,6 @@ def request_ffmpeg_stop(
     wait_timeout: float = FFMPEG_QUIT_POLL,
 ) -> None:
     """Ask an ffmpeg process to exit, letting it finish the file it is writing.
-
-    On POSIX this is ``terminate()``: SIGTERM, which ffmpeg handles by closing
-    and finalizing whatever it has open.
 
     On Windows ``terminate()`` is ``TerminateProcess``, so an MP4 segment that
     has not been closed yet is left without a moov atom and cannot be played.
@@ -65,10 +55,6 @@ def request_ffmpeg_stop(
     lets callers with a raw-pipe input skip the per-process quit poll while still
     trying the graceful Windows mechanisms.
     """
-    if not IS_WINDOWS:
-        ffmpeg_process.terminate()
-        return
-
     # 1. quit command on stdin, which ffmpeg only reads where stdin is a
     #    terminal (its Windows reader is kbhit/getchar based). Still worth the
     #    write: where it is read, it is the only mechanism that works without
@@ -205,9 +191,8 @@ def run_ffmpeg_with_progress(
             export for concat playlists).
         process_started: Optional callback invoked with the live `Popen`
             once spawned — lets callers store the ref for cancellation.
-        use_low_priority: When True, run FFmpeg at low process priority so
-            concat doesn't starve detection. Uses `nice` on POSIX and a Windows
-            process priority class on Windows.
+        use_low_priority: When True, run FFmpeg in a low Windows process
+            priority class so concat does not starve detection.
 
     Returns:
         Tuple of `(returncode, captured_stderr)`. Stdout is left attached
@@ -216,12 +201,9 @@ def run_ffmpeg_with_progress(
     full_cmd = inject_progress_flags(cmd)
     popen_kwargs: dict[str, Any] = {}
     if use_low_priority:
-        if IS_WINDOWS:
-            priority_class = get_process_priority_class(PROCESS_PRIORITY_LOW)
-            if priority_class is not None:
-                popen_kwargs["creationflags"] = priority_class
-        else:
-            full_cmd = ["nice", "-n", str(PROCESS_PRIORITY_LOW)] + full_cmd
+        priority_class = get_process_priority_class(PROCESS_PRIORITY_LOW)
+        if priority_class is not None:
+            popen_kwargs["creationflags"] = priority_class
 
     def emit(percent: float) -> None:
         if on_progress is None:

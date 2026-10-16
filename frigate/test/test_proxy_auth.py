@@ -10,7 +10,7 @@ from frigate.util.env import FRIGATE_ENV_VARS
 class TestProxyRoleResolution(unittest.TestCase):
     def setUp(self):
         self.proxy_config = ProxyConfig(
-            auth_secret=None,
+            auth_secret="test-secret",
             default_role="viewer",
             separator="|",
             header_map=HeaderMappingConfig(
@@ -99,7 +99,7 @@ class TestProxyRoleResolution(unittest.TestCase):
 class TestDefaultRoleNone(unittest.TestCase):
     def setUp(self):
         self.proxy_config = ProxyConfig(
-            auth_secret=None,
+            auth_secret="test-secret",
             default_role="none",
             separator="|",
             header_map=HeaderMappingConfig(
@@ -140,7 +140,7 @@ class TestDefaultRoleNone(unittest.TestCase):
     def test_default_role_none_no_role_map(self):
         """An invalid direct role name resolves to 'none' without a role_map."""
         config = ProxyConfig(
-            auth_secret=None,
+            auth_secret="test-secret",
             default_role="none",
             separator="|",
             header_map=HeaderMappingConfig(
@@ -156,7 +156,7 @@ class TestDefaultRoleNone(unittest.TestCase):
     def test_default_role_none_no_role_header_configured(self):
         """Proxy configs without a role header resolve to 'none'."""
         config = ProxyConfig(
-            auth_secret=None,
+            auth_secret="test-secret",
             default_role="none",
             separator="|",
             header_map=HeaderMappingConfig(user="x-remote-user"),
@@ -175,7 +175,7 @@ class TestDefaultRoleNone(unittest.TestCase):
         for spelling in ("None", "NONE", "nOnE", " none "):
             with self.subTest(default_role=spelling):
                 config = ProxyConfig(
-                    auth_secret=None,
+                    auth_secret="test-secret",
                     default_role=spelling,
                     separator="|",
                     header_map=HeaderMappingConfig(

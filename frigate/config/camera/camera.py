@@ -21,7 +21,6 @@ from frigate.util.builtin import (
     generate_color_palette,
     get_ffmpeg_arg_list,
 )
-from frigate.util.platform import IS_WINDOWS
 
 from ..base import FrigateBaseModel
 from ..classification import (
@@ -66,14 +65,9 @@ class CameraConfig(FrigateBaseModel):
 
     @field_validator("name")
     @classmethod
-    def validate_name_is_usable_on_windows(cls, v: str | None) -> str | None:
-        """Reject names Windows cannot use as a file or directory name.
-
-        The name is used to build every path the camera owns, and Windows
-        resolves a reserved device name to a device rather than to a file no
-        matter where it appears or what extension follows it.
-        """
-        if v is not None and IS_WINDOWS and v.lower() in WINDOWS_RESERVED_NAMES:
+    def validate_name_is_usable(cls, v: str | None) -> str | None:
+        """Reject names Windows cannot use as a file or directory name."""
+        if v is not None and v.lower() in WINDOWS_RESERVED_NAMES:
             raise ValueError(
                 f"Camera name '{v}' is a reserved device name on Windows and "
                 "cannot be used for a directory or file, rename the camera"

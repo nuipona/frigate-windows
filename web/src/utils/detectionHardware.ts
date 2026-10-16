@@ -29,8 +29,8 @@ export function hardwareForDevices(
 /**
  * The unit device string a configured device refers to.
  *
- * A config may leave the index off, such as "edgetpu:usb", which the detector
- * resolves to the first unit of that kind.
+ * A config may leave the device off, such as "openvino", which the detector
+ * resolves through its default Windows runtime selection.
  */
 export function resolveUnitDevice(
   entry: DetectionHardware,

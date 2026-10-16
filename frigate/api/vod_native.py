@@ -1,24 +1,15 @@
-"""Native HLS generation for recorded video.
+"""Native Windows HLS generation for recorded video.
 
-The container image serves recorded video through the nginx vod module: the API
-turns a time range into an nginx-vod mapping document and nginx turns that
-document into HLS playlists and segments. Windows has no nginx vod module, so
-this module provides the same endpoints (``/vod/...``) with the playlist built
-from the recording rows in the database and the segments produced on demand by
-ffmpeg.
+The ``/vod`` endpoints build playlists from recording rows in the database and
+produce segments on demand with FFmpeg:
 
-The shape of the result is deliberately the same as the one browsers already
-receive from the container:
+- a playlist covers the requested range so the player can seek without another
+  metadata round trip;
+- each recording file contributes an entry whose duration comes from the
+  database;
+- MPEG-TS segments are remuxed with ``-c copy`` on first request and cached.
 
-- the playlist is a VOD playlist covering the whole requested range, so the
-  player can seek anywhere without a round trip
-- one playlist entry per recording file, with the duration taken from the
-  database, so the playlist is built instantly and stays accurate
-- segments are MPEG-TS remuxes (``-c copy``) of the part of the recording that
-  covers the entry, generated the first time they are requested and cached
-
-Nothing here transcodes, exactly like the vod module in the container: if a
-camera records H.265 the browser still has to support it.
+No video is transcoded. If a camera records H.265, the browser must support it.
 """
 
 import asyncio
@@ -415,7 +406,7 @@ def hour_range(
     """Convert the year/hour form of the vod endpoints into a timestamp range."""
     from zoneinfo import ZoneInfo
 
-    from frigate.util.builtin import get_normalized_tz_name
+    from frigate.util.time import get_normalized_tz_name
 
     parts = year_month.split("-")
 

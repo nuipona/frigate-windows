@@ -837,8 +837,7 @@
         "description": "När detta är aktiverat startar Frigate i felsäkert läge med begränsad funktionalitet för felsökning."
     },
     "environment_vars": {
-        "label": "Miljövariabler",
-        "description": "Nyckel-/värdepar med miljövariabler som ska ställas in för Frigate-processen i Home Assistant OS. Användare som inte kör HAOS måste i stället konfigurera Docker-miljövariabler."
+        "label": "Miljövariabler"
     },
     "logger": {
         "label": "Loggning",
@@ -925,7 +924,6 @@
         },
         "listen": {
             "label": "Lyssningsportar",
-            "description": "Konfiguration av interna och externa lyssningsportar. Detta är avsett för avancerade användare. I de flesta fall rekommenderas att portinställningarna ändras i Docker Compose-filen.",
             "internal": {
                 "label": "Intern port",
                 "description": "Intern lyssningsport för Frigate (standard: 5000)."
@@ -1011,8 +1009,7 @@
                 "description": "Aktivera övervakning av nätverksbandbredd per process för kamerornas FFmpeg-processer och detektorer (kräver nödvändig systembehörighet)."
             },
             "intel_gpu_device": {
-                "label": "Intel-GPU-enhet",
-                "description": "PCI-bussadress eller DRM-enhetssökväg, t.ex. /dev/dri/card1, som används för att koppla Intel-GPU-statistik till en viss enhet när flera finns."
+                "label": "Intel-GPU-enhet"
             }
         },
         "version_check": {

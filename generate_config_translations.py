@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Generate English translation JSON files from Pydantic config models.
 

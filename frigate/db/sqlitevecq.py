@@ -8,8 +8,6 @@ import regex
 from peewee import DatabaseError
 from playhouse.sqliteq import SqliteQueueDatabase
 
-from frigate.util.platform import IS_WINDOWS
-
 logger = logging.getLogger(__name__)
 
 REGEXP_TIMEOUT_SECONDS = 1.0
@@ -20,13 +18,8 @@ class SqliteVecQueueDatabase(SqliteQueueDatabase):
         self, *args: Any, load_vec_extension: bool = False, **kwargs: Any
     ) -> None:
         self.load_vec_extension: bool = load_vec_extension
-        # the container builds sqlite-vec into /usr/local/lib; Windows gets
-        # the extension DLL from the sqlite_vec Python package, while a missing
-        # library only disables semantic search instead of failing the database
-        self.sqlite_vec_path = os.environ.get(
-            "FRIGATE_SQLITE_VEC_PATH",
-            "/usr/local/lib/vec0" if not IS_WINDOWS else "vec0",
-        )
+        # sqlite-vec's Python package supplies the native Windows DLL.
+        self.sqlite_vec_path = os.environ.get("FRIGATE_SQLITE_VEC_PATH", "vec0")
         self.upsert_lock = threading.Lock()
         super().__init__(*args, **kwargs)
 
@@ -44,7 +37,7 @@ class SqliteVecQueueDatabase(SqliteQueueDatabase):
         conn.enable_load_extension(True)
         extension_path = self.sqlite_vec_path
 
-        if IS_WINDOWS and extension_path == "vec0":
+        if extension_path == "vec0":
             try:
                 from sqlite_vec import loadable_path
 

@@ -188,8 +188,7 @@
         "description": "Wanneer ingeschakeld, start Frigate op in veilige modus met beperkte functies voor probleemoplossing."
     },
     "environment_vars": {
-        "label": "Omgevingsvariabelen",
-        "description": "Sleutel/waarde-paren van omgevingsvariabelen die ingesteld worden voor het Frigate-proces in Home Assistant OS. Gebruikers zonder HAOS moeten in plaats daarvan de Docker-omgevingsvariabelenconfiguratie gebruiken."
+        "label": "Omgevingsvariabelen"
     },
     "auth": {
         "label": "Authenticatie",
@@ -360,7 +359,6 @@
         },
         "listen": {
             "label": "Luisterpoortenconfiguratie",
-            "description": "Configuratie van interne en externe luisterpoorten. Dit is voor gevorderde gebruikers. In de meeste gevallen wordt aanbevolen de poortensectie in het Docker Compose-bestand aan te passen.",
             "internal": {
                 "label": "Interne poort",
                 "description": "Interne luisterpoort voor Frigate (standaard 5000)."
@@ -426,12 +424,10 @@
                 "description": "Verzameling van Intel GPU-statistieken inschakelen indien een Intel GPU aanwezig is."
             },
             "network_bandwidth": {
-                "label": "Netwerkbandbreedte",
-                "description": "Per-proces netwerkbandbreedtebewaking voor camera-ffmpeg-processen en detectoren inschakelen (vereist Linux-capabilities)."
+                "label": "Netwerkbandbreedte"
             },
             "intel_gpu_device": {
-                "label": "Intel GPU-apparaat",
-                "description": "PCI-busadres of DRM-apparaatpad (bijv. /dev/dri/card1) om Intel GPU-statistieken aan een specifiek apparaat te koppelen bij meerdere GPU's."
+                "label": "Intel GPU-apparaat"
             }
         },
         "version_check": {

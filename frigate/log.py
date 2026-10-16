@@ -16,7 +16,7 @@ from queue import Empty, Queue
 from typing import Any, TypeVar, cast
 
 from frigate.util.builtin import clean_camera_user_pass
-from frigate.util.platform import get_service_log_path, serves_web_app
+from frigate.util.platform import get_service_log_path
 
 # lets a decorator keep the signature of the function it wraps
 _F = TypeVar("_F", bound=Callable[..., Any])
@@ -57,15 +57,7 @@ log_queue: Queue | None = None
 
 
 def service_log_handler() -> logging.Handler | None:
-    """Handler writing the log to the file the web UI reads.
-
-    Only used when Frigate is not supervised by s6, because inside the
-    container s6-log already collects stdout into that file and a second
-    writer would interleave with it.
-    """
-    if not serves_web_app():
-        return None
-
+    """Handler writing the bounded log file consumed by the web UI."""
     path = get_service_log_path("frigate")
 
     try:
@@ -135,22 +127,6 @@ def apply_log_levels(default: str, log_levels: dict[str, LogLevel]) -> None:
 
     for log, level in log_levels.items():
         logging.getLogger(log).setLevel(level.value.upper())
-
-
-# When a multiprocessing.Process exits, python tries to flush stdout and stderr. However, if the
-# process is created after a thread (for example a logging thread) is created and the process fork
-# happens while an internal lock is held, the stdout/err flush can cause a deadlock.
-#
-# https://github.com/python/cpython/issues/91776
-def reopen_std_streams() -> None:
-    sys.stdout = os.fdopen(1, "w")
-    sys.stderr = os.fdopen(2, "w")
-
-
-if hasattr(os, "register_at_fork"):
-    # Windows has no fork, so there is nothing to reopen: children start
-    # through spawn with their own streams.
-    os.register_at_fork(after_in_child=reopen_std_streams)
 
 
 # based on https://codereview.stackexchange.com/a/17959
@@ -334,9 +310,8 @@ def redirect_output_to_logger(logger: logging.Logger, level: int) -> Callable[[_
 def suppress_os_output(func: Callable) -> Callable:
     """Discard C-level stdout and stderr while ``func`` runs.
 
-    Redirecting to an unread pipe can block once its buffer fills. ``os.devnull``
-    is available on both Windows and POSIX and safely discards arbitrarily large
-    native-library output.
+    Redirecting to an unread pipe can block once its buffer fills. The Windows
+    null device safely discards arbitrarily large native-library output.
     """
 
     @wraps(func)
@@ -367,7 +342,7 @@ def suppress_stderr_during(operation_name: str) -> Generator[None, None, None]:
 
     Useful for silencing LLVM debug output, CUDA messages, and other native
     library logging that cannot be controlled via Python logging or environment
-    variables. Completely redirects file descriptor 2 (stderr) to /dev/null.
+    variables. Completely redirects file descriptor 2 to the Windows null device.
 
     Usage:
         with suppress_stderr_during("model_conversion"):

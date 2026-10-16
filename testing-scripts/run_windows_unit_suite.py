@@ -20,6 +20,7 @@ Run from the repository root::
 
 from __future__ import annotations
 
+import faulthandler
 import sys
 import unittest
 from pathlib import Path
@@ -50,10 +51,19 @@ def load_denylist(path: Path = DENYLIST) -> list[tuple[str, str]]:
 
 def is_denied(test_id: str, denylist: list[tuple[str, str]]) -> bool:
     """Whether a test id matches a denied module, class or test."""
-    return any(test_id == prefix or test_id.startswith(f"{prefix}.") for prefix, _ in denylist)
+    return any(
+        test_id == prefix or test_id.startswith(f"{prefix}.") for prefix, _ in denylist
+    )
 
 
 def main() -> int:
+    # Several tests load native inference and media libraries. If one faults,
+    # ordinary unittest output ends at a progress dot and gives no clue which
+    # module took the interpreter down. Dump every Python thread on a native
+    # fault, and use verbose test names below so the final log line identifies
+    # the test that was running.
+    faulthandler.enable(all_threads=True)
+
     denylist = load_denylist()
 
     loader = unittest.TestLoader()
@@ -72,7 +82,7 @@ def main() -> int:
     print(f"Skipping {denied_suite.countTestCases()} listed in {DENYLIST.name}")
     print()
 
-    result = unittest.TextTestRunner(verbosity=1).run(allowed_suite)
+    result = unittest.TextTestRunner(verbosity=2).run(allowed_suite)
 
     failures = [
         (test.id(), traceback_text)

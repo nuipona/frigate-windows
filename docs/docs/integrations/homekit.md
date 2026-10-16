@@ -3,52 +3,38 @@ id: homekit
 title: HomeKit
 ---
 
-Frigate cameras can be exported to Apple HomeKit through go2rtc. Each exported camera appears as an accessory in the Apple Home app on your iOS, iPadOS, macOS, and tvOS devices.
+# Apple HomeKit
 
-## Overview
-
-Exporting cameras is handled entirely through go2rtc, which is embedded in Frigate. go2rtc provides the necessary HomeKit Accessory Protocol (HAP) server, so your camera is published to HomeKit as an accessory in its own right.
-
-:::note
-
-This is the opposite of importing a HomeKit camera. go2rtc can also pair with an existing HomeKit camera (Aqara, Eve, Eufy, and similar) and use it as a stream source, which is what the `add` page of the go2rtc WebUI is for. That page discovers HomeKit accessories on your network and will not list your Frigate cameras. It is not used for exporting.
-
-:::
+The bundled Windows `go2rtc.exe` can publish Frigate restreams as HomeKit camera accessories.
 
 ## Requirements
 
-- Frigate must be running with `network_mode: host` so that HomeKit can discover your cameras over mDNS
-- Your Apple device must be on the same network as Frigate
-- Port 1984 must be accessible so you can reach the go2rtc WebUI
+- The Windows host and Apple home hub/device must share a multicast-capable LAN.
+- Windows Firewall must allow go2rtc's HomeKit/mDNS traffic on the selected network profile.
+- The exported stream must be compatible with HomeKit, normally H.264 video at a supported resolution and Opus mono audio at 16 kHz.
+- A stream must already exist under `go2rtc.streams`.
 
-HomeKit also places strict limits on the stream itself. go2rtc passes your stream through without resizing or re-encoding it, so the stream you export must already meet these requirements:
+This publishes a Frigate stream to HomeKit. Importing an existing HomeKit camera as a Frigate source is a different go2rtc feature.
 
-- **Video:** H.264 at 1920x1080, 1280x720, or 320x240
-- **Audio:** Opus, mono, 16 kHz
+## Persistent configuration
 
-A camera's full resolution stream usually does not qualify. See [Exporting a compatible stream](#exporting-a-compatible-stream) below.
+HomeKit pairings are writable state, so they are stored separately from generated go2rtc settings:
 
-## Configuration
-
-HomeKit settings are stored in `/config/go2rtc_homekit.yml`. This is a separate file from your Frigate config, because go2rtc needs to write your pairings back to it when you pair a device.
-
-Edit it using the go2rtc config editor, which writes to that file directly:
-
-```
-http://<frigate_host>:1984/editor.html
+```text
+<Frigate config directory>\go2rtc_homekit.yml
 ```
 
-Replace `<frigate_host>` with the IP address or hostname of your Frigate server. The editor will be empty until you add a HomeKit section, since this file holds only your HomeKit settings and not the rest of your go2rtc config.
+For the default service install this is `%ProgramData%\Frigate\config\go2rtc_homekit.yml`. Frigate keeps only the `homekit` section and passes this file to go2rtc as its writable primary config. Do not store camera URLs or other settings there.
 
-:::warning
+Open the go2rtc editor through Frigate's authenticated gateway:
 
-Do not put the `homekit:` section in the `go2rtc:` section of your Frigate config.
+```text
+https://frigate-host:8971/go2rtc/editor.html
+```
 
-Frigate regenerates that config on every startup, so go2rtc cannot save your pairings to it. Pairing will appear to succeed and then fail after the next restart with `PairVerify with unknown client_id`. If the section exists in both places, your saved pairings are erased on every restart.
+The go2rtc management port is loopback-only by default and should not be exposed directly.
 
-:::
-
-Add an entry for each camera you want to export. The key must match the name of a go2rtc stream, and the pin must be 8 digits. This is the number the Home app calls the setup code:
+Add an entry whose key exactly matches a configured stream:
 
 ```yaml
 homekit:
@@ -57,46 +43,30 @@ homekit:
     pin: "12345678"
 ```
 
-If the key does not match a go2rtc stream, go2rtc logs `[homekit] missing stream:` at startup and the camera will not appear in the Home app.
+Use a unique eight-digit PIN that is not an obvious sequence. Protect this file like other credentials because it contains pairing state.
 
-:::note
+## Compatible restream
 
-go2rtc derives each accessory's HomeKit identity from this key, so renaming it later means the camera appears as a new accessory and has to be paired again. Settle on the name before you pair.
-
-:::
-
-Frigate keeps only the `homekit:` section of this file when it starts, so do not store streams or other go2rtc settings in it.
-
-### Exporting a compatible stream
-
-If a camera's stream does not meet the requirements listed above, define a scaled restream in your Frigate config and point HomeKit at that stream instead of the original:
+If the camera's main stream is not HomeKit-compatible, define a dedicated stream in `config.yml`:
 
 ```yaml
 go2rtc:
   streams:
     front_door:
-      - rtsp://user:password@192.168.1.50:554/stream
+      - rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@camera/main
     front_door_homekit:
       - "ffmpeg:front_door#video=h264#width=1280#height=720#audio=opus/16000"
 ```
 
-```yaml
-# /config/go2rtc_homekit.yml
-homekit:
-  front_door_homekit:
-    name: Front Door
-    pin: "12345678"
-```
+Then use `front_door_homekit` as the key in `go2rtc_homekit.yml`. On matching NVIDIA or Windows decode hardware, go2rtc can use `#hardware=cuda` or `#hardware=dxva2`; test software transcoding first.
 
-Add `#hardware=cuda`, `#hardware=vaapi`, or the appropriate value for your system to transcode using your GPU. Note that NVENC cannot encode H.264 wider than 4096 pixels, so very wide streams must be scaled down as shown above rather than only re-encoded.
+## Pair
 
-## Pairing Cameras
+1. Restart Frigate after adding the `homekit` entry.
+2. In Apple Home, choose **Add Accessory**, then **More options**.
+3. Select the camera and enter the configured PIN.
+4. Confirm a `pairings` value is written beneath the camera in `go2rtc_homekit.yml`.
 
-1. Restart Frigate after adding the `homekit:` section
-2. In the Apple Home app, choose **Add Accessory**, then **More options** to enter a code manually
-3. Select your camera and enter the pin you configured as the setup code
-4. Confirm that a `pairings:` list now appears under the camera in `/config/go2rtc_homekit.yml`
+If the accessory is not discovered, verify that the Windows network is Private, multicast is not isolated by the access point/VLAN, and Windows Firewall allows go2rtc. If pairing succeeds but fails after restart, check that the Frigate service account can modify `go2rtc_homekit.yml` and inspect `logs\go2rtc.log` for a save error.
 
-Pairings are saved back to that file automatically. If step 4 shows no `pairings:` list, check the Frigate log for `[homekit] can't save`, which means the `homekit:` section is missing from `/config/go2rtc_homekit.yml`.
-
-For detailed go2rtc configuration options, refer to the [go2rtc documentation](https://github.com/AlexxIT/go2rtc).
+Renaming the stream changes the accessory identity and requires pairing again.

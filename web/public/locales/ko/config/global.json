@@ -8,8 +8,7 @@
         "description": "활성화하면 문제 해결을 위해 기능을 축소한 안전 모드로 Frigate를 시작합니다."
     },
     "environment_vars": {
-        "label": "환경 변수",
-        "description": "Home Assistant OS에서 Frigate 프로세스에 적용할 환경 변수의 키/값 쌍입니다. 비-HAOS 사용자는 Docker 환경 변수 설정을 사용해야 합니다."
+        "label": "환경 변수"
     },
     "logger": {
         "label": "로깅",
@@ -212,7 +211,6 @@
         },
         "listen": {
             "label": "리스닝 포트 구성",
-            "description": "내부 및 외부 리스닝 포트 설정입니다. 고급 사용자용 기능이며, 일반적인 환경에서는 Docker Compose의 포트 설정을 변경하는 것을 권장합니다.",
             "internal": {
                 "label": "내부 포트",
                 "description": "Frigate의 내부 리스닝 포트입니다 (기본값: 5000)."
@@ -1303,8 +1301,7 @@
                 "description": "카메라 FFmpeg 프로세스 및 감지기에 대한 프로세스별 네트워크 대역폭 모니터링을 활성화합니다 (권한 필요)."
             },
             "intel_gpu_device": {
-                "label": "Intel GPU 디바이스",
-                "description": "여러 대의 GPU가 있을 때 통계를 특정 장치에 고정하기 위한 PCI 버스 주소 또는 DRM 디바이스 경로(예: /dev/dri/card1)입니다."
+                "label": "Intel GPU 디바이스"
             }
         },
         "version_check": {
@@ -1508,8 +1505,7 @@
             "description": "이 모델이 사용되는 카메라 환경의 이름입니다 (예: 'thermal'). 카메라는 detect.scene을 일치하는 값으로 설정하여 모델을 선택하며, 별도로 설정하지 않은 카메라는 'default' 모델을 사용합니다."
         },
         "devices": {
-            "label": "감지 하드웨어",
-            "description": "이 모델이 실행되는 하드웨어로, '<detector>' 또는 '<detector>:<device>' 형식으로 지정합니다 (예: 'edgetpu:pci:0' 또는 'openvino:GPU'). 동일한 장치를 여러 번 나열하면 해당 장치에서 추론 프로세스를 추가로 실행합니다."
+            "label": "감지 하드웨어"
         },
         "path": {
             "label": "사용자 지정 객체 감지기 모델 경로",

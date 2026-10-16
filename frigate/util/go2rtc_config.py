@@ -1,17 +1,15 @@
 """Generate go2rtc's configuration file.
 
-go2rtc is an external process. In the container image an s6 service stages the
-config in ``/dev/shm/go2rtc.yaml`` before go2rtc starts; a native install does
-the same thing from Python so ``python -m frigate`` is all a user has to run.
-
-The logic lives here rather than in the image's ``create_config.py`` so both
-paths share one implementation. That script is now a thin wrapper around
-:func:`main`.
+go2rtc is an external Windows child process. Frigate stages its generated
+configuration in the runtime directory before starting it, so
+``python -m frigate`` is the only application command a user needs.
 """
 
+import io
 import json
 import logging
 import os
+from pathlib import Path
 from typing import Any
 
 from ruamel.yaml import YAML
@@ -21,7 +19,7 @@ from frigate.ffmpeg_presets import parse_preset_hardware_acceleration_encode
 from frigate.util.config import find_config_file, resolve_ffmpeg_path
 from frigate.util.env import apply_config_env_vars, substitute_frigate_vars
 from frigate.util.live_streams import raw_transcode_streams
-from frigate.util.platform import birdseye_pipe_source, get_tmp_dir
+from frigate.util.platform import birdseye_pipe_source, get_config_dir, get_tmp_dir
 from frigate.util.services import (
     is_go2rtc_arbitrary_exec_allowed,
     is_restricted_go2rtc_source,
@@ -30,6 +28,58 @@ from frigate.util.services import (
 logger = logging.getLogger(__name__)
 
 yaml = YAML()
+
+HOMEKIT_CONFIG_NAME = "go2rtc_homekit.yml"
+HOMEKIT_CONFIG_MAX_BYTES = 10 * 1024 * 1024
+
+
+def go2rtc_homekit_config_path() -> str:
+    """Persistent config that go2rtc may update with HomeKit pairings."""
+    return os.path.join(get_config_dir(), HOMEKIT_CONFIG_NAME)
+
+
+def prepare_homekit_config(path: str | None = None) -> str:
+    """Create and normalize the writable HomeKit config.
+
+    go2rtc writes pairing state back to its first config file. Keep only the
+    ``homekit`` section there so streams and other generated settings continue
+    to come from Frigate's configuration.
+    """
+    config_path = Path(path or go2rtc_homekit_config_path())
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if config_path.is_symlink() or (config_path.exists() and not config_path.is_file()):
+        raise ValueError(f"HomeKit config is not a regular file: {config_path}")
+
+    if config_path.exists():
+        if config_path.stat().st_size > HOMEKIT_CONFIG_MAX_BYTES:
+            raise ValueError(f"HomeKit config is too large: {config_path}")
+        content = config_path.read_text(encoding="utf-8")
+    else:
+        content = ""
+
+    if content.strip():
+        try:
+            loaded = yaml.load(content)
+        except Exception as err:
+            raise ValueError(f"HomeKit config is invalid YAML: {config_path}") from err
+        homekit = loaded.get("homekit") if isinstance(loaded, dict) else None
+    else:
+        homekit = None
+
+    output = io.StringIO()
+    if homekit is not None:
+        yaml.dump({"homekit": homekit}, output)
+
+    normalized = output.getvalue()
+    if normalized != content:
+        temporary = config_path.with_suffix(config_path.suffix + ".tmp")
+        temporary.write_text(normalized, encoding="utf-8")
+        os.replace(temporary, config_path)
+    elif not config_path.exists():
+        config_path.touch()
+
+    return str(config_path)
 
 
 def go2rtc_config_path() -> str:
@@ -87,15 +137,15 @@ def build_go2rtc_config(config: dict[str, Any]) -> dict[str, Any]:
 
     go2rtc_config: dict[str, Any] = dict(config.get("go2rtc", {}) or {})
 
-    # Need to enable CORS for go2rtc so the frigate integration / card work automatically
+    # The management API is reached through Frigate's authenticated gateway.
+    # Binding it to loopback prevents camera credentials from being exposed on
+    # the LAN if the Windows firewall is permissive.
     if go2rtc_config.get("api") is None:
-        go2rtc_config["api"] = {"origin": "*"}
-    elif go2rtc_config["api"].get("origin") is None:
+        go2rtc_config["api"] = {}
+    if go2rtc_config["api"].get("origin") is None:
         go2rtc_config["api"]["origin"] = "*"
-
-    # Need to set default location for HA config
-    if go2rtc_config.get("hass") is None:
-        go2rtc_config["hass"] = {"config": "/homeassistant"}
+    if go2rtc_config["api"].get("listen") is None:
+        go2rtc_config["api"]["listen"] = "127.0.0.1:1984"
 
     # we want to ensure that logs are easy to read
     if go2rtc_config.get("log") is None:

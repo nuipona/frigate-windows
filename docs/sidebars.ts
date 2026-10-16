@@ -18,7 +18,6 @@ const sidebars: SidebarsConfig = {
     Guides: [
       "guides/getting_started",
       "guides/ha_notifications",
-      "guides/ha_network_storage",
       "guides/reverse_proxy",
     ],
     Usage: [
@@ -122,7 +121,6 @@ const sidebars: SidebarsConfig = {
           "configuration/ffmpeg_presets",
           "configuration/pwa",
           "configuration/tls",
-          "configuration/non_root",
         ],
       },
       {
@@ -179,7 +177,7 @@ const sidebars: SidebarsConfig = {
           title: "Troubleshooting Hardware",
           description: "Troubleshooting Problems with Hardware",
         },
-        items: ["troubleshooting/gpu", "troubleshooting/edgetpu"],
+        items: ["troubleshooting/gpu"],
       },
       {
         type: "category",
@@ -192,10 +190,7 @@ const sidebars: SidebarsConfig = {
         items: ["troubleshooting/cpu", "troubleshooting/memory"],
       },
     ],
-    Development: [
-      "development/contributing",
-      "development/contributing-boards",
-    ],
+    Development: ["development/contributing"],
   },
 };
 

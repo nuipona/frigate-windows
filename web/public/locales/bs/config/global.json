@@ -1003,8 +1003,7 @@
         "description": "Kada je omogućeno, pokrenite Frigate u sigurnosnom režimu s smanjenim funkcijama za uklanjanje problema."
     },
     "environment_vars": {
-        "label": "Okolinski varijable",
-        "description": "Parovi ključ/vrijednost okolinskih varijabli za postavljanje za proces Frigate u Home Assistant OS. Korisnici koji nisu HAOS moraju koristiti konfiguraciju okolinskih varijabli Docker umjesto toga."
+        "label": "Okolinski varijable"
     },
     "logger": {
         "label": "Zapisi",
@@ -1091,7 +1090,6 @@
         },
         "listen": {
             "label": "Konfiguracija slušajućih porta",
-            "description": "Konfiguracija unutarnjih i vanjskih slušajućih porta. Ovo je za napredne korisnike. Za većinu slučajeva preporučuje se promijeniti sekciju porta u svojoj Docker compose datoteci.",
             "internal": {
                 "label": "Unutarnji port",
                 "description": "Unutarnji slušajući port za Frigate (zadano 5000)."
@@ -1161,8 +1159,7 @@
                 "description": "Omogući praćenje širine pojasa mreže po procesu za procese kamere ffmpeg i detektore (zahtijeva mogućnosti)."
             },
             "intel_gpu_device": {
-                "label": "Intel GPU uređaj",
-                "description": "PCI adresa magistrale ili DRM putanja uređaja (npr. /dev/dri/card1) koja se koristi za vezivanje Intel GPU statistika za određeni uređaj kada je prisutno više njih."
+                "label": "Intel GPU uređaj"
             }
         },
         "version_check": {

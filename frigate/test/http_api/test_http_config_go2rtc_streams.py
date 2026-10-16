@@ -10,7 +10,7 @@ import ruamel.yaml
 
 from frigate.models import Event, Recordings, ReviewSegment
 from frigate.test.http_api.base_http_test import AuthTestClient, BaseTestHttp
-from frigate.util.env import _CONTAINER_ENV, FRIGATE_ENV_VARS, reload_sources
+from frigate.util.env import _PROCESS_ENV, FRIGATE_ENV_VARS, reload_sources
 
 # shape of the source in GHSA-qjjw-3v66-279f, with the payload replaced
 _INJECTED_SRC = "ffmpeg:#input='-f''h264''-i''data:placeholder''-c''copy'"
@@ -35,7 +35,7 @@ _CONFIG = {
 @contextlib.contextmanager
 def _frigate_vars(values: dict[str, str]):
     # config parsing rebuilds FRIGATE_ENV_VARS from its sources
-    with patch.dict(_CONTAINER_ENV, values), patch.dict(FRIGATE_ENV_VARS, values):
+    with patch.dict(_PROCESS_ENV, values), patch.dict(FRIGATE_ENV_VARS, values):
         yield
     reload_sources(warn=False)
 

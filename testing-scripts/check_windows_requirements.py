@@ -29,8 +29,7 @@ import urllib.request
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-REQUIREMENTS = REPO_ROOT / "docker" / "main" / "requirements-windows.txt"
-LINUX_REQUIREMENTS = REPO_ROOT / "docker" / "main" / "requirements-wheels.txt"
+REQUIREMENTS = REPO_ROOT / "requirements.txt"
 PACKAGE_ROOT = REPO_ROOT / "frigate"
 
 #: import name -> distribution name, for the packages where they differ
@@ -46,7 +45,6 @@ IMPORT_TO_DISTRIBUTION = {
     "ruamel": "ruamel.yaml",
     "sherpa_onnx": "sherpa-onnx",
     "sqlite_vec": "sqlite-vec",
-    "starlette_context": "starlette-context",
     "titlecase": "titlecase",
     "zeep": "zeep",
     "zmq": "pyzmq",
@@ -204,27 +202,6 @@ def third_party_imports() -> dict[str, set[str]]:
     return imports
 
 
-def report_drift() -> None:
-    """Print how the Windows set differs from the container set.
-
-    The differences are intentional (Linux only wheels, packages without
-    Windows support), so this is printed rather than failed on: it is here so
-    the two lists cannot drift apart without anyone noticing.
-    """
-    if not LINUX_REQUIREMENTS.is_file():
-        return
-
-    windows = {normalize(name) for name, _, _ in parse_requirements(REQUIREMENTS)}
-    linux = {normalize(name) for name, _, _ in parse_requirements(LINUX_REQUIREMENTS)}
-
-    only_linux = sorted(linux - windows)
-    only_windows = sorted(windows - linux)
-
-    print()
-    print(f"Not in {REQUIREMENTS.name} ({len(only_linux)}): {', '.join(only_linux)}")
-    print(f"Not in {LINUX_REQUIREMENTS.name} ({len(only_windows)}): {', '.join(only_windows)}")
-
-
 def main(requirements_path: Path = REQUIREMENTS) -> int:
     failures: list[str] = []
     requirements = parse_requirements(requirements_path)
@@ -280,7 +257,6 @@ def main(requirements_path: Path = REQUIREMENTS) -> int:
         return 1
 
     print("Windows requirements are complete and installable")
-    report_drift()
     return 0
 
 

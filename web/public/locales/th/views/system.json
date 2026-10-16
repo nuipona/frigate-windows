@@ -64,7 +64,6 @@
     "logs": {
       "frigate": "Frigate Logs - Frigate",
       "go2rtc": "Logs ของ Go2RTC - Frigate",
-      "nginx": "Logs ของ Nginx - Frigate",
       "websocket": "ประวัติข้อความ - Frigate"
     }
   },

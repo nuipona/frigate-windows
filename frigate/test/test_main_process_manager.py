@@ -16,7 +16,6 @@ class TestMainProcessManager(unittest.TestCase):
                 "install_job_object",
                 side_effect=lambda: calls.append("job object"),
             ),
-            patch.object(frigate_main, "supports_forkserver", return_value=False),
             patch.object(
                 frigate_main.mp,
                 "Manager",

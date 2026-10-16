@@ -16,8 +16,8 @@
     {
       "type": "editor-browser",
       "request": "launch",
-      "name": "Nginx: Launch in integrated browser",
-      "url": "http://localhost:5000"
+      "name": "Frigate: Launch in integrated browser",
+      "url": "http://localhost:8971"
     },
     {
       "type": "editor-browser",

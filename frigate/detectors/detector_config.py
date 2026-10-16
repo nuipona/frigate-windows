@@ -63,7 +63,7 @@ class ModelConfig(BaseModel):
     devices: list[str] = Field(
         default_factory=list,
         title="Detection hardware",
-        description="Hardware this model runs on, as '<detector>' or '<detector>:<device>' (for example 'edgetpu:pci:0' or 'openvino:GPU'). Listing the same device more than once runs additional inference processes on it.",
+        description="Hardware this model runs on, as '<detector>' or '<detector>:<device>' (for example 'onnx:0' or 'openvino:GPU'). Listing the same device more than once runs additional inference processes on it.",
     )
     path: str | None = Field(
         None,
@@ -156,7 +156,7 @@ class ModelConfig(BaseModel):
 
         labelmap_path = config.get("labelmap_path")
         if "labelmap_path" not in config:
-            labelmap_path = get_default_labelmap_path() or "/labelmap.txt"
+            labelmap_path = get_default_labelmap_path()
 
         self._merged_labelmap = {
             **load_labels(labelmap_path),
@@ -231,10 +231,6 @@ class ModelConfig(BaseModel):
         if model_info.get("inputDataType"):
             self.input_dtype = InputDTypeEnum(model_info["inputDataType"])
 
-        # RKNN always uses NHWC
-        if detector == "rknn":
-            self.input_tensor = InputTensorEnum.nhwc
-
         # generate list of attribute labels
         self.attributes_map = {
             **model_info.get("attributes", DEFAULT_ATTRIBUTE_LABEL_MAP),
@@ -289,7 +285,7 @@ class BaseDetectorConfig(BaseModel):
     type: str = Field(
         default="cpu",
         title="Detector Type",
-        description="Type of detector to use for object detection (for example 'cpu', 'edgetpu', 'openvino').",
+        description="Native Windows detector type: cpu, onnx, openvino, or zmq.",
     )
     model: ModelConfig | None = Field(
         default=None,

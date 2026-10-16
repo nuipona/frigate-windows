@@ -1,67 +1,82 @@
+"""Load the detector backends supported by the native Windows application.
+
+Detector discovery is deliberately explicit so startup and the configuration
+schema do not depend on unrelated SDKs installed on the machine. The native
+Windows build supports exactly these backends:
+
+* ``cpu`` — TensorFlow Lite on the host CPU
+* ``onnx`` — ONNX Runtime (CPU, DirectML, or a provider installed by the user)
+* ``openvino`` — Intel/AMD CPU and Intel GPU/NPU through OpenVINO
+* ``zmq`` — inference delegated to an external ZeroMQ service
+"""
+
 import importlib
 import logging
-import pkgutil
-from enum import Enum
-from typing import Annotated, Union, get_args
+from enum import StrEnum
+from functools import reduce
+from operator import or_
+from types import UnionType
 
-from pydantic import Field
+from pydantic import BaseModel
 
-from . import plugins
-from .detection_api import DetectionApi
-from .detector_config import BaseDetectorConfig
+from frigate.detectors.detection_api import DetectionApi
 
 logger = logging.getLogger(__name__)
 
+SUPPORTED_DETECTOR_MODULES = ("cpu_tfl", "onnx", "openvino", "zmq_ipc")
 
-_included_modules = pkgutil.iter_modules(plugins.__path__, plugins.__name__ + ".")
 
-plugin_modules = []
+class DetectorTypeEnum(StrEnum):
+    cpu = "cpu"
+    onnx = "onnx"
+    openvino = "openvino"
+    zmq = "zmq"
 
-# detector key -> the import error that stopped its plugin module loading.
-# Populated below so a device string for a runtime that is not installed can
-# be reported with the real reason instead of "does not name a known detector",
-# which is what a missing plugin module looks like downstream.
+
+api_types: dict[str, type[DetectionApi]] = {}
+config_types: dict[str, type[BaseModel]] = {}
 failed_plugin_imports: dict[str, str] = {}
 
-for _, name, _ in _included_modules:
+for module_name in SUPPORTED_DETECTOR_MODULES:
     try:
-        # currently openvino may fail when importing
-        # on an arm device with 64 KiB page size.
-        plugin_modules.append(importlib.import_module(name))
-    except ImportError as e:
-        logger.error(f"Error importing detector runtime: {e}")
-        module_name = name.rpartition(".")[2]
-        failed_plugin_imports[module_name] = str(e)
+        module = importlib.import_module(f"frigate.detectors.plugins.{module_name}")
+    except ImportError as err:
+        # Keep startup importable so configuration validation can produce a
+        # useful detector-specific message instead of failing the entire app.
+        failed_plugin_imports[module_name] = str(err)
+        logger.warning(
+            "Windows detector plugin %s could not be imported: %s", module_name, err
+        )
+        continue
+
+    for name in dir(module):
+        candidate = getattr(module, name)
+
+        try:
+            is_config = (
+                isinstance(candidate, type)
+                and issubclass(candidate, BaseModel)
+                and candidate.__module__ == module.__name__
+            )
+            is_api = (
+                isinstance(candidate, type)
+                and issubclass(candidate, DetectionApi)
+                and candidate.__module__ == module.__name__
+            )
+        except TypeError:
+            continue
+
+        if is_config:
+            config_types[module.DETECTOR_KEY] = candidate
+        elif is_api:
+            api_types[module.DETECTOR_KEY] = candidate
 
 
-api_types = {det.type_key: det for det in DetectionApi.__subclasses__()}
+if config_types:
+    DetectorConfig: UnionType = reduce(or_, config_types.values())
+else:
 
+    class UnavailableDetectorConfig(BaseModel):
+        """Sentinel used only when every required detector import failed."""
 
-class StrEnum(str, Enum):
-    pass
-
-
-DetectorTypeEnum = StrEnum("DetectorTypeEnum", {k: k for k in api_types})
-
-DetectorConfig = Annotated[
-    Union[tuple(BaseDetectorConfig.__subclasses__())],  # noqa: UP007
-    Field(discriminator="type"),
-]
-
-
-def _discriminator_value(config_class: type[BaseDetectorConfig]) -> str | None:
-    """Read the Literal value of a detector config class' type field."""
-    field = config_class.model_fields.get("type")
-
-    if field is None:
-        return None
-
-    values = get_args(field.annotation)
-    return values[0] if values else None
-
-
-config_types: dict[str, type[BaseDetectorConfig]] = {
-    key: config_class
-    for config_class in BaseDetectorConfig.__subclasses__()
-    if (key := _discriminator_value(config_class)) is not None
-}
+    DetectorConfig = UnavailableDetectorConfig

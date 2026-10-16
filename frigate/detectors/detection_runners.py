@@ -2,7 +2,6 @@
 
 import logging
 import os
-import platform
 import threading
 from abc import ABC, abstractmethod
 from typing import Any
@@ -11,8 +10,6 @@ import numpy as np
 import onnxruntime as ort
 
 from frigate.util.model import get_ort_providers
-from frigate.util.platform import IS_WINDOWS
-from frigate.util.rknn_converter import auto_convert_model, is_rknn_compatible
 
 logger = logging.getLogger(__name__)
 
@@ -43,56 +40,10 @@ def snapshot_loaded_devices() -> dict[str, tuple[str, str]]:
 
 _PROVIDER_LABELS = {
     "CUDAExecutionProvider": "CUDA",
-    "TensorrtExecutionProvider": "TensorRT",
-    "MIGraphXExecutionProvider": "MIGraphX",
     "OpenVINOExecutionProvider": "OpenVINO",
     "DmlExecutionProvider": "DirectML",
     "CPUExecutionProvider": "CPU",
-    "LighterANE": "Neural Engine",
 }
-
-# lighter (https://github.com/fieldwork-ai/lighter) places an ONNX Runtime plugin
-# execution provider in a container started with --device lighter.sh/ane=all,
-# which runs models on a Mac's Neural Engine; LIGHTER_ANE_EP names where it is
-LIGHTER_ANE_EP_NAME = "LighterANE"
-LIGHTER_ANE_LIBRARY = "/usr/lib/lighter/liblighter_ane_ep.so"
-
-
-def get_lighter_ane_devices() -> list[Any]:
-    """Get the Neural Engine devices lighter's provider offers, registering it once.
-
-    Returns:
-        The provider's ONNX Runtime devices, or an empty list without lighter's device
-    """
-    if IS_WINDOWS:
-        return []
-
-    library = os.environ.get("LIGHTER_ANE_EP", LIGHTER_ANE_LIBRARY)
-
-    if not os.path.exists(library):
-        return []
-
-    devices = [d for d in ort.get_ep_devices() if d.ep_name == LIGHTER_ANE_EP_NAME]
-
-    if not devices:
-        try:
-            ort.register_execution_provider_library(LIGHTER_ANE_EP_NAME, library)
-        except Exception as e:
-            logger.warning(
-                f"Failed to load the Neural Engine provider from {library}: {e}"
-            )
-            return []
-
-        devices = [d for d in ort.get_ep_devices() if d.ep_name == LIGHTER_ANE_EP_NAME]
-
-    return devices
-
-
-def is_arm64_platform() -> bool:
-    """Check if we're running on an ARM platform."""
-    machine = platform.machine().lower()
-    return machine in ("aarch64", "arm64", "armv8", "armv7l")
-
 
 def get_ort_session_options(
     model_type: str | None = None, cpu: bool = False
@@ -135,6 +86,24 @@ def get_ort_session_options(
         )
 
     return sess_options
+
+
+def get_windows_session_options(
+    model_type: str | None, providers: list[str]
+) -> ort.SessionOptions | None:
+    """Build session options required by the selected Windows providers."""
+    options = get_ort_session_options(
+        model_type, cpu=bool(providers and providers[0] == "CPUExecutionProvider")
+    )
+
+    if "DmlExecutionProvider" in providers:
+        # DirectML requires sequential graph execution and does not support
+        # ONNX Runtime's memory-pattern optimization.
+        options = options or ort.SessionOptions()
+        options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+        options.enable_mem_pattern = False
+
+    return options
 
 
 # Import OpenVINO only when needed to avoid circular dependencies
@@ -211,19 +180,6 @@ class BaseModelRunner(ABC):
 
 class ONNXModelRunner(BaseModelRunner):
     """Run ONNX models using ONNX Runtime."""
-
-    @staticmethod
-    def is_migraphx_complex_model(model_type: str) -> bool:
-        # Import here to avoid circular imports
-        from frigate.detectors.detector_config import ModelTypeEnum
-        from frigate.embeddings.types import EnrichmentModelTypeEnum
-
-        return model_type in [
-            EnrichmentModelTypeEnum.paddleocr.value,
-            EnrichmentModelTypeEnum.jina_v2.value,
-            ModelTypeEnum.rfdetr.value,
-            ModelTypeEnum.dfine.value,
-        ]
 
     @staticmethod
     def is_concurrent_model(model_type: str | None) -> bool:
@@ -606,124 +562,6 @@ class OpenVINOModelRunner(BaseModelRunner):
             return outputs
 
 
-class RKNNModelRunner(BaseModelRunner):
-    """Run RKNN models for embeddings."""
-
-    def __init__(self, model_path: str, model_type: str = None, core_mask: int = 0):
-        self.model_path = model_path
-        self.model_type = model_type
-        self.core_mask = core_mask
-        self.rknn = None
-        self._load_model()
-
-    def _load_model(self):
-        """Load the RKNN model."""
-        try:
-            from rknnlite.api import RKNNLite
-
-            self.rknn = RKNNLite(verbose=False)
-
-            if self.rknn.load_rknn(self.model_path) != 0:
-                logger.error(f"Failed to load RKNN model: {self.model_path}")
-                raise RuntimeError("Failed to load RKNN model")
-
-            if self.rknn.init_runtime(core_mask=self.core_mask) != 0:
-                logger.error("Failed to initialize RKNN runtime")
-                raise RuntimeError("Failed to initialize RKNN runtime")
-
-            logger.info(f"Successfully loaded RKNN model: {self.model_path}")
-
-        except ImportError:
-            logger.error("RKNN Lite not available")
-            raise ImportError("RKNN Lite not available") from None
-        except Exception as e:
-            logger.error(f"Error loading RKNN model: {e}")
-            raise
-
-    @property
-    def device_name(self) -> str:
-        return "RKNN"
-
-    def get_input_names(self) -> list[str]:
-        """Get input names for the model."""
-        # For detection models, we typically use "input" as the default input name
-        # For CLIP models, we need to determine the model type from the path
-        model_name = os.path.basename(self.model_path).lower()
-
-        if "vision" in model_name:
-            return ["pixel_values"]
-        elif "arcface" in model_name:
-            return ["data"]
-        else:
-            # Default fallback - try to infer from model type
-            if self.model_type and "jina-clip" in self.model_type:
-                if "vision" in self.model_type:
-                    return ["pixel_values"]
-
-            # Generic fallback
-            return ["input"]
-
-    def get_input_width(self) -> int:
-        """Get the input width of the model."""
-        # For CLIP vision models, this is typically 224
-        model_name = os.path.basename(self.model_path).lower()
-        if "vision" in model_name:
-            return 224  # CLIP V1 uses 224x224
-        elif "arcface" in model_name:
-            return 112
-        # For detection models, we can't easily determine this from the RKNN model
-        # The calling code should provide this information
-        return -1
-
-    def run(self, inputs: dict[str, Any]) -> Any:
-        """Run inference with the RKNN model."""
-        if not self.rknn:
-            raise RuntimeError("RKNN model not loaded")
-
-        try:
-            input_names = self.get_input_names()
-            rknn_inputs = []
-
-            for name in input_names:
-                if name in inputs:
-                    if name == "pixel_values":
-                        # RKNN expects NHWC format, but ONNX typically provides NCHW
-                        # Transpose from [batch, channels, height, width] to [batch, height, width, channels]
-                        pixel_data = inputs[name]
-                        if len(pixel_data.shape) == 4 and pixel_data.shape[1] == 3:
-                            # Transpose from NCHW to NHWC
-                            pixel_data = np.transpose(pixel_data, (0, 2, 3, 1))
-                        rknn_inputs.append(pixel_data)
-                    elif name == "data":
-                        # ArcFace: undo Python normalisation to uint8 [0,255]
-                        # RKNN runtime applies mean=127.5/std=127.5 internally before first layer
-                        face_data = inputs[name]
-                        if len(face_data.shape) == 4 and face_data.shape[1] == 3:
-                            # Transpose from NCHW to NHWC
-                            face_data = np.transpose(face_data, (0, 2, 3, 1))
-                        face_data = (
-                            ((face_data + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
-                        )
-                        rknn_inputs.append(face_data)
-                    else:
-                        rknn_inputs.append(inputs[name])
-
-            outputs = self.rknn.inference(inputs=rknn_inputs)
-            return outputs
-
-        except Exception as e:
-            logger.error(f"Error during RKNN inference: {e}")
-            raise
-
-    def __del__(self):
-        """Cleanup when the runner is destroyed."""
-        if self.rknn:
-            try:
-                self.rknn.release()
-            except Exception:
-                pass
-
-
 def _record_runner(
     model_path: str, model_type: str, runner: BaseModelRunner
 ) -> BaseModelRunner:
@@ -738,36 +576,12 @@ def get_optimized_runner(
     """Get an optimized runner for the hardware."""
     device = device or "AUTO"
 
-    if not IS_WINDOWS and device != "CPU" and is_rknn_compatible(model_path):
-        rknn_path = auto_convert_model(model_path)
-
-        if rknn_path:
-            return _record_runner(model_path, model_type, RKNNModelRunner(rknn_path))
-
-    if device != "CPU" and (ane_devices := get_lighter_ane_devices()):
-        sess_options = get_ort_session_options(model_type) or ort.SessionOptions()
-        sess_options.add_provider_for_devices(ane_devices, {})
-
-        try:
-            session = ort.InferenceSession(model_path, sess_options=sess_options)
-        except Exception as e:
-            logger.warning(
-                f"Failed to load {model_path} on the Neural Engine, using the default providers: {e}"
-            )
-        else:
-            return _record_runner(
-                model_path,
-                model_type,
-                ONNXModelRunner(session, model_type=model_type),
-            )
-
     providers, options = get_ort_providers(device == "CPU", device, **kwargs)
 
     if providers[0] == "CPUExecutionProvider":
-        # In the default image, ONNXRuntime is used so we will only get CPUExecutionProvider
-        # In other images we will get CUDA / ROCm which are preferred over OpenVINO
-        # There is currently no way to prioritize OpenVINO over CUDA / ROCm in these images
-        if device != "CPU" and is_openvino_gpu_npu_available():
+        # A CPU-only ONNX Runtime install can still delegate AUTO/GPU/NPU to
+        # the native OpenVINO runtime when it exposes an accelerator.
+        if device in ("AUTO", "GPU", "NPU") and is_openvino_gpu_npu_available():
             return _record_runner(
                 model_path,
                 model_type,
@@ -795,24 +609,13 @@ def get_optimized_runner(
             ),
         )
 
-    if (
-        providers
-        and providers[0] == "MIGraphXExecutionProvider"
-        and ONNXModelRunner.is_migraphx_complex_model(model_type)
-    ):
-        # Don't use MIGraphX for models that are not supported
-        providers.pop(0)
-        options.pop(0)
-
     return _record_runner(
         model_path,
         model_type,
         ONNXModelRunner(
             ort.InferenceSession(
                 model_path,
-                sess_options=get_ort_session_options(
-                    model_type, cpu=providers[0] == "CPUExecutionProvider"
-                ),
+                sess_options=get_windows_session_options(model_type, providers),
                 providers=providers,
                 provider_options=options,
             ),

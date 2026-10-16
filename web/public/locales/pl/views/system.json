@@ -7,7 +7,6 @@
     "logs": {
       "frigate": "Logi Frigate - Frigate",
       "go2rtc": "Logi Go2RTC - Frigate",
-      "nginx": "Logi Nginx - Frigate",
       "websocket": "Logi komunikatów - Frigate"
     },
     "health": "Zdrowie – Frigate"

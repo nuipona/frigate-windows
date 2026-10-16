@@ -79,22 +79,7 @@ export default function Statusbar() {
             return;
           }
 
-          let gpuTitle;
-          switch (name) {
-            case "amd-vaapi":
-              gpuTitle = "AMD GPU";
-              break;
-            case "intel-gpu":
-              gpuTitle = "Intel GPU";
-              break;
-            case "rockchip":
-              gpuTitle = "Rockchip GPU";
-              break;
-            default:
-              gpuTitle = name;
-              break;
-          }
-
+          const gpuTitle = name;
           const gpu = parseInt(stats.gpu);
 
           if (isNaN(gpu)) {

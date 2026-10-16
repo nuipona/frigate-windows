@@ -1,134 +1,60 @@
 ---
 id: memory
-title: Memory Usage
+title: High Memory Usage
 ---
 
-Frigate includes built-in memory profiling using [memray](https://bloomberg.github.io/memray/) to help diagnose memory issues. This feature allows you to profile specific Frigate modules to identify memory leaks, excessive allocations, or other memory-related problems.
+# High memory usage on Windows
 
-## Enabling Memory Profiling
+Frigate uses memory for decoded frames, object tracking, recording buffers, model runtimes, the database, and the web application. Windows named shared memory is backed by the page file and has no separate tunable shared-memory quota.
 
-Memory profiling is controlled via the `FRIGATE_MEMRAY_MODULES` environment variable. Set it to a comma-separated list of module names you want to profile:
+## Identify the process
 
-```yaml
-# docker-compose example
-services:
-  frigate:
-    ...
-    environment:
-      - FRIGATE_MEMRAY_MODULES=frigate.embeddings,frigate.capture
+Use **System > Metrics**, Task Manager, Resource Monitor, or:
+
+```powershell
+Get-Process python,ffmpeg,go2rtc -ErrorAction SilentlyContinue |
+  Sort-Object WorkingSet64 -Descending |
+  Select-Object Id,ProcessName,
+    @{Name='WorkingSetMB';Expression={[math]::Round($_.WorkingSet64 / 1MB, 1)}},
+    @{Name='PrivateMB';Expression={[math]::Round($_.PrivateMemorySize64 / 1MB, 1)}}
 ```
 
-```bash
-# docker run example
-docker run -e FRIGATE_MEMRAY_MODULES="frigate.embeddings" \
-   ...
-   --name frigate <frigate_image>
-```
+A stable working set is not a leak. Record values over several hours and compare private bytes after equivalent workloads.
 
-### Module Names
+## Common causes
 
-Frigate processes are named using a module-based naming scheme. Common module names include:
+- Too many high-resolution detection streams or excessive detection FPS.
+- Large frame queues caused by a stalled consumer.
+- Multiple detector processes loading separate copies of a model.
+- Semantic-search, recognition, transcription, or custom-classification models enabled together.
+- go2rtc/FFmpeg transcodes with large probe or queue buffers.
+- A long export or reindex task.
+- A camera repeatedly reconnecting and leaving work pending until timeout.
 
-- `frigate.review_segment_manager` - Review segment processing
-- `frigate.recording_manager` - Recording management
-- `frigate.capture` - Camera capture processes (all cameras with this module name)
-- `frigate.process` - Camera processing/tracking (all cameras with this module name)
-- `frigate.output` - Output processing
-- `frigate.audio_manager` - Audio processing
-- `frigate.embeddings` - Embeddings processing
+## Reduce use
 
-You can also specify the full process name (including camera-specific identifiers) if you want to profile a specific camera:
+1. Use a camera substream for detection.
+2. Keep detection near 5 FPS unless the scene requires more.
+3. Remove duplicate model devices unless throughput measurements justify them.
+4. Disable enrichments one at a time to identify model memory.
+5. Correct unstable camera streams and timestamp errors.
+6. Keep the Windows page file system-managed on a volume with free space.
 
-```bash
-FRIGATE_MEMRAY_MODULES=frigate.capture:front_door
-```
+Do not disable the page file for a machine running GPU runtimes and multiple spawned Python processes.
 
-When you specify a module name (e.g., `frigate.capture`), all processes with that module prefix will be profiled. For example, `frigate.capture` will profile all camera capture processes.
+## Shared-memory errors
 
-## How It Works
+A named shared-memory failure can result from address-space pressure, page-file exhaustion, stale processes, or security software. Stop the Frigate service and confirm all child Python and FFmpeg processes exit before restarting. A reboot clears orphaned Windows kernel objects if a force-terminated process left them behind.
 
-1. **Binary File Creation**: When profiling is enabled, memray creates a binary file (`.bin`) in `/config/memray_reports/` that is updated continuously in real-time as the process runs.
+## Collecting evidence
 
-2. **Automatic HTML Generation**: On normal process exit, Frigate automatically:
+Capture:
 
-   - Stops memray tracking
-   - Generates an HTML flamegraph report
-   - Saves it to `/config/memray_reports/<module_name>.html`
+- Frigate System metrics before and after growth;
+- process private bytes and handles;
+- enabled cameras, resolutions, and FPS;
+- configured models and detector process counts;
+- active enrichment/reindex/export work;
+- the log around the first rapid increase.
 
-3. **Crash Recovery**: If a process crashes (SIGKILL, segfault, etc.), the binary file is preserved with all data up to the crash point. You can manually generate the HTML report from the binary file.
-
-## Viewing Reports
-
-### Automatic Reports
-
-After a process exits normally, you'll find HTML reports in `/config/memray_reports/`. Open these files in a web browser to view interactive flamegraphs showing memory usage patterns.
-
-### Manual Report Generation
-
-If a process crashes or you want to generate a report from an existing binary file, you can manually create the HTML report:
-
-- Run `memray` inside the Frigate container:
-
-```bash
-docker-compose exec frigate memray flamegraph /config/memray_reports/<module_name>.bin
-# or
-docker exec -it <container_name_or_id> memray flamegraph /config/memray_reports/<module_name>.bin
-```
-
-- You can also copy the `.bin` file to the host and run `memray` locally if you have it installed:
-
-```bash
-docker cp <container_name_or_id>:/config/memray_reports/<module_name>.bin /tmp/
-memray flamegraph /tmp/<module_name>.bin
-```
-
-## Understanding the Reports
-
-Memray flamegraphs show:
-
-- **Memory allocations over time**: See where memory is being allocated in your code
-- **Call stacks**: Understand the full call chain leading to allocations
-- **Memory hotspots**: Identify functions or code paths that allocate the most memory
-- **Memory leaks**: Spot patterns where memory is allocated but not freed
-
-The interactive HTML reports allow you to:
-
-- Zoom into specific time ranges
-- Filter by function names
-- View detailed allocation information
-- Export data for further analysis
-
-## Best Practices
-
-1. **Profile During Issues**: Enable profiling when you're experiencing memory issues, not all the time, as it adds some overhead.
-
-2. **Profile Specific Modules**: Instead of profiling everything, focus on the modules you suspect are causing issues.
-
-3. **Let Processes Run**: Allow processes to run for a meaningful duration to capture representative memory usage patterns.
-
-4. **Check Binary Files**: If HTML reports aren't generated automatically (e.g., after a crash), check for `.bin` files in `/config/memray_reports/` and generate reports manually.
-
-5. **Compare Reports**: Generate reports at different times to compare memory usage patterns and identify trends.
-
-## Troubleshooting
-
-### No Reports Generated
-
-- Check that the environment variable is set correctly
-- Verify the module name matches exactly (case-sensitive)
-- Check logs for memray-related errors
-- Ensure `/config/memray_reports/` directory exists and is writable
-
-### Process Crashed Before Report Generation
-
-- Look for `.bin` files in `/config/memray_reports/`
-- Manually generate HTML reports using: `memray flamegraph <file>.bin`
-- The binary file contains all data up to the crash point
-
-### Reports Show No Data
-
-- Ensure the process ran long enough to generate meaningful data
-- Check that memray is properly installed (included by default in Frigate)
-- Verify the process actually started and ran (check process logs)
-
-For more information about memray and interpreting reports, see the [official memray documentation](https://bloomberg.github.io/memray/).
+Do not upload databases, memory dumps, or profiler output without reviewing them for credentials and image data.

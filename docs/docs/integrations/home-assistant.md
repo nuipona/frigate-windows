@@ -3,154 +3,51 @@ id: home-assistant
 title: Home Assistant Integration
 ---
 
-The best way to integrate with Home Assistant is to use the [official integration](https://github.com/blakeblackshear/frigate-hass-integration).
+# Home Assistant integration
 
-## Installation
+Use the [official Frigate integration](https://github.com/blakeblackshear/frigate-hass-integration) from HACS.
 
-### Preparation
+## Prerequisites
 
-Frigate itself must be installed and running before setting up the integration. See the [installation documentation](../frigate/installation.md) for details.
-
-The Frigate integration requires the `mqtt` integration to be installed and
-manually configured first.
-
-See the [MQTT integration
-documentation](https://www.home-assistant.io/integrations/mqtt/) for more
-details.
-
-In addition, MQTT must be enabled in your Frigate configuration file and Frigate must be connected to the same MQTT server as Home Assistant for many of the entities created by the integration to function, e.g.:
+Frigate must already be running on its Windows host. Install and configure Home Assistant's MQTT integration, then point both applications at the same broker:
 
 ```yaml
 mqtt:
-  enabled: True
-  host: mqtt.server.com # the address of your HA server that's running the MQTT integration
-  user: your_mqtt_broker_username
-  password: your_mqtt_broker_password
+  enabled: true
+  host: 192.168.1.10
+  user: "{FRIGATE_MQTT_USER}"
+  password: "{FRIGATE_MQTT_PASSWORD}"
 ```
 
-### Integration installation
+Store the substituted values in Frigate's `secrets.yaml` or Windows service environment. MQTT supplies many entities and state updates even though API and media requests use HTTPS.
 
-Available via HACS as a default repository. To install:
+The Home Assistant `media_source` integration must be enabled for Frigate's Media Browser entries.
 
-- Use [HACS](https://hacs.xyz/) to install the integration:
+## Install
 
-```
-Home Assistant > HACS > Click in the Search bar and type "Frigate" > Frigate
-```
+1. In HACS, search for and install **Frigate**.
+2. Restart Home Assistant.
+3. Open **Settings > Devices & services > Add integration > Frigate**.
+4. Enter the native Windows URL, normally `https://<windows-host>:8971`.
+5. Enter a dedicated Frigate username and password. Assign that user only the cameras Home Assistant needs.
 
-- Restart Home Assistant.
-- Then add/configure the integration:
+The current integration supports Frigate's native JWT login. Do not use port `5000`: it is an unauthenticated, loopback-only listener reserved for Frigate's own processes and cannot be opened to another machine.
 
-```
-Home Assistant > Settings > Devices & Services > Add Integration > Frigate
-```
+## TLS
 
-Note: You will also need
-[media_source](https://www.home-assistant.io/integrations/media_source/) enabled
-in your Home Assistant configuration for the Media Browser to appear.
+Frigate generates a self-signed certificate by default. Home Assistant will reject it while certificate validation is enabled. Prefer installing a certificate whose authority Home Assistant trusts. If that is not immediately possible, the integration can disable certificate validation for this connection, but traffic should remain on a trusted network.
 
-### (Optional) Lovelace Card Installation
+If a reverse proxy terminates TLS, enter its root URL and choose the matching authentication mode in the integration. Frigate does not support a URL path prefix, so use a dedicated hostname.
 
-To install the optional companion Lovelace card, please see the [separate
-installation instructions](https://github.com/dermotduffy/frigate-hass-card) for
-that card.
+## Network access
 
-## Configuration
+Allow Home Assistant to reach TCP port `8971` on the Windows host. Limit the Windows Firewall rule to the Home Assistant address where practical. Live camera entities may also require Frigate's RTSP/WebRTC ports, depending on the configured stream method.
 
-When configuring the integration, you will be asked for the `URL` of your Frigate instance which can be pointed at the internal unauthenticated port (`5000`) or the authenticated port (`8971`) for your instance. This may look like `http://<host>:5000/`.
+The Windows browser client, not Home Assistant, handles normal Frigate WebRTC candidates. Never advertise `localhost` to a client on another device.
 
-### Docker Compose Examples
+## Optional dashboard card
 
-If you are running Home Assistant and Frigate with Docker Compose on the same device, here are some examples.
-
-#### Home Assistant running with host networking
-
-It is not recommended to run Frigate in host networking mode. In this example, you would use `http://172.17.0.1:5000` or `http://172.17.0.1:8971` when configuring the integration.
-
-```yaml
-services:
-  homeassistant:
-    image: ghcr.io/home-assistant/home-assistant:stable
-    network_mode: host
-    ...
-
-  frigate:
-    image: ghcr.io/blakeblackshear/frigate:stable
-    ...
-    ports:
-      - "172.17.0.1:5000:5000"
-      ...
-```
-
-#### Home Assistant _not_ running with host networking or in a separate compose file
-
-In this example, it is recommended to connect to the authenticated port, for example, `http://frigate:8971` when configuring the integration. There is no need to map the port for the Frigate container.
-
-```yaml
-services:
-  homeassistant:
-    image: ghcr.io/home-assistant/home-assistant:stable
-    # network_mode: host
-    ...
-
-  frigate:
-    image: ghcr.io/blakeblackshear/frigate:stable
-    ...
-    ports:
-      # - "172.17.0.1:5000:5000"
-      ...
-```
-
-### Home Assistant App
-
-If you are using Home Assistant App, the URL should be one of the following depending on which App variant you are using. Note that if you are using the Proxy App, you should NOT point the integration at the proxy URL. Just enter the same URL used to access Frigate directly from your network.
-
-| App Variant                | URL                                    |
-| -------------------------- | -------------------------------------- |
-| Frigate                    | `http://ccab4aaf-frigate:5000`         |
-| Frigate (Full Access)      | `http://ccab4aaf-frigate-fa:5000`      |
-| Frigate Beta               | `http://ccab4aaf-frigate-beta:5000`    |
-| Frigate Beta (Full Access) | `http://ccab4aaf-frigate-fa-beta:5000` |
-
-### Frigate running on a separate machine
-
-If you run Frigate on a separate device within your local network, Home Assistant will need access to port 8971.
-
-#### Local network
-
-Use `http://<frigate_device_ip>:8971` as the URL for the integration so that authentication is required.
-
-:::tip
-
-The above URL assumes you have [disabled TLS](../configuration/tls).
-By default, TLS is enabled and Frigate will be using a self-signed certificate. HomeAssistant will fail to connect HTTPS to port 8971 since it fails to verify the self-signed certificate.
-Either disable TLS and use HTTP from HomeAssistant, or configure Frigate to be accessible with a valid certificate.
-
-:::
-
-```yaml
-services:
-  frigate:
-    image: ghcr.io/blakeblackshear/frigate:stable
-    ...
-    ports:
-      - "8971:8971"
-      ...
-```
-
-#### Tailscale or other private networking
-
-Use `http://<frigate_device_tailscale_ip>:5000` as the URL for the integration.
-
-```yaml
-services:
-  frigate:
-    image: ghcr.io/blakeblackshear/frigate:stable
-    ...
-    ports:
-      - "<tailscale_ip>:5000:5000"
-      ...
-```
+The Frigate integration and the third-party Frigate dashboard card are separate. Follow the card's own installation instructions if you choose to use it.
 
 ## Options
 
@@ -197,7 +94,7 @@ For clips to be castable to media devices, audio is required and may need to be 
 
 ## Camera API
 
-To turn a camera off (pauses Frigate's processing of the stream; does not persist across Frigate restarts; see [Camera state](/configuration/live#camera-state)):
+To turn a camera off (pauses Frigate's processing and persists the runtime state across restarts; see [Camera state](/configuration/live#camera-state)):
 
 ```
 action: camera.turn_off

@@ -4,7 +4,6 @@ import asyncio
 import copy
 import logging
 import os
-import platform
 import traceback
 import urllib
 from datetime import datetime, timedelta
@@ -46,11 +45,7 @@ from frigate.config.camera.updater import (
     CameraConfigUpdateTopic,
 )
 from frigate.const import REDACTED_CREDENTIAL_SENTINEL
-from frigate.ffmpeg_presets import (
-    FFMPEG_HWACCEL_VAAPI,
-    _gpu_selector,
-    windows_decode_presets,
-)
+from frigate.ffmpeg_presets import windows_decode_presets
 from frigate.genai import PROVIDERS, load_providers
 from frigate.jobs.media_sync import (
     get_current_media_sync_job,
@@ -80,7 +75,7 @@ from frigate.util.live_streams import (
     sync_transcode_streams,
 )
 from frigate.util.object_names import get_categorized_object_names
-from frigate.util.platform import IS_WINDOWS, get_service_log_path
+from frigate.util.platform import get_audio_labelmap_path, get_service_log_path
 from frigate.util.schema import get_config_schema
 from frigate.util.services import (
     Go2rtcStreamIssue,
@@ -88,7 +83,6 @@ from frigate.util.services import (
     get_nvidia_driver_info,
     process_logs,
     restart_frigate,
-    vainfo_hwaccel,
 )
 from frigate.util.time import get_tz_modifiers
 from frigate.util.version import VERSION
@@ -449,33 +443,8 @@ def get_active_profile(request: Request):
 
 @router.get("/ffmpeg/presets", dependencies=[Depends(allow_any_authenticated())])
 def ffmpeg_presets():
-    """Return available ffmpeg preset keys for config UI usage."""
-    machine = platform.machine().lower()
-    is_arm64 = machine in ("aarch64", "arm64", "armv8", "armv7l")
-
-    if IS_WINDOWS:
-        # the presets in the other branches go through libva, v4l2 or a DRM
-        # device and cannot decode video on Windows, so the config UI must not
-        # offer them there
-        hwaccel_presets = windows_decode_presets()
-    elif is_arm64:
-        hwaccel_presets = [
-            "preset-rpi-64-h264",
-            "preset-rpi-64-h265",
-            "preset-apple-silicon-h264",
-            "preset-apple-silicon-h265",
-            "preset-jetson-h264",
-            "preset-jetson-h265",
-            "preset-rkmpp",
-            "preset-vaapi",
-        ]
-    else:
-        hwaccel_presets = [
-            "preset-vaapi",
-            "preset-intel-qsv-h264",
-            "preset-intel-qsv-h265",
-            "preset-nvidia",
-        ]
+    """Return native Windows FFmpeg preset keys for the config UI."""
+    hwaccel_presets = windows_decode_presets()
 
     input_presets = [
         "preset-http-jpeg-generic",
@@ -1147,42 +1116,15 @@ def config_set(request: Request, body: AppConfigSetBody):
 
 @router.get("/vainfo", dependencies=[Depends(allow_any_authenticated())])
 def vainfo():
-    if IS_WINDOWS:
-        # libva does not exist on Windows and neither does the vainfo tool:
-        # accelerated decoding uses d3d11va, dxva2, qsv, amf or cuda there
-        return JSONResponse(
-            content={
-                "return_code": 1,
-                "stderr": (
-                    "vainfo is a libva tool and is not available on Windows. "
-                    "Set ffmpeg.hwaccel_args to a preset-windows-* value instead."
-                ),
-                "stdout": "",
-            }
-        )
-
-    # Use LibvaGpuSelector to pick an appropriate libva device (if available)
-    selected_gpu = ""
-    try:
-        selected_gpu = _gpu_selector.get_gpu_arg(FFMPEG_HWACCEL_VAAPI, 0) or ""
-    except Exception:
-        selected_gpu = ""
-
-    # If selected_gpu is empty, pass None to vainfo_hwaccel to run plain `vainfo`.
-    vainfo = vainfo_hwaccel(device_name=selected_gpu or None)
+    """Explain why the legacy libva diagnostic is absent on Windows."""
     return JSONResponse(
         content={
-            "return_code": vainfo.returncode,
+            "return_code": 1,
             "stderr": (
-                vainfo.stderr.decode("unicode_escape").strip()
-                if vainfo.returncode != 0
-                else ""
+                "vainfo and libva are not part of the native Windows runtime. "
+                "Use the FFmpeg preset and hardware diagnostics instead."
             ),
-            "stdout": (
-                vainfo.stdout.decode("unicode_escape").strip()
-                if vainfo.returncode == 0
-                else ""
-            ),
+            "stdout": "",
         }
     )
 
@@ -1198,13 +1140,13 @@ def nvinfo():
     dependencies=[Depends(require_role(["admin"]))],
 )
 async def logs(
-    service: str = Path(enum=["frigate", "nginx", "go2rtc"]),
+    service: str = Path(enum=["frigate", "go2rtc"]),
     download: str | None = None,
     stream: bool | None = False,
     start: int | None = 0,
     end: int | None = None,
 ):
-    """Get logs for the requested service (frigate/nginx/go2rtc)"""
+    """Get logs for a native Frigate or go2rtc process."""
 
     def download_logs(service_location: str):
         try:
@@ -1240,13 +1182,9 @@ async def logs(
         except FileNotFoundError:
             yield "Log file not found.\n"
 
-    # in the container s6-log writes these under /dev/shm; a native install
-    # writes them under its own log directory (go2rtc's output is redirected
-    # there by the launcher)
     log_locations = {
         "frigate": get_service_log_path("frigate"),
         "go2rtc": get_service_log_path("go2rtc"),
-        "nginx": get_service_log_path("web"),
     }
     service_location = log_locations.get(service)
 
@@ -1497,7 +1435,7 @@ def categorized_object_names(
 
 @router.get("/audio_labels", dependencies=[Depends(allow_any_authenticated())])
 def get_audio_labels(request: Request):
-    labels = load_labels("/audio-labelmap.txt", prefill=521)
+    labels = load_labels(get_audio_labelmap_path(), prefill=521)
 
     # configured overrides group several audio classes under one label, and the
     # detector merges them over the defaults at runtime. Offer them here too, or

@@ -420,12 +420,7 @@ export function InProgressPreview({
   );
 
   if (!previewFrames || previewFrames.length == 0) {
-    return (
-      <img
-        className="size-full"
-        src={defaultImageUrl} //{`${apiHost}${review.thumb_path.replace("/media/frigate/", "")}`}
-      />
-    );
+    return <img className="size-full" src={defaultImageUrl} />;
   }
 
   return (
