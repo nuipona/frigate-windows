@@ -65,7 +65,9 @@ function walk(dir) {
 }
 
 function lintFile(file) {
-  if (file.includes("/specs/settings/")) return [];
+  // settings specs are exempt; compare resolved paths, not a "/"-joined
+  // substring, so the exemption also holds with Windows separators
+  if (file.startsWith(SETTINGS_PREFIX)) return [];
 
   const errors = [];
   const text = readFileSync(file, "utf8");
