@@ -67,8 +67,19 @@ def main(path: Path) -> int:
         print(f"::warning::all failing test ids:%0A{ids}")
 
     for test_id, traceback in blocks[: MAX_BLOCKS - 1]:
-        body = "%0A".join(_escape(line) for line in traceback if line.strip())
-        print(f"::error::{test_id}%0A{body}")
+        # GitHub truncates annotation messages, and the root exception sits
+        # at the END of a traceback (wrapped server errors especially), so
+        # keep the tail of the block rather than the framework frames.
+        kept: list[str] = []
+        size = 0
+        for line in reversed([line for line in traceback if line.strip()]):
+            kept.append(line)
+            size += len(line) + 3
+            if size > 900:
+                break
+        kept.reverse()
+        body = "%0A".join(_escape(line) for line in kept)
+        print(f"::error::{test_id}%0A...%0A{body}")
 
     if len(blocks) > MAX_BLOCKS:
         remaining = ", ".join(test_id for test_id, _ in blocks[MAX_BLOCKS:])

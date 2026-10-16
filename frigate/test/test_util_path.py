@@ -65,7 +65,7 @@ class TestSafeJoin(unittest.TestCase):
     def test_joins_multiple_segments(self):
         self.assertEqual(
             safe_join(self.base, "model1", "dataset", "none"),
-            "/media/frigate/clips/model1/dataset/none",
+            os.path.join(self.base, "model1", "dataset", "none"),
         )
 
     def test_rejects_empty_segment(self):
@@ -90,8 +90,10 @@ class TestIsContainedIn(unittest.TestCase):
     def test_handles_a_root_base(self):
         # A prefix test would compare against "//" here and wrongly report that
         # the root directory contains nothing.
-        self.assertTrue(is_contained_in("/child", "/"))
-        self.assertEqual(safe_join("/", "child"), "/child")
+        root = os.path.sep
+        child = os.path.join(root, "child")
+        self.assertTrue(is_contained_in(child, root))
+        self.assertEqual(safe_join(root, "child"), child)
 
     def test_rejects_uncomparable_paths(self):
         self.assertFalse(is_contained_in("relative/x", "/media/frigate/clips"))
@@ -124,7 +126,7 @@ class TestSanitizeContainedPath(unittest.TestCase):
     def test_keeps_a_valid_nested_path(self):
         self.assertEqual(
             sanitize_contained_path("/media/frigate/clips/a/b.webp", self.base),
-            "/media/frigate/clips/a/b.webp",
+            os.path.normpath("/media/frigate/clips/a/b.webp"),
         )
 
 
