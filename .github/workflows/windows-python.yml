@@ -94,15 +94,11 @@ jobs:
       - name: Run the unit suite
         shell: pwsh
         run: |
-          Write-Host "::notice::unit suite diagnostic armed"
-          $proc = Start-Process python -PassThru -NoNewWindow -Wait `
-            -ArgumentList 'testing-scripts/run_windows_unit_suite.py' `
-            -RedirectStandardOutput suite.out -RedirectStandardError suite.err
-          $code = $proc.ExitCode
-          if ($code -ne 0) {
-            # TEMPORARY DIAGNOSTIC: surface the suite output as annotations
-            Get-Content suite.out, suite.err -ErrorAction SilentlyContinue |
-              Set-Content suite.log
-            python -c "import pathlib; lines = pathlib.Path('suite.log').read_text(encoding='utf-8', errors='replace').splitlines() if pathlib.Path('suite.log').exists() else []; tail = [ln.replace('%', '%25') for ln in lines[-12:]]; print('::error::suite tail:%0A' + '%0A'.join(tail)); [print('::error::' + ln) for ln in lines if ln.startswith(('FAIL: ', 'ERROR: '))][:9]"
-          }
-          exit $code
+          python testing-scripts/run_windows_unit_suite.py 2>&1 |
+            Tee-Object -FilePath suite.log
+          exit $LASTEXITCODE
+
+      # TEMPORARY DIAGNOSTIC: surface suite failures as annotations
+      - name: Report suite failures
+        if: failure()
+        run: python testing-scripts/_ci_suite_report.py
