@@ -13,18 +13,20 @@ from frigate.config import FrigateConfig
 from frigate.const import STREAM_TYPE_MAIN, STREAM_TYPE_SUB
 from frigate.models import Event, Recordings
 from frigate.storage import MAX_CALCULATED_BANDWIDTH, StorageMaintainer
-from frigate.test.const import TEST_DB, cleanup_test_db
+from frigate.test.const import cleanup_test_db, test_db_path
 
 
 class TestHttp(unittest.TestCase):
     def setUp(self):
         # setup clean database for each test run
-        migrate_db = SqliteDatabase("test.db")
+        self._db_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(self._db_dir.cleanup)
+        migrate_db = SqliteDatabase(test_db_path(self._db_dir.name))
         del logging.getLogger("peewee_migrate").handlers[:]
         router = Router(migrate_db)
         router.run()
         migrate_db.close()
-        self.db = SqliteQueueDatabase(TEST_DB)
+        self.db = SqliteQueueDatabase(test_db_path(self._db_dir.name))
         models = [Event, Recordings]
         self.db.bind(models)
         self.test_dir = tempfile.mkdtemp()

@@ -5,18 +5,25 @@ import os
 
 from playhouse.sqliteq import SqliteQueueDatabase
 
-TEST_DB = "test.db"
-TEST_DB_CLEANUPS = ["test.db", "test.db-shm", "test.db-wal"]
+
+def test_db_path(directory: str) -> str:
+    """Database file for one test class, inside its own temp directory.
+
+    Every harness used to share ``test.db`` in the working directory and
+    delete it between classes. On Windows an open database file cannot be
+    deleted (the queue writer and app threads hold connections), so the
+    deletions silently failed and rows leaked into the next class. A
+    per-class file makes leakage impossible even if removal lags.
+    """
+    return os.path.join(directory, "test.db")
 
 
 def cleanup_test_db(db: SqliteQueueDatabase) -> None:
-    """Stop a test queue database and delete the shared ``test.db`` files.
+    """Stop a test queue database and delete its files.
 
     The queue writer thread owns a connection that ``close()`` does not
-    release. On Windows an open database file cannot be deleted, so without
-    ``stop()`` the cleanup removals fail and rows leak into the next test
-    class, which then sees other tests' events and recordings (Linux
-    unlinks open files happily, so this only ever bit on Windows).
+    release, so stop it first; connections held by dead app/test-client
+    threads release on collection.
     """
     try:
         db.stop()
@@ -29,11 +36,11 @@ def cleanup_test_db(db: SqliteQueueDatabase) -> None:
     except Exception:
         pass
 
-    # connections held by dead app/test-client threads release on collection
     gc.collect()
 
-    for file in TEST_DB_CLEANUPS:
+    base = db.database
+    for suffix in ("", "-shm", "-wal"):
         try:
-            os.remove(file)
+            os.remove(f"{base}{suffix}")
         except OSError:
             pass

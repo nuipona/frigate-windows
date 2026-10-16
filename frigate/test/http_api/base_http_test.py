@@ -1,6 +1,7 @@
 import datetime
 import logging
 import os
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -18,7 +19,7 @@ from frigate.debug_replay import DebugReplayManager
 from frigate.jobs.export import JobStatePublisher
 from frigate.models import Event, Recordings, ReviewSegment
 from frigate.review.types import SeverityEnum
-from frigate.test.const import TEST_DB, cleanup_test_db
+from frigate.test.const import cleanup_test_db, test_db_path
 
 
 class AuthTestClient(TestClient):
@@ -37,13 +38,16 @@ class AuthTestClient(TestClient):
 
 class BaseTestHttp(unittest.TestCase):
     def setUp(self, models):
-        # setup clean database for each test run
-        migrate_db = SqliteDatabase("test.db")
+        # setup clean database for each test run: a per-class temp file, so
+        # a database another class still has open can never leak rows in
+        self._db_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(self._db_dir.cleanup)
+        migrate_db = SqliteDatabase(test_db_path(self._db_dir.name))
         del logging.getLogger("peewee_migrate").handlers[:]
         router = Router(migrate_db)
         router.run()
         migrate_db.close()
-        self.db = SqliteQueueDatabase(TEST_DB)
+        self.db = SqliteQueueDatabase(test_db_path(self._db_dir.name))
         self.db.bind(models)
 
         # The export job manager broadcasts via JobStatePublisher on
