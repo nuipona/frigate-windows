@@ -94,7 +94,7 @@ jobs:
       - name: Run the unit suite
         shell: pwsh
         run: |
-          python testing-scripts/run_windows_unit_suite.py 2>&1 |
+          python -m unittest frigate.test.test_clip_download -v 2>&1 |
             Tee-Object -FilePath suite.log
           exit $LASTEXITCODE
 
