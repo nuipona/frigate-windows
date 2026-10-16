@@ -60,7 +60,13 @@ def main(path: Path) -> int:
     if summary:
         print(f"::error::{_escape(summary)}")
 
-    for test_id, traceback in blocks[:MAX_BLOCKS]:
+    if blocks:
+        # one warning annotation (separate quota from the errors below) so
+        # the full list of failing ids survives GitHub's per-step cap
+        ids = "%0A".join(test_id for test_id, _ in blocks)
+        print(f"::warning::all failing test ids:%0A{ids}")
+
+    for test_id, traceback in blocks[: MAX_BLOCKS - 1]:
         body = "%0A".join(_escape(line) for line in traceback if line.strip())
         print(f"::error::{test_id}%0A{body}")
 
