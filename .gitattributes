@@ -1,0 +1,17 @@
+# Line endings are LF in the repository and in every checkout, including on
+# Windows. The app is Windows-only, but generated artifacts (the OpenAPI
+# spec, locale JSON, translation files) and the web linter compare bytes;
+# CRLF checkouts made the spec check and Prettier fail on Windows while
+# passing everywhere else, and risk whole-file diffs for Windows editors.
+* text=auto eol=lf
+
+# Binary assets (git would normally detect these, but be explicit).
+*.gif binary
+*.ico binary
+*.jpg binary
+*.jpeg binary
+*.mp4 binary
+*.png binary
+*.webp binary
+*.woff binary
+*.woff2 binary
