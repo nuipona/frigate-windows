@@ -94,23 +94,15 @@ jobs:
       - name: Run the unit suite
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Continue'
-          $PSNativeCommandUseErrorActionPreference = $false
-          python testing-scripts/run_windows_unit_suite.py > suite.log 2>&1
-          $code = $LASTEXITCODE
+          Write-Host "::notice::unit suite diagnostic armed"
+          $proc = Start-Process python -PassThru -NoNewWindow -Wait `
+            -ArgumentList 'testing-scripts/run_windows_unit_suite.py' `
+            -RedirectStandardOutput suite.out -RedirectStandardError suite.err
+          $code = $proc.ExitCode
           if ($code -ne 0) {
-            # TEMPORARY DIAGNOSTIC: surface the suite log tail as annotations
-            if (Test-Path suite.log) {
-              $tail = Get-Content suite.log -Tail 12 |
-                ForEach-Object { $_ -replace '%', '%25' -replace "`r", '' -replace "`n", '' }
-              Write-Host "::error::suite.log tail (size $((Get-Item suite.log).Length)):%0A$($tail -join '%0A')"
-              $ids = Select-String -Path suite.log -Pattern '^(FAIL|ERROR): ' |
-                Select-Object -First 9
-              foreach ($hit in $ids) {
-                Write-Host "::error::$($hit.Line)"
-              }
-            } else {
-              Write-Host "::error::suite.log was not created"
-            }
+            # TEMPORARY DIAGNOSTIC: surface the suite output as annotations
+            Get-Content suite.out, suite.err -ErrorAction SilentlyContinue |
+              Set-Content suite.log
+            python -c "import pathlib; lines = pathlib.Path('suite.log').read_text(encoding='utf-8', errors='replace').splitlines() if pathlib.Path('suite.log').exists() else []; tail = [ln.replace('%', '%25') for ln in lines[-12:]]; print('::error::suite tail:%0A' + '%0A'.join(tail)); [print('::error::' + ln) for ln in lines if ln.startswith(('FAIL: ', 'ERROR: '))][:9]"
           }
           exit $code
