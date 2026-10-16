@@ -74,6 +74,7 @@ overrides, service commands, upgrades, and uninstall steps.
 Repository checks are:
 
 ```powershell
+ruff format --check bootstrap_windows.py frigate migrations testing-scripts
 ruff check bootstrap_windows.py frigate migrations testing-scripts
 python -m compileall -q bootstrap_windows.py frigate migrations testing-scripts
 python testing-scripts/check_windows_requirements.py
@@ -86,6 +87,9 @@ npm run build:native
 
 PowerShell and real-device validation must run on Windows. Linux/container test
 results are not accepted as evidence for this runtime.
+
+These checks also run automatically in the `Windows Python` and `Windows Web`
+GitHub Actions workflows on every pull request and push to `dev`.
 
 ## Release limitation
 

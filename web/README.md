@@ -22,7 +22,7 @@ PROXY_HOST=<ip_address:port> npm run dev
 
 | Command | What it does |
 | ------- | ------------ |
-| `npm run build` | Production build for the container, served under a configurable base path |
+| `npm run build` | Production build served under a configurable base path |
 | `npm run build:native` | Production build for the native install, served from `/`. Required for the native server to serve the UI |
 | `npm run lint` | ESLint plus the Playwright spec lint |
 | `npm run lint:fix` | ESLint with `--fix` |

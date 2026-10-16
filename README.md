@@ -29,7 +29,7 @@ This distribution is designed exclusively for native 64-bit Windows. Frigate run
 Install from an ordinary PowerShell window:
 
 ```powershell
-git clone https://github.com/nuipona/frigate-windows.git
+git clone https://github.com/nuipona/gannet.git
 cd frigate-windows
 py -3.12 bootstrap_windows.py
 powershell -ExecutionPolicy Bypass -File .\run_frigate.ps1
