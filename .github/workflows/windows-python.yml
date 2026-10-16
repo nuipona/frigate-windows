@@ -99,16 +99,18 @@ jobs:
           python testing-scripts/run_windows_unit_suite.py > suite.log 2>&1
           $code = $LASTEXITCODE
           if ($code -ne 0) {
-            # TEMPORARY DIAGNOSTIC: surface the failing test ids as one annotation
-            $lines = Get-Content suite.log
-            $start = ($lines | Select-String 'tests fail on Windows' | Select-Object -First 1).LineNumber
-            $summary = ($lines | Select-String '^ran \d+, failures' | Select-Object -First 1).Line
-            Write-Host "::error::$summary"
-            if ($start) {
-              $ids = $lines[$start..($lines.Count - 1)] |
-                Where-Object { $_ -match '^frigate\.test\.' } |
-                ForEach-Object { ($_ -split ' ')[0] }
-              Write-Host "::error::$($ids -join '%0A')"
+            # TEMPORARY DIAGNOSTIC: surface the suite log tail as annotations
+            if (Test-Path suite.log) {
+              $tail = Get-Content suite.log -Tail 12 |
+                ForEach-Object { $_ -replace '%', '%25' -replace "`r", '' -replace "`n", '' }
+              Write-Host "::error::suite.log tail (size $((Get-Item suite.log).Length)):%0A$($tail -join '%0A')"
+              $ids = Select-String -Path suite.log -Pattern '^(FAIL|ERROR): ' |
+                Select-Object -First 9
+              foreach ($hit in $ids) {
+                Write-Host "::error::$($hit.Line)"
+              }
+            } else {
+              Write-Host "::error::suite.log was not created"
             }
           }
           exit $code
