@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from frigate.api.export import _unique_archive_name
-from frigate.const import MAX_PLAYLIST_SECONDS
+from frigate.const import EXPORT_DIR, MAX_PLAYLIST_SECONDS
 from frigate.models import Export
 from frigate.record.export import (
     EXPORT_TRACK_TIMESCALE,
@@ -151,7 +151,7 @@ class TestExportVideoPath(unittest.TestCase):
     def test_uses_the_name_the_user_gave(self):
         self.assertEqual(
             export_video_path("Package thief", self.EXPORT_ID),
-            "/media/frigate/exports/Package thief_abc123.mp4",
+            os.path.join(EXPORT_DIR, "Package thief_abc123.mp4"),
         )
 
     def test_id_suffix_keeps_shared_names_apart(self):
@@ -175,7 +175,7 @@ class TestExportVideoPath(unittest.TestCase):
     def test_stays_inside_the_export_dir(self):
         for name in ("../../etc/passwd", "..", "a/b", "...", ""):
             path = Path(export_video_path(name, self.EXPORT_ID))
-            self.assertEqual(str(path.parent), "/media/frigate/exports")
+            self.assertEqual(path.parent, Path(EXPORT_DIR))
 
 
 class TestUniqueArchiveName(unittest.TestCase):

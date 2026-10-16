@@ -5,7 +5,6 @@
     "logs": {
       "frigate": "Frigate-logger - Frigate",
       "go2rtc": "Go2RTC-logger - Frigate",
-      "nginx": "Nginx-logger - Frigate",
       "websocket": "Meldingslogger - Frigate"
     },
     "general": "Generell statistikk - Frigate",

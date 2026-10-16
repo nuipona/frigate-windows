@@ -1617,17 +1617,6 @@
       "selectPreset": "Vyberte předvolbu",
       "manualPlaceholder": "Zadejte argumenty FFmpeg",
       "presetLabels": {
-        "preset-rpi-64-h264": "Raspberry Pi (H.264)",
-        "preset-rpi-64-h265": "Raspberry Pi (H.265)",
-        "preset-apple-silicon-h264": "Apple Silicon (H.264)",
-        "preset-apple-silicon-h265": "Apple Silicon (H.265)",
-        "preset-vaapi": "VAAPI (Intel/AMD GPU)",
-        "preset-intel-qsv-h264": "Intel QuickSync (H.264)",
-        "preset-intel-qsv-h265": "Intel QuickSync (H.265)",
-        "preset-nvidia": "NVIDIA GPU",
-        "preset-jetson-h264": "NVIDIA Jetson (H.264)",
-        "preset-jetson-h265": "NVIDIA Jetson (H.265)",
-        "preset-rkmpp": "Rockchip RKMPP",
         "preset-http-jpeg-generic": "HTTP JPEG (obecné)",
         "preset-http-mjpeg-generic": "HTTP MJPEG (obecné)",
         "preset-http-reolink": "HTTP – kamery Reolink",
@@ -1935,11 +1924,8 @@
       "audioExclude": "Vynechat",
       "hardwareNone": "Bez hardwarové akcelerace",
       "hardwareAuto": "Automaticky (doporučeno)",
-      "hardwareVaapi": "VAAPI",
       "hardwareCuda": "CUDA",
-      "hardwareV4l2m2m": "V4L2 M2M",
       "hardwareDxva2": "DXVA2",
-      "hardwareVideotoolbox": "VideoToolbox",
       "addVideoCodec": "Přidat videokodek",
       "addAudioCodec": "Přidat zvukový kodek",
       "removeCodec": "Odebrat kodek"
@@ -2115,8 +2101,7 @@
       "countRecommended_other": "Doporučeno pro {{count}} kamer",
       "unrecognized": "Tento model je nastaven pro hardware, který nebyl v systému nalezen: {{devices}}",
       "description": "Hardware, na kterém tento model provádí detekci.",
-      "detectorCountDescription": "Počet procesů detekce na tomto hardwaru. Více detektorů zvládne více kamer, ale vyžaduje více paměti zařízení.",
-      "unitsDescription": "Každá jednotka spouští vlastní proces detekce. Jednotku, kterou nelze sdílet, například Coral, může používat pouze jeden model."
+      "detectorCountDescription": "Počet procesů detekce na tomto hardwaru. Více detektorů zvládne více kamer, ale vyžaduje více paměti zařízení."
     },
     "tabs": {
       "plus": "Frigate+",

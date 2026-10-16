@@ -344,33 +344,6 @@ def get_ort_providers(
                     "device_id": device_id,
                 }
             )
-        elif provider == "TensorrtExecutionProvider":
-            # TensorrtExecutionProvider uses too much memory without options to control it
-            # so it is not enabled by default
-            if device == "Tensorrt":
-                os.makedirs(
-                    os.path.join(MODEL_CACHE_DIR, "tensorrt/ort/trt-engines"),
-                    exist_ok=True,
-                )
-                device_id = 0 if not device.isdigit() else int(device)
-                providers.append(provider)
-                options.append(
-                    {
-                        "device_id": device_id,
-                        "trt_fp16_enable": requires_fp16
-                        and os.environ.get("USE_FP16", "True") != "False",
-                        "trt_timing_cache_enable": True,
-                        "trt_engine_cache_enable": True,
-                        "trt_timing_cache_path": os.path.join(
-                            MODEL_CACHE_DIR, "tensorrt/ort"
-                        ),
-                        "trt_engine_cache_path": os.path.join(
-                            MODEL_CACHE_DIR, "tensorrt/ort/trt-engines"
-                        ),
-                    }
-                )
-            else:
-                continue
         elif provider == "OpenVINOExecutionProvider":
             # OpenVINO is used directly
             if device == "OpenVINO":
@@ -384,16 +357,10 @@ def get_ort_providers(
                         "device_type": device,
                     }
                 )
-        elif provider == "MIGraphXExecutionProvider":
-            migraphx_cache_dir = os.path.join(MODEL_CACHE_DIR, "migraphx")
-            os.makedirs(migraphx_cache_dir, exist_ok=True)
-
+        elif provider == "DmlExecutionProvider":
+            device_id = 0 if (not device or not device.isdigit()) else int(device)
             providers.append(provider)
-            options.append(
-                {
-                    "migraphx_model_cache_dir": migraphx_cache_dir,
-                }
-            )
+            options.append({"device_id": device_id})
         elif provider == "CPUExecutionProvider":
             providers.append(provider)
             options.append(
@@ -401,12 +368,9 @@ def get_ort_providers(
                     "enable_cpu_mem_arena": False,
                 }
             )
-        elif provider == "AzureExecutionProvider":
-            # Skip Azure provider - not typically available on local hardware
-            # and prevents fallback to OpenVINO when it's the first provider
-            continue
         else:
-            providers.append(provider)
-            options.append({})
+            # Ignore providers outside the native Windows CPU, CUDA, DirectML,
+            # and OpenVINO runtime contract rather than silently selecting one.
+            continue
 
     return (providers, options)

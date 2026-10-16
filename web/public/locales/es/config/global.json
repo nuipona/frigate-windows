@@ -8,8 +8,7 @@
         "description": "Cuando está habilitado, inicia Frigate en modo seguro con funciones reducidas para la solución de problemas."
     },
     "environment_vars": {
-        "label": "Variables de entorno",
-        "description": "Pares clave/valor de variables de entorno para establecer para el proceso de Frigate en el sistema operativo Home Assistant. Los usuarios que no son de HAOS deben usar la configuración de variables de entorno de Docker."
+        "label": "Variables de entorno"
     },
     "logger": {
         "label": "Registro",
@@ -422,7 +421,6 @@
                 "label": "Puerto externo",
                 "description": "Puerto externo de escucha para Frigate (por defecto 8791)."
             },
-            "description": "Configuración de los puertos de escucha internos y externos. Esto es para usuarios avanzados. Para la mayoría de los casos de uso, se recomienda modificar la sección de puertos de su configuración de Docker Compose.",
             "label": "Configuración de puertos de escucha"
         },
         "label": "Red",
@@ -480,7 +478,6 @@
                 "description": "Habilitar la recopilación de estadísticas de la GPU AMD si hay una GPU AMD presente."
             },
             "intel_gpu_device": {
-                "description": "Dirección del bus PCI o ruta del dispositivo DRM (p. ej., /dev/dri/card1) usada para fijar las estadísticas de la GPU Intel a un dispositivo concreto cuando hay varios presentes.",
                 "label": "Dispositivo GPU Intel"
             },
             "label": "Estadísticas del sistema",

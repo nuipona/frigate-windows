@@ -1,572 +1,80 @@
 ---
 id: record
-title: Recording
+header_title: Recording
 ---
 
-import ConfigTabs from "@site/src/components/ConfigTabs";
-import TabItem from "@theme/TabItem";
-import NavPath from "@site/src/components/NavPath";
+# Recording
 
-Recordings can be enabled and are stored at `/media/frigate/recordings`. The folder structure for the recordings is `YYYY-MM-DD/HH/<camera_name>/MM.SS.mp4` in **UTC time**. These recordings are written directly from your camera stream without re-encoding. Each camera supports a configurable retention policy. Frigate chooses the largest matching retention value between the recording retention and the tracked object retention when determining if a recording should be removed.
-
-New recording segments are written from the camera stream to cache, they are only moved to disk if they pass a validation check and match the setup recording retention policy.
-
-:::tip
-
-To keep a specific clip beyond your retention window, [export](/usage/exports) it rather than increasing retention for the whole camera. Exports are saved separately and are never removed by retention.
-
-:::
-
-H265 recordings can be viewed in Chrome 108+, Edge and Safari only. All other browsers require recordings to be encoded with H264.
-
-## Common recording configurations
-
-### Most conservative: Ensure all video is saved
-
-For users deploying Frigate in environments where it is important to have contiguous video stored even if there was no detectable motion, the following configuration will store all video for 3 days. After 3 days, only video containing motion will be saved for 7 days. After 7 days, only video containing motion and overlapping with alerts or detections will be retained until 30 days have passed.
-
-<ConfigTabs>
-<TabItem value="ui">
-
-Navigate to <NavPath path="Settings > Global configuration > Recording" />.
-
-- Set **Enable recording** to on
-- Set **Continuous retention > Retention days** to `3`
-- Set **Motion retention > Retention days** to `7`
-- Set **Alert retention > Event retention > Retention days** to `30`
-- Set **Alert retention > Event retention > Retention mode** to `all`
-- Set **Detection retention > Event retention > Retention days** to `30`
-- Set **Detection retention > Event retention > Retention mode** to `all`
-
-</TabItem>
-<TabItem value="yaml">
+Frigate records directly from the stream assigned the `record` role. A separate lower-resolution stream can be assigned to `detect`.
 
 ```yaml
 record:
-  enabled: True
-  continuous:
+  enabled: true
+  retain:
     days: 3
-  motion:
-    days: 7
+    mode: motion
   alerts:
     retain:
       days: 30
-      mode: all
   detections:
     retain:
-      days: 30
-      mode: all
-```
-
-</TabItem>
-</ConfigTabs>
-
-### Reduced storage: Only saving video when motion is detected
-
-To reduce storage requirements, configure recording to only retain video where motion or activity was detected.
-
-<ConfigTabs>
-<TabItem value="ui">
-
-Navigate to <NavPath path="Settings > Global configuration > Recording" />.
-
-- Set **Enable recording** to on
-- Set **Motion retention > Retention days** to `3`
-- Set **Alert retention > Event retention > Retention days** to `30`
-- Set **Alert retention > Event retention > Retention mode** to `motion`
-- Set **Detection retention > Event retention > Retention days** to `30`
-- Set **Detection retention > Event retention > Retention mode** to `motion`
-
-</TabItem>
-<TabItem value="yaml">
-
-```yaml
-record:
-  enabled: True
-  motion:
-    days: 3
-  alerts:
-    retain:
-      days: 30
-      mode: motion
-  detections:
-    retain:
-      days: 30
-      mode: motion
-```
-
-</TabItem>
-</ConfigTabs>
-
-### Minimum: Alerts only
-
-If you only want to retain video that occurs during activity caused by tracked object(s), this configuration will discard video unless an alert is ongoing.
-
-<ConfigTabs>
-<TabItem value="ui">
-
-Navigate to <NavPath path="Settings > Global configuration > Recording" />.
-
-- Set **Enable recording** to on
-- Set **Continuous retention > Retention days** to `0`
-- Set **Alert retention > Event retention > Retention days** to `30`
-- Set **Alert retention > Event retention > Retention mode** to `motion`
-
-</TabItem>
-<TabItem value="yaml">
-
-```yaml
-record:
-  enabled: True
-  continuous:
-    days: 0
-  alerts:
-    retain:
-      days: 30
-      mode: motion
-```
-
-</TabItem>
-</ConfigTabs>
-
-## Pre-capture and Post-capture
-
-The `pre_capture` and `post_capture` settings control how many seconds of video are included before and after an alert or detection. These can be configured independently for alerts and detections, and can be set globally or overridden per camera.
-
-<ConfigTabs>
-<TabItem value="ui">
-
-Navigate to <NavPath path="Settings > Global configuration > Recording" /> for global defaults, or <NavPath path="Settings > Camera configuration > (select camera) > Recording" /> to override for a specific camera.
-
-| Field                                          | Description                                          |
-| ---------------------------------------------- | ---------------------------------------------------- |
-| **Alert retention > Pre-capture seconds**      | Seconds of video to include before an alert event    |
-| **Alert retention > Post-capture seconds**     | Seconds of video to include after an alert event     |
-| **Detection retention > Pre-capture seconds**  | Seconds of video to include before a detection event |
-| **Detection retention > Post-capture seconds** | Seconds of video to include after a detection event  |
-
-</TabItem>
-<TabItem value="yaml">
-
-```yaml
-record:
-  enabled: True
-  alerts:
-    pre_capture: 5 # seconds before the alert to include
-    post_capture: 5 # seconds after the alert to include
-  detections:
-    pre_capture: 5 # seconds before the detection to include
-    post_capture: 5 # seconds after the detection to include
-```
-
-</TabItem>
-</ConfigTabs>
-
-- **Default**: 5 seconds for both pre and post capture.
-- **Pre-capture maximum**: 60 seconds.
-- These settings apply per review category (alerts and detections), not per object type.
-
-### How pre/post capture interacts with retention mode
-
-The `pre_capture` and `post_capture` values define the **time window** around a review item, but only recording segments that also match the configured **retention mode** are actually kept on disk.
-
-- **`mode: all`**: Retains every segment within the capture window, regardless of whether motion was detected.
-- **`mode: motion`** (default): Only retains segments within the capture window that contain motion. This includes segments with active tracked objects, since object motion implies motion. Segments without any motion are discarded even if they fall within the pre/post capture range.
-- **`mode: active_objects`**: Only retains segments within the capture window where tracked objects were actively moving. Segments with general motion but no active objects are discarded.
-
-This means that with the default `motion` mode, you may see less footage than the configured pre/post capture duration if parts of the capture window had no motion.
-
-To guarantee the full pre/post capture duration is always retained:
-
-```yaml
-record:
-  enabled: True
-  alerts:
-    pre_capture: 10
-    post_capture: 10
-    retain:
-      days: 30
-      mode: all # retains all segments within the capture window
-```
-
-:::note
-
-Because recording segments are written in 10 second chunks, pre-capture timing depends on segment boundaries. The actual pre-capture footage may be slightly shorter or longer than the exact configured value.
-
-:::
-
-### Where to view pre/post capture footage
-
-Pre and post capture footage is included in the **recording timeline**, visible in the History view. Note that pre/post capture settings only affect which recording segments are **retained on disk**. They do not change the start and end points shown in the UI. The History view will still center on the review item's actual time range, but you can scrub backward and forward through the retained pre/post capture footage on the timeline. The Explore view shows object-specific clips that are trimmed to when the tracked object was actually visible, so pre/post capture time will not be reflected there.
-
-## Configuring Recording Retention
-
-Frigate supports both continuous and tracked object based recordings with separate retention modes and retention periods.
-
-:::tip
-
-Retention configs support decimals meaning they can be configured to retain `0.5` days, for example.
-
-:::
-
-### Continuous and Motion Recording
-
-The number of days to retain continuous and motion recordings can be configured. By default, continuous recording is disabled.
-
-<ConfigTabs>
-<TabItem value="ui">
-
-Navigate to <NavPath path="Settings > Global configuration > Recording" />.
-
-| Field                                     | Description                                  |
-| ----------------------------------------- | -------------------------------------------- |
-| **Enable recording**                      | Enable or disable recording for all cameras  |
-| **Continuous retention > Retention days** | Number of days to keep continuous recordings |
-| **Motion retention > Retention days**     | Number of days to keep motion recordings     |
-
-</TabItem>
-<TabItem value="yaml">
-
-```yaml
-record:
-  enabled: True
-  continuous:
-    days: 1 # <- number of days to keep continuous recordings
-  motion:
-    days: 2 # <- number of days to keep motion recordings
-```
-
-</TabItem>
-</ConfigTabs>
-
-Continuous recording supports different retention modes [which are described below](#configuring-recording-retention).
-
-### Object Recording
-
-The number of days to retain recordings for review items can be specified for items classified as alerts as well as tracked objects.
-
-<ConfigTabs>
-<TabItem value="ui">
-
-Navigate to <NavPath path="Settings > Global configuration > Recording" />.
-
-| Field                                                      | Description                                 |
-| ---------------------------------------------------------- | ------------------------------------------- |
-| **Enable recording**                                       | Enable or disable recording for all cameras |
-| **Alert retention > Event retention > Retention days**     | Number of days to keep alert recordings     |
-| **Detection retention > Event retention > Retention days** | Number of days to keep detection recordings |
-
-</TabItem>
-<TabItem value="yaml">
-
-```yaml
-record:
-  enabled: True
-  alerts:
-    retain:
-      days: 10 # <- number of days to keep alert recordings
-  detections:
-    retain:
-      days: 10 # <- number of days to keep detections recordings
-```
-
-</TabItem>
-</ConfigTabs>
-
-This configuration will retain recording segments that overlap with alerts and detections for 10 days. Because multiple tracked objects can reference the same recording segments, this avoids storing duplicate footage for overlapping tracked objects and reduces overall storage needs.
-
-## Sub Stream Recording
-
-In addition to the main recording stream, Frigate can record a second, lower quality stream for each camera. This serves two purposes:
-
-- **Quality selection during playback**: A quality selector (`Auto`, `Original`, or `Low`) appears in History view for cameras with sub stream recording enabled. `Original` and `Low` play only that stream's recordings. Time ranges where the selected stream has no footage are skipped during playback, and the selector notes when the selected stream has no recordings at all in the viewed time range. With `Auto` (the default), playback prefers the original quality and automatically falls back to the low quality stream when the connection cannot keep up, or for time ranges where the original recordings have expired. The selector shows each stream's video codec and audio details beneath the options; footage recorded by older Frigate versions shows no details.
-- **Quality selection when exporting**: A `Quality` selector (`Auto`, `Original`, or `Low`) is available for cameras with sub stream recording enabled. See [exporting](#exporting-a-camera-that-records-two-streams) for details on each option.
-- **Extended retention**: Sub stream recordings have their own retention settings, fully independent of the main recordings. By giving the low quality recordings a longer retention period, you can keep weeks or months of low quality history using a fraction of the storage, and that history remains playable after the main recordings expire. Playback falls back to the low quality recordings automatically, and the timeline shows a muted treatment for time ranges where only low quality footage remains. Timeline previews are kept for as long as either stream still has recordings, so scrubbing works across the whole retained history.
-
-### Configuring sub stream recording
-
-Sub stream recording uses the `record_sub` input role. This role can be assigned to the same input as `detect`, so in the common case where detect already uses the camera's sub stream, no additional camera connection is needed. Like the main recording stream, sub stream segments are copied directly from the camera stream without re-encoding, so the recording quality is determined by the source stream.
-
-The following examples keep 7 days of full quality continuous recordings and 60 days of low quality continuous recordings:
-
-<ConfigTabs>
-<TabItem value="ui">
-
-Navigate to <NavPath path="Settings > Camera configuration > Streams (FFmpeg)" /> and select the camera.
-
-- In **Camera inputs**, enable the **Record (Sub Stream)** role on the stream you want to record at low quality, commonly the same stream that has the **Detect** role. Only one stream may have this role, and it cannot be assigned to the same stream as the **Record** role.
-
-Navigate to <NavPath path="Settings > Camera configuration > Recording" /> and select the camera.
-
-- Set **Enable recording** to on
-- Set **Continuous retention > Retention days** to `7`
-- Set **Sub stream recording > Enable sub stream recording** to on
-- Set **Sub stream recording > Sub stream continuous retention > Retention days** to `60`
-
-The camera setup wizard also offers the **Record (Sub Stream)** role when assigning stream roles for a newly added camera.
-
-</TabItem>
-<TabItem value="yaml">
-
-```yaml
-cameras:
-  front_door:
-    ffmpeg:
-      inputs:
-        - path: rtsp://camera/main
-          roles:
-            - record
-        - path: rtsp://camera/sub
-          roles:
-            - detect
-            - record_sub
-    record:
-      enabled: true
-      continuous:
-        days: 7
-      sub:
-        enabled: true
-        continuous:
-          days: 60
-```
-
-If your camera does not provide a suitable sub stream (or the sub stream is already used at a resolution you don't want to record), you can use a go2rtc transcode as the source for `record_sub` instead:
-
-```yaml
-go2rtc:
-  streams:
-    front_door: rtsp://camera/main
-    front_door_lq: ffmpeg:front_door#video=h264#width=854#hardware
+      days: 14
 
 cameras:
-  front_door:
+  front:
     ffmpeg:
       inputs:
-        - path: rtsp://127.0.0.1:8554/front_door
-          input_args: preset-rtsp-restream
-          roles:
-            - detect
-            - record
-        - path: rtsp://127.0.0.1:8554/front_door_lq
-          input_args: preset-rtsp-restream
-          roles:
-            - record_sub
-    record:
-      enabled: true
-      continuous:
-        days: 7
-      sub:
-        enabled: true
-        continuous:
-          days: 60
+        - path: rtsp://user:password@camera/low
+          roles: [detect]
+        - path: rtsp://user:password@camera/high
+          roles: [record]
 ```
 
-</TabItem>
-</ConfigTabs>
+Recording settings can be defined globally and overridden per camera.
 
-The `record.sub` config supports the same retention structure as the main recording config: `continuous`, `motion`, `alerts`, and `detections` each with their own `days` (and `mode` for alerts and detections). The pre-capture and post-capture windows for alerts and detections are taken from the main `record.alerts` and `record.detections` config. Extending `sub.alerts.days` or `sub.detections.days` beyond the main values also keeps those review items visible in the review timeline for the longer window, with playback falling back to the low quality stream once the main recordings expire.
+## Retention modes
 
-:::note
+- `all` retains all segments for the configured number of days.
+- `motion` retains segments containing motion.
+- `active_objects` retains segments containing an active tracked object.
 
-Recording must be enabled (`record.enabled`) for sub stream recording to run, and Frigate will fail to start if `record.sub.enabled` is set without a `record_sub` role assigned to one of the camera's inputs.
+Alert and detection retention can preserve event recordings longer than the continuous-recording period. Frigate deletes media according to the first applicable retention rule and available-storage safeguards.
 
-:::
+## Storage location
 
-### How Auto picks a quality
+Media defaults to `%LOCALAPPDATA%\Frigate\media`. Set `FRIGATE_MEDIA_DIR` before installation to use another local volume. For a service installation, configure the path through the service installer so it is present at boot.
 
-`Auto` measures throughput on every segment download and compares it against the original stream's bitrate (computed from the recorded footage itself). Playback drops to the low quality stream when any of these happen:
+Use NTFS and grant Modify permission to the Frigate service account. Avoid removable media and sleep-prone network shares. Do not store the SQLite database on a network share.
 
-- A freeze lasts 4 seconds (10 seconds when it starts within 2 seconds of a seek, since the seek target is rarely buffered), or freezes total 7 seconds within the last minute.
-- 3 downloads in a row measure below the original bitrate plus 10%, dropping quality before a stall ever becomes visible.
-- No first frame appears within 10 seconds, or loading fails outright.
+Example ACL command from an elevated PowerShell session:
 
-Playback returns to full quality only when measured throughput exceeds the original bitrate by 50%, checked continuously while playing the low quality stream and again at each new hour. The asymmetric thresholds (1.1x to drop, 1.5x to return) keep a borderline connection from switching back and forth.
-
-The most recent measurement is remembered on the device: a connection last measured below the original bitrate (or below 3 Mbps when the bitrate is not yet known) starts playback on the low quality stream so a first frame appears immediately, then upgrades within a few segments if the speed allows.
-
-The quality selector shows which stream Auto is currently playing and why. A browser with Data Saver enabled stays on the low quality stream, a browser that cannot decode the original stream's codec (for example H.265 without HEVC support) plays the low quality stream for that camera, and pinning `Original` or `Low` bypasses Auto entirely.
-
-### Sub stream output args
-
-By default the sub stream is recorded with the same [output args](/configuration/ffmpeg_presets#output-args-presets) as the main recording stream, so it inherits any customization made to `ffmpeg.output_args.record`. Setting `ffmpeg.output_args.record_sub` gives the sub stream its own args instead. Like all `ffmpeg` config, this can be set globally or per camera.
-
-The most common reason to set this is a pair of streams whose audio differs. Many cameras send AAC on the main stream but PCM on the sub stream, and PCM cannot be copied into an mp4 recording. Copying the main stream's audio avoids re-encoding audio that is already AAC, while the sub stream still needs to be transcoded:
-
-```yaml
-ffmpeg:
-  output_args:
-    # main stream audio is already AAC, so copy it
-    record: preset-record-generic-audio-copy
-    # sub stream audio is PCM, so transcode it to AAC
-    record_sub: preset-record-generic-audio-aac
+```powershell
+$path = 'E:\FrigateMedia'
+icacls $path /grant 'NT AUTHORITY\LOCAL SERVICE:(OI)(CI)M' /T
 ```
 
-Other reasons to set this are recording a sub stream whose codec needs a different preset than the main stream, such as `preset-record-mjpeg`, or forcing a matching audio sample rate across the two streams with manual args ending in `-c:a aac -ar 16000`.
+Replace the account with the one selected during service installation.
 
-:::warning
+## Storage planning
 
-Avoid removing audio from only one of the two streams (for example with `-an`). When one stream has audio and the other does not, playback of time ranges that combine both qualities is silent, so stripping audio from the sub stream also silences the merged timeline.
+Storage depends on camera bitrate, retention period, and retained-event activity. For a constant stream:
 
-:::
-
-### Which stream do features use?
-
-As a general rule, features that read recordings prefer the main stream and fall back to the sub stream for time ranges where the main recordings have expired. Analytics features use only the main stream.
-
-| Feature                                                                                  | Stream used                                                                                                   |
-| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Recording playback (History and Review)                                                  | Both (main preferred with sub fallback by default), or exactly one stream when a quality is selected manually |
-| Tracking details and Explore clip playback                                               | Main, falling back to sub where the main recordings have expired                                              |
-| Exports                                                                                  | Both (main preferred with sub fallback by default), or exactly one stream when a quality is selected in the export dialog |
-| Clip downloads                                                                           | Main; sub is used when no main recordings remain in the range (streams are never mixed in one file)           |
-| Frames grabbed from a recording in History (download snapshot, submit frame to Frigate+) | Main preferred, sub fallback                                                                                  |
-| Audio extraction (e.g., transcription)                                                   | Main preferred, sub fallback                                                                                  |
-| Motion search                                                                            | Main only                                                                                                     |
-| Review timeline motion data                                                              | Main only                                                                                                     |
-| Storage usage statistics                                                                 | Both streams counted, and listed separately per camera                                                        |
-
-This table covers only features that read recordings from disk. Tracked object snapshots and thumbnails (the images shown in Explore and sent with notifications, and the images submitted to Frigate+ from a tracked object) are captured live from the `detect` stream as the object is tracked, never from recordings, so sub stream recording does not affect them.
-
-### Trade-offs
-
-- Recording a second stream increases overall storage use. The increase is typically small relative to the main recordings, since the low quality stream is much smaller. Both streams are cached before being written to disk, so cache use goes up as well. See [the `/tmp/cache` area is separate](#the-tmpcache-area-is-separate) if you start seeing `No space left on device` errors after enabling it.
-- The go2rtc transcode approach continuously encodes the low quality stream, which uses CPU or GPU resources. This cost only applies to the transcode path; recording the camera's native sub stream does not re-encode. See the [go2rtc hardware acceleration documentation](https://github.com/AlexxIT/go2rtc?tab=readme-ov-file#source-ffmpeg) for accelerating the transcode.
-- Many camera sub streams do not include audio. If the source stream has no audio, the low quality recordings will not have audio.
-- **Matching video codecs and audio settings between the two streams gives the smoothest playback.** When playback combines both qualities on one timeline (the default `Auto` behavior: for example original quality during events with low quality in between, or low quality history after the original recordings expire) and the streams use different video codecs or audio settings, for example H.265 on the main stream and H.264 on the sub stream, or 16 kHz audio on one and 8 kHz on the other, playback still works: Frigate inserts a decoder reset at each quality transition, which can cause a barely-perceptible pause there. Configuring both streams in the camera's firmware to use the same video codec, audio codec, and sample rate makes transitions fully seamless, and a mismatched audio sample rate can also be corrected with [sub stream output args](#sub-stream-output-args). If one stream has audio and the other does not, combined time ranges play **without audio**; selecting a single quality with the playback selector always keeps that stream's audio.
-
-## Can I have "continuous" recordings, but only at certain times?
-
-Using Frigate UI, Home Assistant, or MQTT, cameras can be automated to only record in certain situations or at certain times.
-
-## How do I export recordings?
-
-Footage can be exported from Frigate by right-clicking (desktop) or long pressing (mobile) on a review item in the Review pane or by clicking the Export button in the History view. Exported footage is then organized and searchable through the Export view, accessible from the main navigation bar.
-
-### Custom export with FFmpeg arguments
-
-For advanced use cases, the [custom export HTTP API](../integrations/api/export-recording-custom-export-custom-camera-name-start-start-time-end-end-time-post.api.mdx) lets you pass custom FFmpeg arguments when exporting a recording:
-
-```
-POST /export/custom/{camera_name}/start/{start_time}/end/{end_time}
+```text
+GB per day ≈ bitrate in Mbit/s × 10.8
 ```
 
-The request body accepts `ffmpeg_input_args` and `ffmpeg_output_args` to control encoding, frame rate, filters, and other FFmpeg options. If neither is provided, Frigate defaults to time-lapse output settings (25x speed, 30 FPS) with audio removed (`-an`). When providing your own `ffmpeg_input_args`, include `-an` if you want audio stripped from the export.
+A 4 Mbit/s stream therefore uses roughly 43 GB per day before filesystem overhead. Variable-bitrate cameras and motion-only retention can differ substantially.
 
-The following example exports a time-lapse at 60x speed with 25 FPS:
+Frigate monitors free space on the media volume and may remove old recordings to keep the configured reserve. Windows volume metrics are reported in diagnostics.
 
-```json
-{
-  "name": "Front Door Time-lapse",
-  "ffmpeg_output_args": "-vf setpts=PTS/60 -r 25"
-}
-```
+## Exporting
 
-#### CPU fallback
+Exports are written beneath the media directory and are available only to authorized users with access to the camera. Ensure enough free space for both source segments and the completed export.
 
-If hardware acceleration is configured and the export fails (e.g., the GPU is unavailable), set `cpu_fallback: true` in the request body to automatically retry using software encoding.
+## Troubleshooting
 
-```json
-{
-  "name": "My Export",
-  "ffmpeg_output_args": "-c:v libx264 -crf 23",
-  "cpu_fallback": true
-}
-```
-
-:::note
-
-Non-admin users are restricted from using FFmpeg arguments that can access the filesystem (e.g., `-filter_complex`, file paths, and protocol references). Admin users have full control over FFmpeg arguments.
-
-:::
-
-:::tip
-
-When `hwaccel_args` is configured, hardware encoding is used for exports. This can be overridden per camera (e.g., when camera resolution exceeds hardware encoder limits) by setting a camera-level `hwaccel_args`. Using an unrecognized value or empty string falls back to software encoding (libx264).
-
-:::
-
-:::tip
-
-To reduce output file size, add the FFmpeg parameter `-qp n` to `ffmpeg_output_args` (where `n` is the quantization parameter). Adjust the value to balance quality and file size for your scenario.
-
-:::
-
-## Apple Compatibility with H.265 Streams
-
-Apple devices running the Safari browser may fail to playback h.265 recordings. The [apple compatibility option](../configuration/camera_specific.md#h265-cameras-via-safari) should be used to ensure seamless playback on Apple devices.
-
-## Syncing Media Files With Disk
-
-Media files (event snapshots, event thumbnails, review thumbnails, previews, exports, and recordings) can become orphaned when database entries are deleted but the corresponding files remain on disk.
-
-Normal operation may leave small numbers of orphaned files until Frigate's scheduled cleanup, but crashes, configuration changes, or upgrades may cause more orphaned files that Frigate does not clean up. This feature checks the file system for media files and removes any that are not referenced in the database.
-
-The Maintenance pane in the Frigate UI or an API endpoint `POST /api/media/sync` can be used to trigger a media sync. When using the API, a job ID is returned and the operation continues on the server. Status can be checked with the `/api/media/sync/status/{job_id}` endpoint. Results include the disk space reclaimed, or with `dry_run: true`, the space that would be reclaimed.
-
-Setting `verbose: true` writes a detailed report of every orphaned file and database entry to `/config/media_sync/<job_id>.txt`. For recordings, the report separates orphaned database entries (DB records whose files are missing from disk) from orphaned files (files on disk with no corresponding database record).
-
-:::warning
-
-This operation uses considerable CPU resources and includes a safety threshold that aborts if more than 50% of files would be deleted. Only run when necessary. If you set `force: true` the safety threshold will be bypassed; do not use `force` unless you are certain the deletions are intended.
-
-:::
-
-## Understanding storage usage
-
-The storage usage Frigate reports will not exactly match what the operating system reports with `df` or `du`. This is expected, not a bug. The sections below explain how Frigate derives its storage figures and why they differ from the disk's own accounting.
-
-### How Frigate measures recording usage
-
-The **Recordings** value on the Storage Metrics page (<NavPath path="Health and Metrics > Storage" />), and the per-camera **Camera Storage** breakdown, is the sum of the recording segment sizes Frigate has written, taken from Frigate's database. It is **not** computed by a scan of the disk. Frigate tracks usage this way by design: repeatedly walking the entire drive to total its size would keep hard drives spun up and add unnecessary I/O.
-
-The disk **total** shown beside it, and the free-space figure Frigate uses to decide when to delete recordings, instead come from the operating system's report for the whole filesystem mounted at `/media/frigate`. As a result, the **Unused** value on the page is _total disk capacity minus Frigate's recordings_, not the drive's real free space, which will be lower whenever anything else is stored on the disk.
-
-### What counts toward usage, and why it won't match `df`
-
-Only **recording segments** (`/media/frigate/recordings`) are included in the recordings storage total. Plenty of other things consume real disk space but are **not** part of that number:
-
-- **Snapshots and thumbnails** (`/media/frigate/clips`): see [Snapshots](/configuration/snapshots). These are retained independently of recordings.
-- **Preview videos** and **review thumbnails** (also under `/media/frigate/clips`).
-- **Exports** (`/media/frigate/exports`): exports are never removed by retention.
-- **The database, downloaded detection models, and face / license plate training images** (stored under `/config`).
-- **Debug images from enrichments** (`/media/frigate/clips`): when enabled, License Plate Recognition's `debug_save_plates` and GenAI's `debug_save_thumbnails` save plate crops and request images for troubleshooting.
-
-These files are the usual explanation for an "other" or seemingly unaccounted bucket of space: it is real, it is Frigate's, and it simply isn't part of the _recordings_ total. They are also why comparing the **Recordings** figure to `df -h` always shows a gap: `df` additionally counts any non-Frigate data on the disk, filesystem overhead and reserved blocks (ext4 reserves ~5% for root by default, so a disk can read "full" before recordings approach the total), and recently deleted recordings whose space has not yet been reclaimed.
-
-:::tip
-
-The Storage page is not intended to be a system-wide disk monitor: it shows how much space _Frigate's recordings_ use. To see true disk usage, use `df -h` (free space) and `du -sh` (per-directory usage) on the host.
-
-:::
-
-### Free space and the `/media/frigate` mount
-
-Frigate reports the capacity and free space of whatever filesystem is actually mounted at `/media/frigate` **inside the container**. If an external drive or network share isn't truly mounted there (a missing `/etc/fstab` entry, a share that was offline when the container started, or a host that doesn't pass the path through), the container falls back to the host's OS disk, and Frigate will correctly report that smaller disk instead of the drive you intended.
-
-If the reported capacity doesn't match your drive, the mount is the place to look, not Frigate. Verify what is actually mounted from inside the container:
-
-```bash
-docker exec -it frigate df -h /media/frigate
-docker exec -it frigate mount | grep media
-```
-
-See the [storage mount layout](/frigate/installation#storage) for how the volumes are expected to be configured.
-
-### The `/tmp/cache` area is separate
-
-Recording segments are first written to `/tmp/cache`, a small, in-memory (`tmpfs`) area, before being checked and moved to `/media/frigate/recordings`. Because it is separate and small, `/tmp/cache` can fill up and produce `No space left on device` errors even when the recordings disk has plenty of room. They are different storage areas. See [Recordings troubleshooting](/troubleshooting/recordings) for diagnosing cache and slow-storage issues.
-
-### When the metrics don't match what's on disk
-
-Because usage is tracked in the database, deleting recording files directly on disk, or files left behind after an upgrade, will not update the reported usage, and can even push it above 100%. Frigate is unaware of files it didn't record and won't count or remove them automatically. Use [Syncing Media Files With Disk](#syncing-media-files-with-disk) to reconcile the database with what is actually on disk.
-
-## Will Frigate delete old recordings if my storage runs out?
-
-Yes. Frigate continuously checks the **free space of the disk** holding `/media/frigate/recordings`. This is different from adding up the size of every recording: free space is a single number the operating system already tracks, so Frigate can ask for it instantly without reading through your files or spinning up the disk, which is exactly why it relies on this check rather than scanning the drive. When less than roughly one hour of recording space remains (estimated from the current recording bitrate, **not** a fixed percentage), Frigate deletes the oldest recordings to reclaim space and logs a message. This emergency cleanup removes the oldest recordings first **regardless of retention settings**.
-
-Two consequences follow from this being based on whole-disk free space:
-
-- Because the check uses the disk's real free space, **anything** filling the drive, including non-Frigate files, can trigger deletion of your oldest recordings.
-- Cleanup can run while a meaningful percentage of the disk is still free (for example, with high bitrates or many cameras), because the threshold is "less than ~1 hour of recording headroom," not "X% full."
-
-Frequent emergency cleanups usually mean your configured retention exceeds what the disk can hold. Reduce your retention days so the normal retention cleanup keeps up and the emergency path rarely triggers.
+- Verify the record input contains stable timestamps and a supported codec.
+- Ensure the service account can create, rename, and delete files in the media directory.
+- Exclude the media directory from real-time antivirus scanning only if allowed by your security policy; exclusions reduce protection.
+- Check drive health and free space before increasing retention.
+- Review FFmpeg logs when recordings contain gaps or cannot be finalized.

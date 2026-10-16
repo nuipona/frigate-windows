@@ -173,7 +173,7 @@ To serve the `embeddings` role for [Semantic Search](/configuration/semantic_sea
 
 [Ollama](https://ollama.com/) allows you to self-host large language models and keep everything running locally. It is highly recommended to host this server on a machine with an Nvidia graphics card, or on a Apple silicon Mac for best performance.
 
-Most of the 7b parameter 4-bit vision models will fit inside 8GB of VRAM. There is also a [Docker container](https://hub.docker.com/r/ollama/ollama) available.
+Most 7-billion-parameter 4-bit vision models fit in 8 GB of VRAM. Install Ollama natively on its Windows host or use another reachable Ollama server.
 
 Parallel requests also come with some caveats. You will need to set `OLLAMA_NUM_PARALLEL=1` and choose a `OLLAMA_MAX_QUEUE` and `OLLAMA_MAX_LOADED_MODELS` values that are appropriate for your hardware and preferences. See the [Ollama documentation](https://docs.ollama.com/faq#how-does-ollama-handle-concurrent-requests).
 
@@ -183,7 +183,7 @@ If you are trying to use a single model for Frigate and HomeAssistant, it will n
 
 :::
 
-Note that Frigate will not automatically download the model you specify in your config. Ollama will try to download the model but it may take longer than the timeout, so it is recommended to pull the model beforehand by running `ollama pull your_model` on your Ollama server/Docker container. The model specified in Frigate's config must match the downloaded model tag.
+Frigate does not download the configured Ollama model. Run `ollama pull your_model` on the Ollama host before enabling the provider; the tag in Frigate must exactly match the downloaded model.
 
 #### Configuration
 
@@ -509,7 +509,7 @@ Frigate's Generative AI features are configured and enabled separately. [Review 
    ```
 
 5. Save the exact images and prompts that were sent to your provider.
-   - Turn on **Save thumbnails** for the feature you are debugging (`review.genai.debug_save_thumbnails` or `objects.genai.debug_save_thumbnails`). Both features write to `/media/frigate/clips/genai-requests/`, and these files are admin-only.
+   - Turn on **Save thumbnails** for the feature you are debugging (`review.genai.debug_save_thumbnails` or `objects.genai.debug_save_thumbnails`). Both features write to `clips\genai-requests` beneath the configured Windows media directory, and these files are admin-only.
    - Review descriptions write `genai-requests/<review_id>/` containing the numbered frames that were sent, plus `prompt.txt` and `response.txt` with the exact prompt and the raw, unparsed model response.
    - Review summary reports write `genai-requests/<start_ts>-<end_ts>/prompt.txt` and `response.txt`. No images are involved, since a report summarizes existing review descriptions.
    - Object descriptions write `genai-requests/<event_id>/` containing the numbered thumbnails. The prompt for object descriptions is not written to a file, it is only visible in the debug logs from step 4.

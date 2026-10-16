@@ -5,6 +5,7 @@ the digest bookkeeping, archive extraction, layout resolution and launcher
 generation without touching the network.
 """
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -52,6 +53,22 @@ class TestBaseLayout(unittest.TestCase):
         self.assertEqual(
             layout.restart_marker(), layout.base_dir / "tmp" / "restart.requested"
         )
+
+    def test_service_defaults_to_program_data(self):
+        with patch.dict(
+            os.environ,
+            {
+                "ProgramData": r"C:\ProgramData",
+                "FRIGATE_BASE_DIR": "",
+                "FRIGATE_CONFIG_DIR": "",
+                "FRIGATE_MEDIA_DIR": "",
+                "FRIGATE_CACHE_DIR": "",
+                "FRIGATE_TMP_DIR": "",
+            },
+        ):
+            layout = bootstrap.BaseLayout(service_mode=True)
+
+        self.assertEqual(layout.base_dir, Path(r"C:\ProgramData") / "Frigate")
 
     def test_base_dir_moves_every_directory(self):
         with tempfile.TemporaryDirectory() as base:
@@ -202,6 +219,8 @@ class TestLauncher(unittest.TestCase):
         self.assertIn("restart.requested", script)
         self.assertIn(str(bootstrap.python_executable_in(venv).resolve()), script)
         self.assertIn("-m frigate", script)
+        self.assertIn("$env:FRIGATE_BASE_DIR", script)
+        self.assertIn("$env:FRIGATE_CONFIG_DIR", script)
         # the marker is consumed so a later manual stop is not mistaken
         # for another restart request
         self.assertIn("Remove-Item $marker", script)
@@ -243,6 +262,32 @@ class TestInstallArtifact(unittest.TestCase):
 
             self.assertEqual(installed, [config / "ffmpeg" / "ffmpeg.exe"])
 
+    def test_pinned_file_is_installed_atomically(self):
+        payload = b"model"
+        with tempfile.TemporaryDirectory() as tmp:
+            layout = bootstrap.BaseLayout()
+            layout.config_dir = Path(tmp) / "config"
+            artifact = bootstrap.PinnedFile(
+                name="model",
+                version="1",
+                url="https://example.com/model.tflite",
+                filename="model.tflite",
+                dest_subdir="model_cache",
+                expected_sha256=hashlib.sha256(payload).hexdigest(),
+            )
+
+            def fake_download(_url: str, dest: Path) -> None:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(payload)
+
+            with patch.object(bootstrap, "download", fake_download):
+                installed = bootstrap.install_file(
+                    artifact, layout, Path(tmp) / "downloads"
+                )
+
+            self.assertEqual(installed.read_bytes(), payload)
+            self.assertFalse(installed.with_name("model.tflite.tmp").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -256,7 +301,7 @@ class TestServiceInstall(unittest.TestCase):
 
         with patch.object(bootstrap.subprocess, "run") as run:
             run.return_value = subprocess.CompletedProcess([], 0)
-            bootstrap.install_service(python)
+            bootstrap.install_service(python, bootstrap.BaseLayout())
 
         command = run.call_args.args[0]
         self.assertEqual(command[0], "powershell")
@@ -265,6 +310,7 @@ class TestServiceInstall(unittest.TestCase):
         # without this the installer would guess, and could register a service
         # that runs an interpreter without Frigate or pywin32 in it
         self.assertIn(str(python), command)
+        self.assertIn("-BaseDir", command)
 
     def test_a_refused_install_is_reported(self):
         """The installer refuses rather than registering a broken service."""
@@ -272,13 +318,15 @@ class TestServiceInstall(unittest.TestCase):
             run.return_value = subprocess.CompletedProcess([], 1)
 
             with self.assertRaises(bootstrap.BootstrapError) as raised:
-                bootstrap.install_service(Path("C:/Frigate/.venv/Scripts/python.exe"))
+                bootstrap.install_service(
+                    Path("C:/Frigate/.venv/Scripts/python.exe"), bootstrap.BaseLayout()
+                )
 
         self.assertIn("not installed", str(raised.exception))
 
     def test_a_missing_installer_is_reported(self):
         with patch.object(bootstrap, "REPO_ROOT", Path("C:/nowhere")):
             with self.assertRaises(bootstrap.BootstrapError) as raised:
-                bootstrap.install_service(Path("python.exe"))
+                bootstrap.install_service(Path("python.exe"), bootstrap.BaseLayout())
 
         self.assertIn("not found", str(raised.exception))

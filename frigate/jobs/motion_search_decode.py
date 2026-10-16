@@ -22,12 +22,9 @@ from frigate.util.services import auto_detect_hwaccel
 
 logger = logging.getLogger(__name__)
 
-# Output-format surfaces that download cleanly to nv12 via the fixed
-# ``hwdownload,format=nv12`` step the decode path appends. Other surfaces
-# (drm_prime from rkmpp, vulkan, amf) need a different download step, so motion
-# search decodes them in software to keep results byte-identical rather than risk
-# a wrong-but-valid-sized frame the zero-frame fallback gate would not catch.
-_NV12_OUTPUT_FORMATS = frozenset({"vaapi", "cuda", "qsv"})
+# GPU surfaces that download cleanly to nv12 through the fixed filter step.
+# D3D11VA/DXVA2 and Vulkan fall back to software for deterministic search pixels.
+_NV12_OUTPUT_FORMATS = frozenset({"cuda", "qsv"})
 
 
 def _hwaccel_output_format(decode_args: list[str]) -> str | None:

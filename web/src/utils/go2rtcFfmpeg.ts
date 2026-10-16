@@ -1,8 +1,7 @@
 export type FfmpegVideoOption = "copy" | "h264" | "h265" | "exclude";
 export type FfmpegAudioOption =
   "copy" | "aac" | "opus" | "pcmu" | "pcma" | "pcm" | "mp3" | "exclude";
-export type FfmpegHardwareOption =
-  "none" | "auto" | "vaapi" | "cuda" | "v4l2m2m" | "dxva2" | "videotoolbox";
+export type FfmpegHardwareOption = "none" | "auto" | "cuda" | "dxva2";
 
 export type ParsedFfmpegUrl = {
   isFfmpeg: boolean;
@@ -26,13 +25,7 @@ const AUDIO_VALUES = new Set([
   "pcm",
   "mp3",
 ]);
-const HARDWARE_SPECIFIC = new Set([
-  "vaapi",
-  "cuda",
-  "v4l2m2m",
-  "dxva2",
-  "videotoolbox",
-]);
+const HARDWARE_SPECIFIC = new Set(["cuda", "dxva2"]);
 
 function isRecognizedFragment(frag: string): boolean {
   if (frag === "hardware") return true;

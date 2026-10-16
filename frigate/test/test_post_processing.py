@@ -15,11 +15,9 @@ conversion keeps both.
 
 import math
 import unittest
-from queue import Queue
 
 import numpy as np
 
-from frigate.detectors.plugins.memryx import MemryXDetector
 from frigate.util.model import (
     post_process_dfine,
     post_process_rfdetr,
@@ -186,40 +184,6 @@ class TestRfdetrPostProcess(unittest.TestCase):
         self.assertEqual(len(detections), 2)
         np.testing.assert_allclose(detections[0], [0, conf_a, *A_ROW], atol=2e-3)
         np.testing.assert_allclose(detections[1], [1, conf_b, *B_ROW], atol=2e-3)
-
-
-class TestMemryxSsdlitePostProcess(unittest.TestCase):
-    def test_keeps_separated_objects_far_from_origin(self):
-        # the NMS math runs on the host CPU, so the real method is testable
-        # without MemryX hardware; it only needs the model dimensions and
-        # the output queue
-        detector = object.__new__(MemryXDetector)
-        detector.memx_model_width = WIDTH
-        detector.memx_model_height = HEIGHT
-        detector.output_queue = Queue()
-
-        # this path uses a 0.5 NMS threshold, so use a tighter pair: zero
-        # true overlap (10 px gap), IoU 0.69 when misread as [x, y, w, h]
-        dets = np.zeros((1, 10, 5), dtype=np.float32)
-        dets[0, 0] = [480, 500, 540, 620, 0.90]
-        dets[0, 1] = [550, 500, 610, 620, 0.85]
-        labels = np.zeros((1, 10), dtype=np.float32)
-        labels[0, 1] = 1
-
-        detector.post_process_ssdlite([dets, labels])
-        detections = kept(detector.output_queue.get())
-
-        self.assertEqual(len(detections), 2)
-        np.testing.assert_allclose(
-            detections[0],
-            [0, 0.90, 500 / 640, 480 / 640, 620 / 640, 540 / 640],
-            atol=2e-3,
-        )
-        np.testing.assert_allclose(
-            detections[1],
-            [1, 0.85, 500 / 640, 550 / 640, 620 / 640, 610 / 640],
-            atol=2e-3,
-        )
 
 
 if __name__ == "__main__":

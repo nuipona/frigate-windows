@@ -1,285 +1,95 @@
 ---
 id: contributing
-title: Contributing To The Main Code Base
+title: Contributing
 ---
 
-## Getting the source
+# Contributing on Windows
 
-### Core, Web, Docker, and Documentation
+Frigate's supported development and runtime platform is 64-bit Windows with CPython 3.12. See the repository-root `CONTRIBUTING.md` for the authoritative setup and validation commands.
 
-This repository holds the main Frigate application and all of its dependencies.
+## Setup
 
-Fork [blakeblackshear/frigate](https://github.com/blakeblackshear/frigate.git) to your own GitHub profile, then clone the forked repo to your local machine.
+Install:
 
-From here, follow the guides for:
+- Git for Windows;
+- 64-bit CPython 3.12 with the Python launcher;
+- Node.js and Corepack;
+- current GPU drivers when changing accelerated code;
+- Visual Studio Build Tools only when a dependency must be compiled locally.
 
-- [Core](#core)
-- [Web Interface](#web-interface)
-- [Documentation](#documentation)
+From PowerShell:
 
-### Frigate Home Assistant App
+```powershell
+git clone https://github.com/blakeblackshear/frigate.git
+cd frigate
+py -3.12 bootstrap_windows.py
+.\.venv\Scripts\Activate.ps1
+```
 
-This repository holds the Home Assistant App, for use with Home Assistant OS and compatible installations. It is the piece that allows you to run Frigate from your Home Assistant Supervisor tab.
+The bootstrap installs pinned native dependencies, verified FFmpeg/go2rtc binaries, and the verified detection/audio models. Do not introduce a dependency unless it supplies a CPython 3.12 `win_amd64` wheel or is pure Python.
 
-Fork [blakeblackshear/frigate-hass-addons](https://github.com/blakeblackshear/frigate-hass-addons) to your own Github profile, then clone the forked repo to your local machine.
+## Local configuration
 
-### Frigate Home Assistant Integration
+Use a separate writable data root while developing:
 
-This repository holds the custom integration that allows your Home Assistant installation to automatically create entities for your Frigate instance, whether you are running Frigate as a standalone Docker container or as a [Home Assistant App](#frigate-home-assistant-app).
+```powershell
+$env:FRIGATE_BASE_DIR = "$PWD\.devdata"
+.\scripts\start_frigate.ps1
+```
 
-Fork [blakeblackshear/frigate-hass-integration](https://github.com/blakeblackshear/frigate-hass-integration) to your own GitHub profile, then clone the forked repo to your local machine.
+Create `.devdata\config\config.yml` through the first-run UI or start with the minimal example in [Configuration](/configuration/config). Keep credentials in `.devdata\config\secrets.yaml`; never commit them.
 
-## Core
-
-### Prerequisites
-
-- GNU make
-- Docker (including buildx plugin)
-- An extra detector (Coral, OpenVINO, etc.) is optional but recommended to simulate real world performance.
-
-:::note
-
-A Coral device can only be used by a single process at a time, so an extra Coral device is recommended if using a coral for development purposes.
-
-:::
-
-### Setup
-
-#### 1. Open the repo with Visual Studio Code
-
-Upon opening, you should be prompted to open the project in a remote container. This will build a container on top of the base Frigate container with all the development dependencies installed. This ensures everyone uses a consistent development environment without the need to install any dependencies on your host machine.
-
-#### 2. Modify your local config file for testing
-
-Place the file at `config/config.yml` in the root of the repo.
-
-Here is an example, but modify for your needs:
+A local sample can be looped with an absolute Windows path:
 
 ```yaml
-mqtt:
-  host: mqtt
-
 cameras:
   test:
     ffmpeg:
       inputs:
-        - path: /media/frigate/car-stopping.mp4
+        - path: 'C:\FrigateSamples\camera.mp4'
           input_args: -re -stream_loop -1 -fflags +genpts
-          roles:
-            - detect
+          roles: [detect]
 ```
 
-These input args tell ffmpeg to read the mp4 file in an infinite loop. You can use any valid ffmpeg input here.
+## Backend validation
 
-#### 3. Gather some mp4 files for testing
+Run formatting, lint, compilation, and the focused tests for code you changed:
 
-Create and place these files in a `debug` folder in the root of the repo. This is also where recordings will be created if you enable them in your test config. Update your config from step 2 above to point at the right file. You can check the `docker-compose.yml` file in the repo to see how the volumes are mapped.
-
-#### 4. Run Frigate from the command line
-
-VS Code will start the Docker Compose file for you and open a terminal window connected to `frigate-dev`.
-
-- Depending on what hardware you're developing on, you may need to amend `docker-compose.yml` in the project root to pass through a USB Coral or GPU for hardware acceleration.
-- Run `python3 -m frigate` to start the backend.
-- In a separate terminal window inside VS Code, change into the `web` directory and run `npm install && npm run dev` to start the frontend.
-
-#### 5. Teardown
-
-After closing VS Code, you may still have containers running. To close everything down, just run `docker-compose down -v` to cleanup all containers.
-
-### Testing
-
-#### Unit Tests
-
-GitHub will execute unit tests on new PRs. You must ensure that all tests pass.
-
-```shell
-python3 -u -m unittest
+```powershell
+.\.venv\Scripts\python.exe -m ruff format --check frigate migrations
+.\.venv\Scripts\python.exe -m ruff check frigate migrations
+.\.venv\Scripts\python.exe -m compileall -q frigate
+.\.venv\Scripts\python.exe -m unittest discover -s frigate\test
 ```
 
-#### FFMPEG Hardware Acceleration
+Tests that mock Win32 APIs may run on another host in CI, but behavior that depends on the Service Control Manager, Job Objects, named events, DirectML, or Windows GPU drivers must also be exercised on Windows.
 
-The following commands are used inside the container to ensure hardware acceleration is working properly.
+## Web application
 
-**Raspberry Pi (64bit)**
-
-This should show less than 50% CPU in top, and ~80% CPU without `-c:v h264_v4l2m2m`.
-
-```shell
-ffmpeg -c:v h264_v4l2m2m -re -stream_loop -1 -i https://streams.videolan.org/ffmpeg/incoming/720p60.mp4 -f rawvideo -pix_fmt yuv420p pipe: > /dev/null
+```powershell
+cd web
+corepack yarn install --immutable
+corepack yarn lint
+corepack yarn test
+corepack yarn build
 ```
 
-**NVIDIA GPU**
-
-```shell
-ffmpeg -c:v h264_cuvid -re -stream_loop -1 -i https://streams.videolan.org/ffmpeg/incoming/720p60.mp4 -f rawvideo -pix_fmt yuv420p pipe: > /dev/null
-```
-
-**NVIDIA Jetson**
-
-```shell
-ffmpeg -c:v h264_nvmpi -re -stream_loop -1 -i https://streams.videolan.org/ffmpeg/incoming/720p60.mp4 -f rawvideo -pix_fmt yuv420p pipe: > /dev/null
-```
-
-**VAAPI**
-
-```shell
-ffmpeg -hwaccel vaapi -hwaccel_device /dev/dri/renderD128 -hwaccel_output_format yuv420p -re -stream_loop -1 -i https://streams.videolan.org/ffmpeg/incoming/720p60.mp4 -f rawvideo -pix_fmt yuv420p pipe: > /dev/null
-```
-
-**QSV**
-
-```shell
-ffmpeg -c:v h264_qsv -re -stream_loop -1 -i https://streams.videolan.org/ffmpeg/incoming/720p60.mp4 -f rawvideo -pix_fmt yuv420p pipe: > /dev/null
-```
-
-### Submitting a pull request
-
-Code must be formatted, linted and type-tested. GitHub will run these checks on pull requests, so it is advised to run them yourself prior to opening.
-
-**Formatting**
-
-```shell
-ruff format frigate migrations docker *.py
-```
-
-**Linting**
-
-```shell
-ruff check frigate migrations docker *.py
-```
-
-**MyPy Static Typing**
-
-```shell
-python3 -u -m mypy --config-file frigate/mypy.ini frigate
-```
-
-## Web Interface
-
-### Prerequisites
-
-- All [core](#core) prerequisites _or_ another running Frigate instance locally available
-- Node.js 20
-
-### Making changes
-
-#### 1. Set up a Frigate instance
-
-The Web UI requires an instance of Frigate to interact with for all of its data. You can either run an instance locally (recommended) or attach to a separate instance accessible on your network.
-
-To run the local instance, follow the [core](#core) development instructions.
-
-If you won't be making any changes to the Frigate HTTP API, you can attach the web development server to any Frigate instance on your network. Skip this step and go to [3a](#3a-run-the-development-server-against-a-non-local-instance).
-
-#### 2. Install dependencies
-
-```console
-cd web && npm install
-```
-
-#### 3. Run the development server
-
-```console
-cd web && npm run dev
-```
-
-##### 3a. Run the development server against a non-local instance
-
-To run the development server against a non-local instance, you will need to
-replace the `localhost` values in `vite.config.ts` with the IP address of the
-non-local backend server.
-
-#### 4. Making changes
-
-The Web UI is built using [Vite](https://vitejs.dev/), [Preact](https://preactjs.com), and [Tailwind CSS](https://tailwindcss.com).
-
-Light guidelines and advice:
-
-- Avoid adding more dependencies. The web UI intends to be lightweight and fast to load.
-- Do not make large sweeping changes. [Open a discussion on GitHub](https://github.com/blakeblackshear/frigate/discussions/new) for any large or architectural ideas.
-- Ensure `lint` passes. This command will ensure basic conformance to styles, applying as many automatic fixes as possible, including Prettier formatting.
-
-```console
-npm run lint
-```
-
-- Ensure the backend [unit tests](#unit-tests) pass. Your PR cannot be merged unless tests pass.
-
-```shell
-python3 -u -m unittest
-```
-
-- Ensure the end-to-end tests pass. They run in Playwright against a production build with mocked API data, so they don't need a running Frigate instance. Add or update tests in `web/e2e/specs/` when you change UI behavior.
-
-```console
-# First-time setup
-npx playwright install chromium
-
-# Build the app and run all tests
-npm run e2e:build && npm run e2e
-```
-
-- Test in different browsers. Firefox, Chrome, and Safari all have different quirks that make them unique targets to interact with.
+Frontend browser requests must use relative URLs so the native gateway can route them. Do not add a browser-side dependency on `localhost`.
 
 ## Documentation
 
-### Prerequisites
-
-- Node.js 20
-
-### Making changes
-
-#### 1. Installation
-
-```console
-cd docs && npm install
-```
-
-#### 2. Local Development
-
-```console
-npm run start
-```
-
-This command starts a local development server and open up a browser window. Most changes are reflected live without having to restart the server.
-
-The docs are built using [Docusaurus v3](https://docusaurus.io). Please refer to the Docusaurus docs for more information on how to modify Frigate's documentation.
-
-#### 3. Build (optional)
-
-```console
+```powershell
+cd docs
+npm ci
 npm run build
 ```
 
-This command generates static content into the `build` directory and can be served using any static contents hosting service.
+Keep examples Windows-native: PowerShell commands, drive-letter or UNC paths, Windows Firewall, and supported acceleration/detector names. Verify links after deleting or renaming a page.
 
-## Official builds
+## Pull requests
 
-Setup buildx for multiarch
-
-```
-docker buildx stop builder && docker buildx rm builder # <---- if existing
-docker run --privileged --rm tonistiigi/binfmt --install all
-docker buildx create --name builder --driver docker-container --driver-opt network=host --use
-docker buildx inspect builder --bootstrap
-make push
-```
-
-## Other
-
-### Nginx
-
-When testing nginx config changes from within the dev container, the following command can be used to copy and reload the config for testing without rebuilding the container:
-
-```console
-sudo cp docker/main/rootfs/usr/local/nginx/conf/* /usr/local/nginx/conf/ && sudo /usr/local/nginx/sbin/nginx -s reload
-```
-
-## Contributing translations of the Web UI
-
-Frigate uses [Weblate](https://weblate.org) to manage translations of the Web UI. To contribute translation, sign up for an account at Weblate and navigate to the Frigate NVR project:
-
-https://hosted.weblate.org/projects/frigate-nvr/
-
-When translating, maintain the existing key structure while translating only the values. Ensure your translations maintain proper formatting, including any placeholder variables (like `{{example}}`).
+- Keep changes focused and include tests for bug fixes.
+- Describe any manual Windows validation and hardware used.
+- Do not restore removed service supervisors, Unix sockets, device-node discovery, or platform branches.
+- Never commit camera credentials, JWT/proxy secrets, databases, recordings, downloaded models, or generated certificates.
+- Update `WINDOWS_COMPATIBILITY.md` when changing a platform boundary.

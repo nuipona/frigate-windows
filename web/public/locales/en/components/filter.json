@@ -2,7 +2,9 @@
   "filter": "Filter",
   "classes": {
     "label": "Classes",
-    "all": { "title": "All Classes" },
+    "all": {
+      "title": "All Classes"
+    },
     "count_one": "{{count}} Class",
     "count_other": "{{count}} Classes"
   },

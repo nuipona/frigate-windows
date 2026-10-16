@@ -3,7 +3,6 @@ import json
 import logging
 import os
 import re
-from pathlib import Path
 from typing import Any
 
 import cv2
@@ -17,26 +16,23 @@ from frigate.const import MODEL_CACHE_DIR, PLUS_API_HOST, PLUS_ENV_VAR
 
 logger = logging.getLogger(__name__)
 
+WINDOWS_PLUS_DETECTORS = frozenset({"cpu", "openvino", "onnx"})
 
-def add_hailo_alias(model_info: dict[str, Any]) -> dict[str, Any]:
-    """Name the hailo detector by its current key as well as its old one.
 
-    Frigate+ reports every Hailo model as supporting hailo8l, which this
-    detector was called before it was renamed to cover every Hailo device.
-    The old key is kept so an older Frigate still matches the model.
+def _windows_model_metadata(model: dict[str, Any]) -> dict[str, Any] | None:
+    """Keep only detector variants runnable by the native Windows build."""
+    supported = [
+        detector
+        for detector in model.get("supportedDetectors", [])
+        if detector in WINDOWS_PLUS_DETECTORS
+    ]
+    if not supported:
+        return None
 
-    Args:
-        model_info: A Frigate+ model's metadata, edited in place
-
-    Returns:
-        The same metadata
-    """
-    supported = model_info.get("supportedDetectors")
-
-    if supported and "hailo8l" in supported and "hailo" not in supported:
-        supported.append("hailo")
-
-    return model_info
+    result = dict(model)
+    result["supportedDetectors"] = supported
+    result.pop("hailoDevice", None)
+    return result
 
 
 def load_plus_model_info(model_id: str) -> dict[str, Any] | None:
@@ -54,7 +50,7 @@ def load_plus_model_info(model_id: str) -> dict[str, Any] | None:
     except (OSError, ValueError):
         return None
 
-    return add_hailo_alias(model_info)
+    return model_info
 
 
 def get_jpg_bytes(image: ndarray, max_dim: int, quality: int) -> bytes:
@@ -78,20 +74,6 @@ class PlusApi:
         self.key = None
         if PLUS_ENV_VAR in os.environ:
             self.key = os.environ.get(PLUS_ENV_VAR)
-        elif (
-            os.path.isdir("/run/secrets")
-            and os.access("/run/secrets", os.R_OK)
-            and PLUS_ENV_VAR in os.listdir("/run/secrets")
-        ):
-            self.key = (
-                Path(os.path.join("/run/secrets", PLUS_ENV_VAR)).read_text().strip()
-            )
-        # check for the add-on options file
-        elif os.path.isfile("/data/options.json"):
-            with open("/data/options.json") as f:
-                raw_options = f.read()
-            options = json.loads(raw_options)
-            self.key = options.get("plus_api_key")
 
         if self.key is not None and not re.match(
             r"[a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12}:[a-z0-9]{40}",
@@ -283,7 +265,12 @@ class PlusApi:
         if not r.ok:
             raise Exception(r.text)
 
-        return r.json()
+        metadata = _windows_model_metadata(r.json())
+        if metadata is None:
+            raise ValueError(
+                f"Frigate+ model {model_id} has no native Windows detector variant"
+            )
+        return metadata
 
     def get_models(self) -> Any:
         r = self._get("model/list")
@@ -291,9 +278,10 @@ class PlusApi:
         if not r.ok:
             raise Exception(r.text)
 
-        models = r.json()
-
-        for model in models.get("list") or []:
-            add_hailo_alias(model)
-
-        return models
+        payload = r.json()
+        models = [
+            metadata
+            for model in payload.get("list", [])
+            if (metadata := _windows_model_metadata(model)) is not None
+        ]
+        return {**payload, "list": models}

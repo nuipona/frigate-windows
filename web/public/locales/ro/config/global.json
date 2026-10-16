@@ -1137,8 +1137,7 @@
         "description": "Când este activat, pornește Frigate în mod de siguranță, cu funcții reduse, pentru depanare."
     },
     "environment_vars": {
-        "label": "Variabile de mediu",
-        "description": "Perechi cheie/valoare ale variabilelor de mediu de setat pentru procesul Frigate în Home Assistant OS. Utilizatorii care nu folosesc HAOS trebuie să folosească configurarea variabilelor de mediu din Docker."
+        "label": "Variabile de mediu"
     },
     "logger": {
         "label": "Jurnalizare",
@@ -1225,7 +1224,6 @@
         },
         "listen": {
             "label": "Configurare porturi ascultare",
-            "description": "Configurare pentru porturile de ascultare interne și externe. Aceasta este pentru utilizatori avansați. Pentru majoritatea cazurilor, se recomandă schimbarea secțiunii de porturi din fișierul Docker compose.",
             "internal": {
                 "label": "Port intern",
                 "description": "Portul de ascultare intern pentru Frigate (implicit 5000)."
@@ -1295,8 +1293,7 @@
                 "description": "Activează monitorizarea lățimii de bandă a rețelei pe proces pentru procesele ffmpeg ale camerelor și detectoare (necesită capabilități)."
             },
             "intel_gpu_device": {
-                "label": "Dispozitiv GPU Intel",
-                "description": "Adresa magistralei PCI sau calea dispozitivului DRM (ex./dev/dri/card1) folosită pentru a fixa statisticile GPU Intel la un anumit dispozitiv când sunt prezente mai multe."
+                "label": "Dispozitiv GPU Intel"
             }
         },
         "version_check": {
@@ -1508,8 +1505,7 @@
             "description": "Un nume pentru mediul camerei pentru care este utilizat acest model, cum ar fi 'termal'. Camerele selectează un model prin setarea valorii detect.scene la o valoare corespunzătoare, iar modelul 'implicit' este folosit de orice cameră care nu are o setare definită."
         },
         "devices": {
-            "label": "Hardware de detecție",
-            "description": "Hardware-ul pe care rulează acest model, sub forma '<detector>' sau '<detector>:<device>' (de exemplu 'edgetpu:pci:0' sau 'openvino:GPU'). Listarea aceluiași dispozitiv de mai multe ori rulează procese de inferență suplimentare pe acesta."
+            "label": "Hardware de detecție"
         },
         "path": {
             "label": "Calea către modelul personalizat al detectorului de obiecte",

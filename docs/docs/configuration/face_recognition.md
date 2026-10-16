@@ -358,6 +358,6 @@ By default iOS devices will use HEIC (High Efficiency Image Container) for image
 
 <FaqItem id="how-can-i-delete-the-face-database-and-start-over" question="How can I delete the face database and start over?">
 
-Frigate does not store anything in its database related to face recognition. You can simply delete all of your faces through the Frigate UI or remove the contents of the `/media/frigate/clips/faces` directory.
+Frigate does not store face-recognition images in its database. Delete faces through the UI or remove the contents of `clips\faces` beneath the configured Windows media directory while Frigate is stopped.
 
 </FaqItem>

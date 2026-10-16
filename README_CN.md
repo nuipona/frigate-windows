@@ -14,7 +14,7 @@
 
 一个完整的本地网络视频录像机（NVR），专为[Home Assistant](https://www.home-assistant.io)设计，具备 AI 目标/物体检测功能。使用 OpenCV 和 TensorFlow 在本地为 IP 摄像头执行实时物体检测。
 
-强烈推荐使用 GPU 或者 AI 加速器（例如[Google Coral 加速器](https://coral.ai/products/) 或者 [Hailo](https://hailo.ai/)等）。它们的运行效率远远高于现在的顶级 CPU，并且功耗也极低。
+强烈推荐使用 Windows 支持的 GPU 或 AI 加速器，例如 DirectML、OpenVINO 或 Nvidia CUDA；也可以使用 CPU 检测。
 
 - 通过[自定义组件](https://github.com/blakeblackshear/frigate-hass-integration)与 Home Assistant 紧密集成
 - 设计上通过仅在必要时和必要地点寻找目标，最大限度地减少资源使用并最大化性能
@@ -27,9 +27,9 @@
 - 通过 RTSP 重新流传输以减少摄像头的连接数
 - 支持 WebRTC 和 MSE，实现低延迟的实时观看
 
-## 本仓库：原生 Windows 支持
+## 原生 Windows 应用程序
 
-`nuipona/frigate-windows` 跟踪 `blakeblackshear/frigate`，并增加了原生 Windows 安装方式：Frigate 以普通 Windows 进程运行，不需要 Docker，也不需要 WSL。API、媒体接口和 Web 界面都由 Frigate 自己提供，因此没有 nginx、s6 和 `/dev/shm`。
+本发行版专为原生 64 位 Windows 设计。Frigate 作为普通 Windows 进程或 SCM 服务运行；不支持容器、WSL 或 Unix 运行时路径。API、媒体接口和 Web 界面均由 Frigate 自己提供。
 
 在普通的 PowerShell 窗口中安装：
 
@@ -40,7 +40,7 @@ py -3.12 bootstrap_windows.py
 powershell -ExecutionPolicy Bypass -File .\run_frigate.ps1
 ```
 
-引导脚本需要 64 位 CPython 3.12。它会创建虚拟环境、安装 Windows 依赖、下载固定版本的 FFmpeg 与 go2rtc、在检测到 Node.js 时构建 Web 界面，并生成一个启动脚本（Frigate 请求重启时由它负责重新拉起）。只有构建前端时才需要 Node.js：`windows_bundle` 发布任务会附上一个已构建好 `web/dist` 的 zip。
+引导脚本需要 64 位 CPython 3.12。它会创建虚拟环境、安装 Windows 依赖、下载固定版本的 FFmpeg、go2rtc 以及检测与音频模型、在检测到 Node.js 时构建 Web 界面，并生成一个启动脚本（Frigate 请求重启时由它负责重新拉起）。只有构建前端时才需要 Node.js；打包的发行版可以预先包含 `web/dist`。
 
 Windows 相关特性：
 

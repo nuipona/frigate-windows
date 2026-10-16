@@ -13,10 +13,7 @@ from frigate.util.platform import (
     get_tmp_dir,
 )
 
-# Paths resolve per platform. Inside the container image these are the
-# documented locations (/config, /media/frigate, /tmp/cache, /dev/shm); a
-# native Windows or macOS install keeps the same layout under one base
-# directory. See frigate/util/platform.py.
+# Writable paths in the native Windows application-data layout.
 INSTALL_DIR = get_install_dir()
 FFMPEG_DIR = get_ffmpeg_dir()
 CONFIG_DIR = get_config_dir()
@@ -40,17 +37,6 @@ PLUS_ENV_VAR = "PLUS_API_KEY"
 PLUS_API_HOST = "https://api.frigate.video"
 
 FULL_SYSTEM_CPU_KEY = "frigate.full_system"
-
-# Key the storage stats for the shared memory equivalent. The container uses
-# /dev/shm; a native install reports the page file backed shared memory under
-# the same key so the web UI does not need to know which one it is talking to.
-SHM_STATS_KEY = "/dev/shm"
-
-# File paths inside the container image that only exist on Linux. They are
-# resolved lazily through frigate.util.platform so importing this module never
-# touches a path that does not exist.
-CONTAINER_MEDIA_DIR = "/media/frigate"
-
 
 SHM_FRAMES_VAR = "SHM_MAX_FRAMES"
 
@@ -132,18 +118,8 @@ MAX_WAL_SIZE = 10  # MB
 
 # Ffmpeg constants
 
-DEFAULT_FFMPEG_VERSION = os.environ.get("DEFAULT_FFMPEG_VERSION", "")
-INCLUDED_FFMPEG_VERSIONS = os.environ.get("INCLUDED_FFMPEG_VERSIONS", "").split(":")
 LIBAVFORMAT_VERSION_MAJOR = int(os.environ.get("LIBAVFORMAT_VERSION_MAJOR", "59"))
-FFMPEG_HWACCEL_NVIDIA = "preset-nvidia"
-FFMPEG_HWACCEL_VAAPI = "preset-vaapi"
-FFMPEG_HWACCEL_VULKAN = "preset-vulkan"
-FFMPEG_HWACCEL_RKMPP = "preset-rkmpp"
-FFMPEG_HWACCEL_AMF = "preset-amd-amf"
 FFMPEG_HVC1_ARGS = ["-tag:v", "hvc1"]
-
-# RKNN constants
-SUPPORTED_RK_SOCS = ["rk3562", "rk3566", "rk3568", "rk3576", "rk3588"]
 
 # Regex constants
 
@@ -162,13 +138,6 @@ WINDOWS_RESERVED_NAMES = frozenset(
 REGEX_RTSP_CAMERA_USER_PASS = r":\/\/[a-zA-Z0-9_-]+:[\S]+@"
 REGEX_HTTP_CAMERA_USER_PASS = r"user=[a-zA-Z0-9_-]+&password=[\S]+"
 REGEX_JSON = re.compile(r"^\s*\{")
-
-# Known Driver Names
-
-DRIVER_ENV_VAR = "LIBVA_DRIVER_NAME"
-DRIVER_AMD = "radeonsi"
-DRIVER_INTEL_i965 = "i965"
-DRIVER_INTEL_iHD = "iHD"
 
 # Preview Values
 

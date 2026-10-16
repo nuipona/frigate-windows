@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Generate E2E mock data from backend Pydantic and Peewee models.
 
 Run from the repo root:

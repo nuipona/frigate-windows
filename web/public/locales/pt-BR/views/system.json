@@ -7,7 +7,6 @@
     "logs": {
       "frigate": "Registros Frigate - Frigate",
       "go2rtc": "Registros GoRTC - Frigate",
-      "nginx": "Registros Nginx - Frigate",
       "websocket": "Registros de Mensagem - Frigate"
     },
     "health": "Saúde - Frigate"
@@ -295,7 +294,6 @@
         "detector_stuck": "O detector {{detector}} foi reiniciado depois de parar de responder",
         "model_download_failed": "Falha ao baixar {{file}} para {{model}}: {{error}}",
         "skipped_detections": "A detecção não conseguiu acompanhar e ignorou {{pct}}% dos quadros por mais de um minuto",
-        "shm_too_low": "A alocação de /dev/shm ({{total}} MB) deve ser aumentada para pelo menos {{min}} MB",
         "failed_login_other": "Tentativas de login malsucedidas para {{user}}",
         "failed_login_one": "Tentativa de login malsucedida para {{user}}",
         "update_available": "O Frigate {{version}} está disponível",

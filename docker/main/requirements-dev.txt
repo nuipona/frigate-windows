@@ -1,4 +1,0 @@
-ruff == 0.16.10
-
-# types
-types-peewee == 4.0.*

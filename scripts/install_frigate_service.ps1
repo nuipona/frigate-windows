@@ -20,8 +20,8 @@
         config and the recordings in the service profile. This resolves the
         directory once, creates it, gives the service account access to it, and
         pins it in the service's own environment as FRIGATE_BASE_DIR (along
-        with any other FRIGATE_* variable of this session, so a custom layout
-        carries over).
+        with other FRIGATE_* variables, `PLUS_API_KEY`, and the explicit go2rtc
+        exec opt-in from this session, so startup settings carry over).
 
     Recovery
         The service reports a failure when Frigate dies, but the SCM does
@@ -192,8 +192,8 @@ function Install-PyWin32 {
 
     if (Test-PyWin32 -Python $Python) { return }
 
-    Write-Host "pywin32 is missing from $Python; installing it (it is part of docker/main/requirements-windows.txt)..."
-    & $Python -m pip install -r (Join-Path $repoRoot "docker\main\requirements-windows.txt")
+    Write-Host "pywin32 is missing from $Python; installing it (it is part of requirements.txt)..."
+    & $Python -m pip install -r (Join-Path $repoRoot "requirements.txt")
     if ($LASTEXITCODE -ne 0) {
         throw "Installing the Windows requirements failed (exit $LASTEXITCODE)."
     }
@@ -220,6 +220,20 @@ function Initialize-BaseDirectory {
     Write-Host "Data directory:   $Path"
 }
 
+function Format-ServiceEnvironment {
+    param([string[]]$Variables)
+
+    return (($Variables | ForEach-Object {
+                $name, $value = $_ -split "=", 2
+                if ($name -eq "FRIGATE_BASE_DIR") {
+                    "$name=$value"
+                }
+                else {
+                    "$name=<set>"
+                }
+            }) -join "; ")
+}
+
 function Set-ServiceEnvironment {
     param([string]$Path)
 
@@ -230,7 +244,10 @@ function Set-ServiceEnvironment {
     # service itself sets for the process it starts)
     $skip = @("FRIGATE_BASE_DIR", "FRIGATE_SERVICE_MODE", "FRIGATE_SERVICE_STOP_EVENT")
     $configured = Get-ChildItem Env: |
-        Where-Object { $_.Name -like "FRIGATE_*" -and $skip -notcontains $_.Name } |
+        Where-Object {
+            ($_.Name -like "FRIGATE_*" -or $_.Name -in @("PLUS_API_KEY", "GO2RTC_ALLOW_ARBITRARY_EXEC")) -and
+            $skip -notcontains $_.Name
+        } |
         Sort-Object Name
 
     foreach ($variable in $configured) {
@@ -242,7 +259,7 @@ function Set-ServiceEnvironment {
     New-ItemProperty -Path (Get-ServiceKey) -Name Environment -PropertyType MultiString `
         -Value $variables -Force | Out-Null
 
-    Write-Host "Service env:      $($variables -join '; ')"
+    Write-Host "Service env:      $(Format-ServiceEnvironment -Variables $variables)"
 }
 
 function Set-ServiceRecovery {
@@ -311,7 +328,7 @@ function Invoke-ServiceAction {
             $environment = (Get-ItemProperty -Path (Get-ServiceKey) -Name Environment `
                     -ErrorAction SilentlyContinue).Environment
             if ($environment) {
-                Write-Host "Service env:      $($environment -join '; ')"
+                Write-Host "Service env:      $(Format-ServiceEnvironment -Variables $environment)"
             }
             else {
                 Write-Host "Service env:      not set, so Frigate will use the service account's"

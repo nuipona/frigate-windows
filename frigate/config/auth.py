@@ -23,9 +23,12 @@ class AuthConfig(FrigateBaseModel):
         pattern=r"^[a-z_]+$",
     )
     cookie_secure: bool = Field(
-        default=False,
+        default=True,
         title="Secure cookie flag",
-        description="Set the secure flag on the auth cookie; should be true when using TLS.",
+        description=(
+            "Set the Secure flag on the authentication cookie. Disable only "
+            "when the public listener intentionally uses plain HTTP."
+        ),
     )
     session_length: int = Field(
         default=86400,

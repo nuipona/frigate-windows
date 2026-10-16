@@ -1,4 +1,4 @@
-"""Tests for networking config validation."""
+"""Tests for native Windows networking config validation."""
 
 import unittest
 
@@ -14,24 +14,24 @@ class TestListenConfig(unittest.TestCase):
         self.assertEqual(listen.internal_port, 5000)
         self.assertEqual(listen.external_port, 8971)
 
-    def test_address_and_port_string_is_parsed(self):
-        listen = ListenConfig(internal="127.0.0.1:5000", external="0.0.0.0:8971")
+    def test_numeric_strings_are_parsed(self):
+        listen = ListenConfig(internal="5001", external="8971")
 
-        self.assertEqual(listen.internal_port, 5000)
+        self.assertEqual(listen.internal_port, 5001)
         self.assertEqual(listen.external_port, 8971)
 
     def test_identical_ports_rejected(self):
         with self.assertRaises(ValidationError):
             ListenConfig(internal=8971, external=8971)
 
-    def test_same_port_on_different_addresses_rejected(self):
-        # nginx would accept these as distinct listeners, but /auth decides on
-        # the port alone, so the external one would inherit anonymous admin
+    def test_ports_must_be_in_tcp_range(self):
         with self.assertRaises(ValidationError):
-            ListenConfig(internal="127.0.0.1:8971", external="0.0.0.0:8971")
+            ListenConfig(internal=0)
+        with self.assertRaises(ValidationError):
+            ListenConfig(external=65536)
 
     def test_distinct_ports_accepted(self):
-        listen = ListenConfig(internal=5001, external="0.0.0.0:8971")
+        listen = ListenConfig(internal=5001, external=8971)
 
         self.assertEqual(listen.internal_port, 5001)
         self.assertEqual(listen.external_port, 8971)

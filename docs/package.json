@@ -3,10 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "build:config": "node scripts/build-config.mjs",
     "docusaurus": "docusaurus",
-    "start": "npm run build:config && npm run regen-docs && docusaurus start --host 0.0.0.0",
-    "build": "npm run build:config && npm run regen-docs && docusaurus build",
+    "start": "npm run regen-docs && docusaurus start --host 0.0.0.0",
+    "build": "npm run regen-docs && docusaurus build",
     "swizzle": "docusaurus swizzle",
     "deploy": "docusaurus deploy",
     "clear": "docusaurus clear",

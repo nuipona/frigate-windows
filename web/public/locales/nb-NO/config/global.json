@@ -8,8 +8,7 @@
         "description": "Når aktivert, start Frigate i trygg modus med redusert funksjonalitet for feilsøking."
     },
     "environment_vars": {
-        "label": "Miljøvariabler",
-        "description": "Nøkkel-/verdipar for miljøvariabler som skal settes for Frigate-prosessen i Home Assistant OS. Brukere uten HAOS må bruke miljøvariabelkonfigurasjon i Docker i stedet."
+        "label": "Miljøvariabler"
     },
     "logger": {
         "label": "Logging",
@@ -172,7 +171,6 @@
         },
         "listen": {
             "label": "Konfigurasjon for lytteporter",
-            "description": "Konfigurasjon for interne og eksterne lytteporter. Dette er for avanserte brukere. For de fleste brukstilfeller anbefales det å endre port-seksjonen i din Docker compose-fil i stedet.",
             "internal": {
                 "label": "Intern port",
                 "description": "Intern lytteport for Frigate (standard 5000)."

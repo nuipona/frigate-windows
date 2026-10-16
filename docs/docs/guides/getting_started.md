@@ -1,453 +1,152 @@
 ---
 id: getting_started
-title: Getting started
+title: Getting Started
 ---
 
-import ConfigTabs from "@site/src/components/ConfigTabs";
-import Tabs from "@theme/Tabs";
-import TabItem from "@theme/TabItem";
 import NavPath from "@site/src/components/NavPath";
 
-# Getting Started
+# Getting started on Windows
 
-:::tip
+This guide takes a new native Windows installation from bootstrap to the first working camera.
 
-If you already have an environment with Linux and Docker installed, you can continue to [Installing Frigate](#installing-frigate) below.
+## 1. Prepare the computer
 
-If you already have Frigate installed through Docker or through a Home Assistant App, you can continue to [Configuring Frigate](#configuring-frigate) below.
+Use 64-bit Windows 10 or Windows 11 and 64-bit CPython 3.12. Install current GPU drivers before selecting hardware acceleration. A wired network and a local NTFS media volume are strongly recommended.
 
-:::
+Open PowerShell in the Frigate source directory and run:
 
-## Setting up hardware
-
-This section guides you through setting up a server with Debian Bookworm and Docker.
-
-### Install Debian 12 (Bookworm)
-
-There are many guides on how to install Debian Server, so this will be an abbreviated guide. Connect a temporary monitor and keyboard to your device so you can install a minimal server without a desktop environment.
-
-#### Prepare installation media
-
-1. Download the small installation image from the [Debian website](https://www.debian.org/distrib/netinst)
-1. Flash the ISO to a USB device (popular tool is [balena Etcher](https://etcher.balena.io/))
-1. Boot your device from USB
-
-#### Install and setup Debian for remote access
-
-1. Ensure your device is connected to the network so updates and software options can be installed
-1. Choose the non-graphical install option if you don't have a mouse connected, but either install method works fine
-1. You will be prompted to set the root user password and create a user with a password
-1. Install the minimum software. Fewer dependencies result in less maintenance.
-   1. Uncheck "Debian desktop environment" and "GNOME"
-   1. Check "SSH server"
-   1. Keep "standard system utilities" checked
-1. After reboot, login as root at the command prompt to add user to sudoers
-   1. Install sudo
-      ```bash
-      apt update && apt install -y sudo
-      ```
-   1. Add the user you created to the sudo group (change `blake` to your own user)
-      ```bash
-      usermod -aG sudo blake
-      ```
-1. Shutdown by running `poweroff`
-
-At this point, you can install the device in a permanent location. The remaining steps can be performed via SSH from another device. If you don't have an SSH client, you can install one of the options listed in the [Visual Studio Code documentation](https://code.visualstudio.com/docs/remote/troubleshooting#_installing-a-supported-ssh-client).
-
-#### Finish setup via SSH
-
-1. Connect via SSH and login with your non-root user created during install
-1. Setup passwordless sudo so you don't have to type your password for each sudo command (change `blake` in the command below to your user)
-
-   ```bash
-   echo 'blake    ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/user
-   ```
-
-1. Logout and login again to activate passwordless sudo
-1. Setup automatic security updates for the OS (optional)
-   1. Ensure everything is up to date by running
-      ```bash
-      sudo apt update && sudo apt upgrade -y
-      ```
-   1. Install unattended upgrades
-      ```bash
-      sudo apt install -y unattended-upgrades
-      echo unattended-upgrades unattended-upgrades/enable_auto_updates boolean true | sudo debconf-set-selections
-      sudo dpkg-reconfigure -f noninteractive unattended-upgrades
-      ```
-
-Now you have a minimal Debian server that requires very little maintenance.
-
-### Install Docker
-
-1. Install Docker Engine (not Docker Desktop) using the [official docs](https://docs.docker.com/engine/install/debian/)
-   1. Specifically, follow the steps in the [Install using the apt repository](https://docs.docker.com/engine/install/debian/#install-using-the-repository) section
-2. Add your user to the docker group as described in the [Linux postinstall steps](https://docs.docker.com/engine/install/linux-postinstall/)
-
-## Installing Frigate
-
-This section shows how to create a minimal directory structure for a Docker installation on Debian. If you have installed Frigate as a Home Assistant App or another way, you can continue to [Configuring Frigate](#configuring-frigate).
-
-### Setup directories
-
-Frigate will create a config file if one does not exist on the initial startup. The following directory structure is the bare minimum to get started.
-
-```
-.
-├── docker-compose.yml
-├── config/
-└── storage/
+```powershell
+py -3.12 bootstrap_windows.py
 ```
 
-This will create the above structure:
+The bootstrap creates `.venv`, installs pinned Python packages, downloads verified Windows FFmpeg and go2rtc builds plus the detection and audio models, builds the web UI, and creates the native data directories.
 
-```bash
-mkdir storage config && touch docker-compose.yml
+Start Frigate interactively for the first setup:
+
+```powershell
+.\scripts\start_frigate.ps1
 ```
 
-If you are setting up Frigate on a Linux device via SSH, you can use [nano](https://itsfoss.com/nano-editor-guide/) to edit the following files. If you prefer to edit remote files with a full editor instead of a terminal, I recommend using [Visual Studio Code](https://code.visualstudio.com/) with the [Remote SSH extension](https://code.visualstudio.com/docs/remote/ssh-tutorial).
+Open `https://localhost:8971`. The generated certificate is self-signed, so the first browser visit displays a certificate warning. Retrieve the generated administrator password from `%LOCALAPPDATA%\Frigate\logs\frigate.log` and change it during setup.
 
-:::note
+## 2. Add a camera
 
-This `docker-compose.yml` file is just a starter for amd64 devices. You will need to customize it for your setup as detailed in the [Installation docs](/frigate/installation#docker).
-
-:::
-`docker-compose.yml`
+Use <NavPath path="Settings > Global configuration > Camera management" /> or edit `config\config.yml`. Start with one camera and one stable RTSP stream:
 
 ```yaml
-services:
-  frigate:
-    container_name: frigate
-    restart: unless-stopped
-    stop_grace_period: 30s
-    image: ghcr.io/blakeblackshear/frigate:stable
-    volumes:
-      - ./config:/config
-      - ./storage:/media/frigate
-      - type: tmpfs # 1GB In-memory filesystem for recording segment storage
-        target: /tmp/cache
-        tmpfs:
-          size: 1000000000
-    ports:
-      - "8971:8971"
-      - "8554:8554" # RTSP feeds
-```
-
-Now you should be able to start Frigate by running `docker compose up -d` from within the folder containing `docker-compose.yml`. On startup, an admin user and password will be created and outputted in the logs. You can see this by running `docker logs frigate`. Frigate should now be accessible at `https://server_ip:8971` where you can login with the `admin` user. With no cameras configured yet, the setup wizard runs on first login and walks you through the rest.
-
-## Configuring Frigate
-
-This section assumes that you already have an environment setup as described in [Installation](../frigate/installation.md). You should also configure your cameras according to the [camera setup guide](/frigate/camera_setup). Pay particular attention to the section on choosing a detect resolution.
-
-<Tabs
-groupId="setup-method"
-defaultValue="wizard"
-values={[
-{ label: "Setup wizard", value: "wizard" },
-{ label: "Manual", value: "manual" },
-]}
-
-> <TabItem value="wizard">
-
-The first time you open Frigate with no cameras configured, the setup wizard walks you through the basics. Every step can be skipped, everything it sets can be changed later in Settings, and once you finish or dismiss it, it doesn't come back.
-
-:::note
-
-Frigate only sees hardware that has been passed into the container. If you plan to use a GPU, a Coral, or another accelerator, add the device to your `docker-compose.yml` and restart before running the wizard, otherwise it won't appear in the detection or hardware acceleration steps. The Manual tab shows the device entries for an Intel or AMD GPU and for a Coral, and the [hardware acceleration](../configuration/hardware_acceleration_video.md) and [object detectors](../configuration/object_detectors.md) docs cover the rest.
-
-:::
-
-**Account**
-
-Set a password for the `admin` account to replace the generated one from the logs, and add accounts for anyone else who needs access. This step is hidden if you have turned authentication off.
-
-**Add a camera**
-
-Opens the [Add Camera Wizard](../configuration/cameras.md#adding-a-camera-with-the-add-camera-wizard), which connects to the camera, tests each stream, and writes its configuration for you. You can add more than one before moving on.
-
-**Object detection**
-
-Lists the detection hardware Frigate found on your system, such as a Coral, an Intel GPU or NPU, or a discrete GPU, and configures the one you pick. NVIDIA and AMD GPUs need a model before detection can start, so the wizard offers your Frigate+ models if you have them, or lets you finish setup and add one later under <NavPath path="Settings > System > Detection models" />.
-
-**Hardware acceleration**
-
-Offers only the decoding methods your hardware supports. Auto picks one based on that hardware and the codec your camera sends, so a mixed h264 and h265 setup gets the right preset per camera.
-
-**Recording**
-
-Choose whether to record only when something is detected or around the clock, and how long to keep it.
-
-The last screen summarizes what was set up. If a step changed something that needs a restart, the button restarts Frigate and returns you to the Live view once it is back.
-
-The wizard configures the essentials only. Motion masks are not included and should be set up afterward, once you can identify the areas of the frame that trigger unwanted motion. See the [masks documentation](../configuration/masks.md). Zones, tracked object types, notifications, and MQTT are also configured in Settings.
-
-</TabItem>
-<TabItem value="manual">
-
-On a new install the setup wizard opens first. Click **Skip setup and configure manually** on its welcome screen to dismiss it, and the steps below apply. The wizard won't come back once dismissed.
-
-**Step 1: Start Frigate**
-
-At this point you should be able to start Frigate and a basic config will be created automatically.
-
-**Step 2: Add a camera**
-
-Click the **Add Camera** button in <NavPath path="Settings > Global configuration > Camera management" /> to use the camera setup wizard to get your first camera added into Frigate. See [Adding a camera with the Add Camera Wizard](../configuration/cameras.md#adding-a-camera-with-the-add-camera-wizard) for a walkthrough of each step.
-
-**Step 3: Configure hardware acceleration (recommended)**
-
-Now that you have a working camera configuration, set up hardware acceleration to minimize the CPU required to decode your video streams. See the [hardware acceleration](../configuration/hardware_acceleration_video.md) docs for examples applicable to your hardware.
-
-:::note
-
-Hardware acceleration requires passing the appropriate device to the Docker container. For Intel and AMD GPUs, add the device to your `docker-compose.yml`:
-
-```yaml {4,5}
-services:
-  frigate:
-    ...
-    devices:
-      - /dev/dri/renderD128:/dev/dri/renderD128 # for intel & amd hwaccel, needs to be updated for your hardware
-    ...
-```
-
-After modifying, run `docker compose up -d` to apply changes.
-
-:::
-
-<ConfigTabs>
-<TabItem value="ui">
-
-Navigate to <NavPath path="Settings > Global configuration > FFmpeg" /> and set **Hardware acceleration arguments** to the appropriate preset for your hardware (e.g., `VAAPI (Intel/AMD GPU)` for most Intel processors).
-
-</TabItem>
-<TabItem value="yaml">
-
-```yaml
-mqtt: ...
-
-cameras:
-  name_of_your_camera:
-    ffmpeg:
-      inputs: ...
-      # highlight-next-line
-      hwaccel_args: preset-vaapi
-    detect: ...
-```
-
-</TabItem>
-</ConfigTabs>
-
-**Step 4: Configure detectors**
-
-By default, Frigate will use a single OpenVINO detector running on the CPU.
-
-In many cases, the integrated graphics on Intel CPUs provides sufficient performance for typical Frigate setups. If you have an Intel processor, you can follow the configuration below.
-
-<details>
-  <summary>Use Intel OpenVINO detector</summary>
-
-You need to refer to **Configure hardware acceleration** above to enable the container to use the GPU.
-
-<ConfigTabs>
-<TabItem value="ui">
-
-1. Navigate to <NavPath path="Settings > System > Detection models" /> and select **Intel GPU** from the **Hardware** dropdown
-2. On the same model, open the **Custom Model** tab and configure the model settings for OpenVINO:
-
-| Field                                    | Value                                      |
-| ---------------------------------------- | ------------------------------------------ |
-| **Object detection model input width**   | `300`                                      |
-| **Object detection model input height**  | `300`                                      |
-| **Model Input Tensor Shape**             | `nhwc`                                     |
-| **Model Input Pixel Color Format**       | `bgr`                                      |
-| **Custom object detector model path**    | `/openvino-model/ssdlite_mobilenet_v2.xml` |
-| **Label map for custom object detector** | `/openvino-model/coco_91cl_bkgr.txt`       |
-
-</TabItem>
-<TabItem value="yaml">
-
-```yaml {3-6,9-15,20-21}
-mqtt: ...
-
-models: # <---- add models
-  - devices:
-      - openvino:GPU # <---- use the openvino detector on the GPU
-    # We will use the default MobileNet_v2 model from OpenVINO.
-    width: 300
-    height: 300
-  input_tensor: nhwc
-  input_pixel_format: bgr
-  path: /openvino-model/ssdlite_mobilenet_v2.xml
-  labelmap_path: /openvino-model/coco_91cl_bkgr.txt
-
-cameras:
-  name_of_your_camera:
-    ffmpeg: ...
-    detect:
-      enabled: True # <---- turn on detection
-      ...
-```
-
-</TabItem>
-</ConfigTabs>
-
-</details>
-
-If you have a USB Coral, you will need to add a detectors section to your config.
-
-<details>
-   <summary>Use USB Coral detector</summary>
-
-:::note
-
-You need to pass the USB Coral device to the Docker container. Add the following to your `docker-compose.yml` and run `docker compose up -d`:
-
-```yaml {4-6}
-services:
-  frigate:
-    ...
-    devices:
-      - /dev/bus/usb:/dev/bus/usb # passes the USB Coral, needs to be modified for other versions
-      - /dev/apex_0:/dev/apex_0 # passes a PCIe Coral, follow driver instructions here https://github.com/jnicolson/gasket-builder
-    ...
-```
-
-:::
-
-<ConfigTabs>
-<TabItem value="ui">
-
-Navigate to <NavPath path="Settings > System > Detection models" /> and select **Coral EdgeTPU (USB)** from the **Hardware** dropdown.
-
-</TabItem>
-<TabItem value="yaml">
-
-```yaml {3-6,11-12}
-mqtt: ...
-
-models: # <---- add models
-  - devices:
-      - edgetpu:usb
-
-cameras:
-  name_of_your_camera:
-    ffmpeg: ...
-    detect:
-      enabled: True # <---- turn on detection
-      ...
-```
-
-</TabItem>
-</ConfigTabs>
-
-</details>
-
-More details on available detectors can be found [here](../configuration/object_detectors.md).
-
-Restart Frigate and you should start seeing detections for `person`. If you want to track other objects, they can be configured in <NavPath path="Settings > Global configuration > Objects" /> or via the [configuration file reference](../configuration/advanced/reference.md).
-
-**Step 5: Setup motion masks**
-
-Now that you have optimized your configuration for decoding the video stream, you will want to check to see where to implement motion masks. Click on the camera from the main dashboard, then select the gear icon in the top right, enable the [Debug view](/usage/live#the-single-camera-view), and finally enable the switch for Motion Boxes. Watch for areas that continuously trigger unwanted motion to be detected. Common areas to mask include camera timestamps and trees that frequently blow in the wind. The goal is to avoid wasting object detection cycles looking at these areas.
-
-Use the mask editor to draw polygon masks directly on the camera feed. Navigate to <NavPath path="Settings > Camera configuration > Masks / Zones" /> and set up a motion mask over the area. More information about masks can be found [here](../configuration/masks.md).
-
-:::warning
-
-Note that motion masks should not be used to mark out areas where you do not want objects to be detected or to reduce false positives. They do not alter the image sent to object detection, so you can still get tracked objects, alerts, and detections in areas with motion masks. These only prevent motion in these areas from initiating object detection.
-
-:::
-
-If you are using YAML to configure Frigate instead of the UI, your configuration should look similar to this now:
-
-```yaml {16-18}
 mqtt:
-  enabled: False
-
-models:
-  - devices:
-      - edgetpu:usb
+  enabled: false
 
 cameras:
-  name_of_your_camera:
+  front:
     ffmpeg:
       inputs:
-        - path: rtsp://10.0.10.10:554/rtsp
-          roles:
-            - detect
-    motion:
-      mask:
-        motion_area:
-          friendly_name: "Motion mask"
-          enabled: true
-          coordinates: "0,461,3,0,1919,0,1919,843,1699,492,1344,458,1346,336,973,317,869,375,866,432"
+        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@camera/stream
+          roles: [detect]
 ```
 
-**Step 6: Enable recordings**
+Put the substituted values in `config\secrets.yaml`:
 
-In order to review activity in the Frigate UI, recordings need to be enabled.
+```yaml
+FRIGATE_RTSP_USER: camera-user
+FRIGATE_RTSP_PASSWORD: a-long-unique-password
+```
 
-<ConfigTabs>
-<TabItem value="ui">
+Test the exact URL in VLC or the installed `ffplay.exe` from the Frigate machine. Prefer a camera substream near the model's useful detection resolution and around 5 frames per second. Detection on a 4K stream wastes resources without improving most models.
 
-1. If you have separate streams for detect and record, navigate to <NavPath path="Settings > Camera configuration > Streams (FFmpeg)" />, select your camera, and add a second input with the `record` role pointing to your high-resolution stream
-2. Navigate to <NavPath path="Settings > Global configuration > Recording" /> (or <NavPath path="Settings > Camera configuration > Recording" /> for a specific camera) and set **Enable recording** to on
+## 3. Configure object detection
 
-</TabItem>
-<TabItem value="yaml">
+The default TFLite detector runs on the CPU and uses the digest-verified model installed by the bootstrap. It is suitable for setup and small installations.
 
-```yaml {16-17}
-mqtt: ...
+The setup wizard probes native Windows runtimes and offers supported devices:
 
-models: ...
+- **CPU** — always available;
+- **OpenVINO** — Intel CPU, GPU, or NPU exposed by the installed OpenVINO runtime;
+- **ONNX Runtime DirectML** — GPU inference through `onnxruntime-directml`;
+- **ONNX Runtime CUDA** — NVIDIA inference when the CUDA provider is installed.
+
+ONNX requires a compatible model path. Frigate+ models can be selected from the UI when the account is linked. Do not select a provider that is not shown by <NavPath path="System > Hardware" />.
+
+## 4. Enable Windows video acceleration
+
+Begin without acceleration so camera connectivity is easy to diagnose. Then select the recommendation shown by the setup wizard or use a supported preset:
+
+```yaml
+ffmpeg:
+  hwaccel_args: preset-windows-d3d11va
+```
+
+Other native presets cover Intel QSV, NVIDIA NVDEC/NVENC, DXVA2, AMD AMF, and Vulkan. A working detector does not prove that video decoding is accelerated; they are separate pipelines.
+
+## 5. Configure recording
+
+Add a higher-quality stream for recording when the camera offers one:
+
+```yaml
+record:
+  enabled: true
+  retain:
+    days: 7
+    mode: motion
 
 cameras:
-  name_of_your_camera:
+  front:
     ffmpeg:
       inputs:
-        - path: rtsp://10.0.10.10:554/rtsp
-          roles:
-            - detect
-        - path: rtsp://10.0.10.10:554/high_res_stream # <----- Add stream you want to record from
-          roles:
-            - record
-    detect: ...
-    record: # <----- Enable recording
-      enabled: True
-    motion: ...
+        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@camera/substream
+          roles: [detect]
+        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@camera/mainstream
+          roles: [record]
 ```
 
-</TabItem>
-</ConfigTabs>
+Media defaults to `%LOCALAPPDATA%\Frigate\media`. Set `FRIGATE_MEDIA_DIR` before installation to place it on another local NTFS volume. The Windows service account needs Modify access.
 
-If you don't have separate streams for detect and record, you would just add the record role to the list on the first input.
+## 6. Tune motion and objects
 
-:::note
+After detections are visible:
 
-If you only define one stream in your `inputs` and do not assign a `detect` role to it, Frigate will automatically assign it the `detect` role. Frigate will always decode a stream to support motion detection, Birdseye, the API image endpoints, and other features, even if you have disabled object detection with `enabled: False` in your config's `detect` section.
+1. draw motion masks only over unavoidable movement such as timestamps or swaying foliage;
+2. create zones for areas that matter;
+3. tune object thresholds and minimum area from real examples;
+4. enable snapshots, alerts, and longer retention only after basic tracking is stable.
 
-If you only plan to use Frigate for recording, it is still recommended to define a `detect` role for a low resolution stream to minimize resource usage from the required stream decoding.
+Large motion masks can prevent Frigate from running object detection where it is needed. Object masks discard detections whose anchor point falls inside the mask; they should not be used as general privacy masks.
 
-:::
+## 7. Configure live view
 
-By default, Frigate will retain video of all tracked objects for 10 days. The full set of options for recording can be found [here](../configuration/advanced/reference.md).
+Add the source to go2rtc, preferably with a stream name matching the camera:
 
-</TabItem>
-</Tabs>
+```yaml
+go2rtc:
+  streams:
+    front:
+      - rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@camera/mainstream
+```
 
-### Complete config
+MSE usually works with no extra network rule. WebRTC needs a candidate address that the browser can reach and Windows Firewall access to its configured TCP/UDP port.
 
-At this point you have a complete config with basic functionality.
+## 8. Install the Windows service
 
-- View [common configuration examples](../configuration/config.md#common-configuration-examples) for a list of common configuration examples.
-- View [full config reference](../configuration/advanced/reference.md) for a complete list of configuration options.
+After the interactive configuration works, open an elevated PowerShell session:
 
-### Follow up
+```powershell
+.\scripts\install_frigate_service.ps1
+```
 
-Now that you have a working install, you can use the following documentation for additional features:
+The installer records paths and environment for the service account. Verify:
 
-1. [Zones](../configuration/zones.md)
-2. [Review](../configuration/review.md)
-3. [Masks](../configuration/masks.md)
-4. [Home Assistant Integration](../integrations/home-assistant.md) - Integrate with Home Assistant
+```powershell
+Get-Service Frigate
+Get-Content "$env:ProgramData\Frigate\logs\frigate.log" -Tail 100
+```
+
+If the installer was given another data root, read the log from that configured root instead.
+
+## Next steps
+
+- [Configuration](../configuration/config.md)
+- [Object detectors](../configuration/object_detectors.md)
+- [Video hardware acceleration](../configuration/hardware_acceleration_video.md)
+- [Recording](../configuration/record.md)
+- [Live view](../configuration/live.md)
+- [Windows troubleshooting](../troubleshooting/common_errors.md)

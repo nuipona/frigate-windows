@@ -9,13 +9,7 @@ from unittest.mock import MagicMock, patch
 from frigate.plus import PlusApi, load_plus_model_info
 
 
-class TestHailoAlias(unittest.TestCase):
-    """Frigate+ reports Hailo models by the detector's pre-rename key.
-
-    Both the model list and a cached info file have to carry the current key,
-    or every Hailo model reads as unsupported.
-    """
-
+class TestPlusModelList(unittest.TestCase):
     def _get_models(self, models: list[dict]) -> list[dict]:
         api = PlusApi.__new__(PlusApi)
         response = MagicMock(ok=True, json=lambda: {"list": models})
@@ -23,25 +17,28 @@ class TestHailoAlias(unittest.TestCase):
         with patch.object(PlusApi, "_get", return_value=response):
             return api.get_models()["list"]
 
-    def test_the_model_list_gains_the_current_key(self):
-        models = self._get_models([{"supportedDetectors": ["hailo8l"]}])
+    def test_native_windows_detectors_are_unchanged(self):
+        models = self._get_models(
+            [{"supportedDetectors": ["cpu", "openvino", "onnx"]}]
+        )
 
-        self.assertEqual(models[0]["supportedDetectors"], ["hailo8l", "hailo"])
+        self.assertEqual(
+            models[0]["supportedDetectors"], ["cpu", "openvino", "onnx"]
+        )
 
-    def test_the_old_key_is_kept_for_older_versions(self):
-        models = self._get_models([{"supportedDetectors": ["hailo8l"]}])
+    def test_unsupported_variants_and_models_are_removed(self):
+        models = self._get_models(
+            [
+                {
+                    "id": "mixed",
+                    "supportedDetectors": ["hailo", "onnx", "rknn"],
+                    "hailoDevice": "hailo8l",
+                },
+                {"id": "unsupported", "supportedDetectors": ["edgetpu"]},
+            ]
+        )
 
-        self.assertIn("hailo8l", models[0]["supportedDetectors"])
-
-    def test_other_detectors_are_untouched(self):
-        models = self._get_models([{"supportedDetectors": ["openvino", "onnx"]}])
-
-        self.assertEqual(models[0]["supportedDetectors"], ["openvino", "onnx"])
-
-    def test_a_model_already_naming_both_is_unchanged(self):
-        models = self._get_models([{"supportedDetectors": ["hailo8l", "hailo"]}])
-
-        self.assertEqual(models[0]["supportedDetectors"], ["hailo8l", "hailo"])
+        self.assertEqual(models, [{"id": "mixed", "supportedDetectors": ["onnx"]}])
 
     def test_an_empty_list(self):
         self.assertEqual(self._get_models([]), [])
@@ -56,15 +53,14 @@ class TestLoadPlusModelInfo(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def _write(self, model_id: str, content: str) -> None:
-        with open(os.path.join(self.cache.name, f"{model_id}.json"), "w") as f:
-            f.write(content)
+        with open(os.path.join(self.cache.name, f"{model_id}.json"), "w") as file:
+            file.write(content)
 
-    def test_a_cached_hailo_model_gains_the_current_key(self):
-        self._write("abc", json.dumps({"supportedDetectors": ["hailo8l"]}))
+    def test_cached_metadata_is_loaded(self):
+        metadata = {"supportedDetectors": ["cpu", "openvino"]}
+        self._write("abc", json.dumps(metadata))
 
-        self.assertEqual(
-            load_plus_model_info("abc")["supportedDetectors"], ["hailo8l", "hailo"]
-        )
+        self.assertEqual(load_plus_model_info("abc"), metadata)
 
     def test_a_missing_file(self):
         self.assertIsNone(load_plus_model_info("nope"))

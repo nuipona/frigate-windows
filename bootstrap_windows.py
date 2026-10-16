@@ -6,17 +6,16 @@ one command run from an ordinary PowerShell window:
     py -3.12 bootstrap_windows.py
 
 The script creates the virtual environment, installs the native Windows
-requirements, fetches pinned Windows builds of FFmpeg and go2rtc into the
-Frigate base directory, builds the web interface when Node.js is available,
-and writes a launcher that restarts Frigate when Frigate asks to be
-restarted (the UI's restart action and the watchdog both rely on that).
+requirements, fetches digest-pinned Windows builds of FFmpeg and go2rtc plus
+the CPU detection and YAMNet audio models into the Frigate data tree, builds
+the web interface when Node.js is available, and writes a launcher that
+restarts Frigate when Frigate asks to be restarted (the UI's restart action
+and watchdog both rely
+on that).
 
-It only uses the Python standard library so it can run before anything is
-installed. The binary downloads are pinned to exact URLs; each downloaded
-archive's SHA-256 is recorded on first use and re-verified on every later
-run, and a digest pinned in FFMPEG_ARTIFACT / GO2RTC_ARTIFACT is enforced
-strictly. `--print-digests` prints the digests of what this machine fetched
-so a maintainer can pin them here after verifying them against the vendor.
+It uses only the Python standard library so it can run before anything is
+installed. Downloads use exact URLs and enforce their vendor-verified SHA-256
+digests. `--print-digests` reports any legacy trust-on-first-use entries.
 """
 
 import argparse
@@ -38,7 +37,7 @@ from pathlib import Path
 logger = logging.getLogger("bootstrap")
 
 REPO_ROOT = Path(__file__).resolve().parent
-REQUIREMENTS = REPO_ROOT / "docker" / "main" / "requirements-windows.txt"
+REQUIREMENTS = REPO_ROOT / "requirements.txt"
 LAUNCHER_NAME = "run_frigate.ps1"
 RESTART_MARKER_NAME = "restart.requested"
 
@@ -70,6 +69,18 @@ class PinnedArtifact:
     expected_sha256: str = ""
 
 
+@dataclass(frozen=True)
+class PinnedFile:
+    """A single downloaded runtime file with a vendor-verified digest."""
+
+    name: str
+    version: str
+    url: str
+    filename: str
+    dest_subdir: str
+    expected_sha256: str
+
+
 FFMPEG_ARTIFACT = PinnedArtifact(
     name="ffmpeg",
     version="8.1.2",
@@ -82,6 +93,7 @@ FFMPEG_ARTIFACT = PinnedArtifact(
         "ffmpeg-8.1.2-essentials_build/bin/ffprobe.exe",
     ),
     dest_subdir="ffmpeg",
+    expected_sha256="db580001caa24ac104c8cb856cd113a87b0a443f7bdf47d8c12b1d740584a2ec",
 )
 
 GO2RTC_ARTIFACT = PinnedArtifact(
@@ -91,6 +103,31 @@ GO2RTC_ARTIFACT = PinnedArtifact(
         "https://github.com/AlexxIT/go2rtc/releases/download/v1.9.14/go2rtc_win64.zip"
     ),
     members=("go2rtc.exe",),
+    expected_sha256="dd4167d75cb04abe618855b7c71f8658bd009f60c1a71835d134d2c11c939907",
+)
+
+CPU_DETECTION_MODEL = PinnedFile(
+    name="cpu-detection-model",
+    version="frogfish",
+    url=(
+        "https://github.com/google-coral/test_data/raw/release-frogfish/"
+        "ssdlite_mobiledet_coco_qat_postprocess.tflite"
+    ),
+    filename="cpu_model.tflite",
+    dest_subdir="model_cache",
+    expected_sha256="90bb33a634e041914cc1819aa5df99818e6c396c4d2db952c0fd7a9cffc4724f",
+)
+
+AUDIO_MODEL = PinnedFile(
+    name="yamnet-audio-model",
+    version="1",
+    url=(
+        "https://tfhub.dev/google/lite-model/yamnet/classification/tflite/1"
+        "?lite-format=tflite"
+    ),
+    filename="cpu_audio_model.tflite",
+    dest_subdir="model_cache",
+    expected_sha256="10c95ea3eb9a7bb4cb8bddf6feb023250381008177ac162ce169694d05c317de",
 )
 
 
@@ -113,10 +150,16 @@ class BaseLayout:
     even be importable yet.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, service_mode: bool = False) -> None:
+        if service_mode:
+            default_root = Path(os.environ.get("ProgramData", "C:/ProgramData"))
+        else:
+            default_root = Path(
+                os.environ.get("LOCALAPPDATA", "~/AppData/Local")
+            ).expanduser()
+
         self.base_dir = Path(
-            os.environ.get("FRIGATE_BASE_DIR")
-            or Path(os.environ.get("LOCALAPPDATA", "~/AppData/Local")) / "Frigate"
+            os.environ.get("FRIGATE_BASE_DIR") or default_root / "Frigate"
         ).expanduser()
         self.config_dir = Path(
             os.environ.get("FRIGATE_CONFIG_DIR") or self.base_dir / "config"
@@ -178,7 +221,7 @@ def save_recorded_digests(digest_store: Path, digests: dict[str, str]) -> None:
 
 
 def verify_or_record_digest(
-    archive: Path, artifact: PinnedArtifact, digest_store: Path
+    archive: Path, artifact: PinnedArtifact | PinnedFile, digest_store: Path
 ) -> str:
     """Enforce the artifact's digest, recording it on first use.
 
@@ -259,18 +302,28 @@ def extract_members(
 
 
 def download(url: str, dest: Path) -> None:
-    """Stream a file over HTTPS, writing to dest."""
+    """Stream an HTTPS response into place atomically."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     logger.info("Downloading %s", url)
+    partial = dest.with_name(f"{dest.name}.part")
 
-    with urllib.request.urlopen(url, timeout=60) as response, open(dest, "wb") as out:
-        while True:
-            chunk = response.read(1024 * 1024)
+    try:
+        with urllib.request.urlopen(url, timeout=60) as response, open(
+            partial, "wb"
+        ) as out:
+            while True:
+                chunk = response.read(1024 * 1024)
 
-            if not chunk:
-                break
+                if not chunk:
+                    break
 
-            out.write(chunk)
+                out.write(chunk)
+        os.replace(partial, dest)
+    finally:
+        try:
+            partial.unlink()
+        except OSError:
+            pass
 
 
 def install_artifact(
@@ -311,6 +364,45 @@ def install_artifact(
     return installed
 
 
+def install_file(
+    artifact: PinnedFile, layout: BaseLayout, download_dir: Path
+) -> Path:
+    """Install one digest-pinned model or data file into the config tree."""
+    dest_dir = layout.config_dir / artifact.dest_subdir
+    target = dest_dir / artifact.filename
+
+    if target.is_file() and sha256_file(target) == artifact.expected_sha256:
+        logger.info("%s already installed at %s", artifact.name, target)
+        return target
+
+    if target.exists():
+        logger.warning("Replacing %s because its sha256 is not the pinned value", target)
+
+    cached = download_dir / f"{artifact.name}-{artifact.version}-{artifact.filename}"
+    digest_store = download_dir / "digests.json"
+    if not cached.is_file():
+        download(artifact.url, cached)
+    else:
+        logger.info("Using cached %s", cached)
+
+    digest = verify_or_record_digest(cached, artifact, digest_store)
+    logger.info("%s sha256 %s", artifact.name, digest)
+
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(f"{target.name}.tmp")
+    try:
+        shutil.copyfile(cached, temporary)
+        os.replace(temporary, target)
+    finally:
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+
+    logger.info("Installed %s to %s", artifact.name, target)
+    return target
+
+
 ### Virtual environment and dependencies
 
 
@@ -322,7 +414,15 @@ def python_executable_in(venv_dir: Path) -> Path:
 
 
 def check_interpreter() -> None:
-    """The Windows requirements are built for 64-bit CPython 3.12."""
+    """Require the only supported runtime: 64-bit CPython 3.12 on Windows."""
+    if os.name != "nt":
+        raise BootstrapError(
+            f"This installer runs only on native Windows; detected {sys.platform!r}."
+        )
+
+    if platform.python_implementation() != "CPython":
+        raise BootstrapError("CPython 3.12 is required.")
+
     # unpacked so mypy does not fold the comparison against its configured
     # python_version and declare the rest of the function unreachable
     major, minor = sys.version_info[:2]
@@ -408,6 +508,11 @@ def build_web() -> bool:
 ### Launcher and shortcut
 
 
+def powershell_literal(value: str | Path) -> str:
+    """Quote one value as a PowerShell single-quoted string."""
+    return "'" + str(value).replace("'", "''") + "'"
+
+
 def build_launcher_script(venv_dir: Path, layout: BaseLayout) -> str:
     """The PowerShell launcher that keeps Frigate restartable.
 
@@ -416,18 +521,22 @@ def build_launcher_script(venv_dir: Path, layout: BaseLayout) -> str:
     the marker is there, so Ctrl+C and closing the console still stop it.
     """
     python = python_executable_in(venv_dir).resolve()
+    configured_paths = {
+        "FRIGATE_BASE_DIR": layout.base_dir,
+        "FRIGATE_CONFIG_DIR": layout.config_dir,
+        "FRIGATE_MEDIA_DIR": layout.media_dir,
+        "FRIGATE_CACHE_DIR": layout.cache_dir,
+        "FRIGATE_TMP_DIR": layout.tmp_dir,
+    }
+    environment = "\n".join(
+        f"if (-not $env:{name}) {{ $env:{name} = {powershell_literal(path)} }}"
+        for name, path in configured_paths.items()
+    )
     return f"""# Generated by bootstrap_windows.py. Start Frigate with this script.
 $ErrorActionPreference = "Stop"
-$python = "{python}"
-$tmpDir = if ($env:FRIGATE_TMP_DIR) {{
-    $env:FRIGATE_TMP_DIR
-}} else {{
-    $base = if ($env:FRIGATE_BASE_DIR) {{ $env:FRIGATE_BASE_DIR }} else {{
-        Join-Path $env:LOCALAPPDATA "Frigate"
-    }}
-    Join-Path $base "tmp"
-}}
-$marker = Join-Path $tmpDir "{RESTART_MARKER_NAME}"
+$python = {powershell_literal(python)}
+{environment}
+$marker = Join-Path $env:FRIGATE_TMP_DIR "{RESTART_MARKER_NAME}"
 
 while ($true) {{
     & $python -m frigate @args
@@ -529,7 +638,7 @@ def add_defender_exclusion(layout: BaseLayout) -> None:
 ### Service
 
 
-def install_service(python: Path) -> None:
+def install_service(python: Path, layout: BaseLayout) -> None:
     """Register Frigate with the SCM, through the PowerShell installer.
 
     The installer resolves the service's data directory, pins it in the
@@ -555,6 +664,8 @@ def install_service(python: Path) -> None:
             "Install",
             "-PythonPath",
             str(python),
+            "-BaseDir",
+            str(layout.base_dir),
         ],
         check=False,
     )
@@ -597,7 +708,9 @@ def main(argv: list[str] | None = None) -> int:
         "--skip-deps", action="store_true", help="do not pip install the requirements"
     )
     parser.add_argument(
-        "--skip-binaries", action="store_true", help="do not fetch ffmpeg and go2rtc"
+        "--skip-binaries",
+        action="store_true",
+        help="do not fetch FFmpeg, go2rtc, or the detection and audio models",
     )
     parser.add_argument(
         "--skip-web", action="store_true", help="do not build the web interface"
@@ -644,7 +757,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         check_interpreter()
-        layout = BaseLayout()
+        layout = BaseLayout(service_mode=args.install_service)
         layout.ensure_dirs()
         download_dir = layout.cache_dir / "downloads"
 
@@ -659,6 +772,8 @@ def main(argv: list[str] | None = None) -> int:
         if not args.skip_binaries:
             install_artifact(FFMPEG_ARTIFACT, layout, download_dir)
             install_artifact(GO2RTC_ARTIFACT, layout, download_dir)
+            install_file(CPU_DETECTION_MODEL, layout, download_dir)
+            install_file(AUDIO_MODEL, layout, download_dir)
 
         if not args.skip_web:
             build_web()
@@ -669,7 +784,7 @@ def main(argv: list[str] | None = None) -> int:
             install_start_menu_shortcut(launcher)
 
         if args.install_service:
-            install_service(python)
+            install_service(python, layout)
 
         if args.add_defender_exclusion:
             add_defender_exclusion(layout)

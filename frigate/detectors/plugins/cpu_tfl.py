@@ -1,6 +1,7 @@
 import logging
 from typing import ClassVar, Literal
 
+from ai_edge_litert.interpreter import Interpreter
 from pydantic import ConfigDict, Field
 
 from frigate.detectors.detection_api import DetectionApi
@@ -8,12 +9,6 @@ from frigate.detectors.detector_config import BaseDetectorConfig
 from frigate.log import suppress_stderr_during
 
 from ..detector_utils import tflite_detect_raw, tflite_init
-
-try:
-    from tflite_runtime.interpreter import Interpreter
-except ModuleNotFoundError:
-    from ai_edge_litert.interpreter import Interpreter
-
 
 logger = logging.getLogger(__name__)
 

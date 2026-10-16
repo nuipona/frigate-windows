@@ -451,11 +451,7 @@ class TestStartupAppliesConfigLayersBeforeWorkersStart(unittest.TestCase):
             patch("frigate.app.cleanup_replay_cameras"),
             patch("frigate.app.reap_stale_exports"),
             patch("frigate.app.create_fastapi_app"),
-            patch("frigate.app.uvicorn"),
-            # a native install (Windows, or a Linux checkout outside the
-            # container) serves the web app itself instead of through
-            # uvicorn behind nginx, and that server would bind a real port
-            # for the MagicMock config this test starts the app with
+            # The native gateway would otherwise bind real Windows ports.
             patch("frigate.app.run_native_web_server"),
         ):
             FrigateApp.start(app)

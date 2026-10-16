@@ -987,8 +987,7 @@
         "description": "Ko je omogočeno, se Frigate zažene v varnem načinu z omejenimi funkcijami za odpravljanje težav."
     },
     "environment_vars": {
-        "label": "Okoljske spremenljivke",
-        "description": "Pari ključ/vrednost okoljskih spremenljivk, ki se nastavijo za proces Frigate v sistemu Home Assistant OS. Uporabniki, ki ne uporabljajo HAOS, morajo namesto tega uporabiti konfiguracijo okoljskih spremenljivk Docker."
+        "label": "Okoljske spremenljivke"
     },
     "logger": {
         "label": "Beleženje (Logging)",
@@ -1075,7 +1074,6 @@
         },
         "listen": {
             "label": "Konfiguracija vrat za poslušanje",
-            "description": "Konfiguracija za notranja in zunanja vrata za poslušanje. To je za napredne uporabnike. V večini primerov je priporočljivo spremeniti sekcijo 'ports' v tvoji datoteki Docker Compose.",
             "internal": {
                 "label": "Notranja vrata",
                 "description": "Notranja vrata za poslušanje za Frigate (privzeto 5000)."

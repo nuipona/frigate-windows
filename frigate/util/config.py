@@ -2,31 +2,21 @@
 
 import asyncio
 import logging
+import ntpath
 import os
 import shutil
-from functools import cache
 from typing import Any
 
 from ruamel.yaml import YAML
 
 from frigate.const import (
-    BASE_DIR,
-    CACHE_DIR,
     CONFIG_DIR,
-    DEFAULT_FFMPEG_VERSION,
     EXPORT_DIR,
     FFMPEG_DIR,
-    INCLUDED_FFMPEG_VERSIONS,
     REDACTED_CREDENTIAL_SENTINEL,
 )
 from frigate.util.builtin import deep_merge
-from frigate.util.platform import (
-    EXECUTABLE_SUFFIX,
-    IS_MACOS,
-    IS_WINDOWS,
-    find_executable,
-    get_tmp_dir,
-)
+from frigate.util.platform import EXECUTABLE_SUFFIX, find_executable
 from frigate.util.services import get_video_properties
 
 logger = logging.getLogger(__name__)
@@ -38,8 +28,6 @@ DEFAULT_CONFIG_FILE = os.path.join(CONFIG_DIR, "config.yml")
 # something other than "device"
 DETECTOR_DEVICE_FIELDS = {
     "cpu": "num_threads",
-    "rknn": "num_cores",
-    "degirum": "location",
     "zmq": "endpoint",
 }
 
@@ -47,143 +35,55 @@ DETECTOR_DEVICE_FIELDS = {
 # detectors that use them are being reworked, so they are dropped rather than
 # carried over.
 DROPPED_DETECTOR_OPTIONS = {
-    "degirum": ["zoo", "token"],
     "zmq": ["request_timeout_ms", "linger_ms"],
 }
-
-
-# Trees the unprivileged runtime user can write. A root frigate service must
-# not execute a binary from any of them; a compromised uid-1000 process could
-# plant one and be root after the next restart.
-RUNTIME_USER_WRITABLE_DIRS = (
-    CONFIG_DIR,
-    BASE_DIR,
-    CACHE_DIR,
-    get_tmp_dir(),
-    "/tmp",
-)
-
-
-def frigate_service_is_granular_root() -> bool:
-    """Report whether FRIGATE_ROOT_SERVICES runs frigate as root.
-
-    The escape hatch is excluded: it never sweeps /config and leaves no
-    unprivileged service running, so custom binaries stay as safe as they
-    were before the privilege drop.
-    """
-    if IS_WINDOWS or not hasattr(os, "geteuid"):
-        # no root, no privilege drop: every file belongs to the user running
-        # Frigate, so there is no ownership boundary to defend
-        return False
-
-    if os.geteuid() != 0:
-        return False
-
-    if os.environ.get("FRIGATE_RUN_AS_ROOT", "false") == "true":
-        return False
-
-    entries = os.environ.get("FRIGATE_ROOT_SERVICES", "").split(",")
-    return any("".join(entry.split()) == "frigate" for entry in entries)
-
-
-def is_runtime_user_writable(path: str) -> bool:
-    """Report whether a path resolves inside a runtime-user-writable tree."""
-    resolved = os.path.realpath(path)
-    return any(
-        resolved == root or resolved.startswith(f"{root}{os.sep}")
-        for root in RUNTIME_USER_WRITABLE_DIRS
-    )
-
-
-@cache
-def _warn_ignored_ffmpeg_path(path: str) -> None:
-    """Warn once per path; resolution runs per camera and per binary."""
-    logger.warning(
-        "Ignoring ffmpeg.path %s because FRIGATE_ROOT_SERVICES runs frigate as root and that location is writable by the unprivileged user; using the bundled build",
-        path,
-    )
 
 
 def _is_absolute_path(path: str) -> bool:
     """Whether a config value is a path rather than a version alias."""
     # Windows paths are absolute when they start with a drive or a separator,
     # which os.path.isabs knows and a leading slash test does not
-    return os.path.isabs(path) or path.startswith("/")
+    return ntpath.isabs(path)
 
 
 def resolve_ffmpeg_path(path: str, binary: str = "ffmpeg") -> str:
-    """Resolve an ffmpeg version alias or custom path to a binary path.
+    """Resolve the bundled or explicitly configured Windows executable.
 
-    A bare version alias that is no longer bundled (for example one that was
-    dropped when the default version changed) falls back to the default
-    bundled version so existing configs keep working across an upgrade or a
-    revert. Custom install paths are used as-is, except one in a
-    runtime-user-writable tree while FRIGATE_ROOT_SERVICES makes frigate root;
-    see RUNTIME_USER_WRITABLE_DIRS.
-
-    On a native install there is no bundled ffmpeg, so a path that does not
-    point at an existing binary falls back to the first ffmpeg found on PATH
-    and the user is told about it.
+    ``default`` selects the single FFmpeg build installed by
+    ``bootstrap_windows.py``. A custom value may name either
+    an executable or a directory containing it (directly or below ``bin``).
     """
-    if path == "default" or (
-        not _is_absolute_path(path) and path not in INCLUDED_FFMPEG_VERSIONS
-    ):
-        version = DEFAULT_FFMPEG_VERSION
-    elif path in INCLUDED_FFMPEG_VERSIONS:
-        version = path
+    executable = f"{binary}{EXECUTABLE_SUFFIX}"
+
+    if path == "default" or not _is_absolute_path(path):
+        found = find_executable(binary)
+        if found:
+            return found
+        candidate = os.path.join(FFMPEG_DIR, executable)
+    elif os.path.isfile(path):
+        return path
     else:
-        if not (frigate_service_is_granular_root() and is_runtime_user_writable(path)):
-            resolved = os.path.join(path, "bin", f"{binary}{EXECUTABLE_SUFFIX}")
-
-            return _fall_back_to_path(path, resolved, binary)
-
-        _warn_ignored_ffmpeg_path(path)
-        version = DEFAULT_FFMPEG_VERSION
-
-    # built with a format string rather than os.path.join so the bundled path
-    # stays byte for byte what the image ships, including when DEFAULT_FFMPEG_VERSION
-    # is unset
-    bundled = f"{FFMPEG_DIR}/{version}/bin/{binary}{EXECUTABLE_SUFFIX}"
-
-    return _fall_back_to_path(f"bundled ffmpeg {version}", bundled, binary)
-
-
-def default_ffmpeg_binary(binary: str = "ffmpeg") -> str:
-    """Path of the ffmpeg build Frigate uses when no config value applies.
-
-    Inside the image this is the bundled build. A native install has no bundled
-    builds, so it resolves through ``PATH`` instead. Used where a build with a
-    known feature set is required, such as the webp encoder exports need.
-    """
-    return resolve_ffmpeg_path("default", binary)
-
-
-def _fall_back_to_path(source: str, candidate: str, binary: str) -> str:
-    """Use a candidate binary when it exists, else the one found on PATH.
-
-    Linux resolves to the bundled build Frigate ships, where the caller gets a
-    clear error if it is missing. A native Windows or macOS install has no
-    bundled ffmpeg, so the default config value has to resolve to whatever the
-    user installed, and only warns when nothing is found at all.
-    """
-    if not IS_WINDOWS and not IS_MACOS:
-        return candidate
+        direct = os.path.join(path, executable)
+        nested = os.path.join(path, "bin", executable)
+        candidate = direct if os.path.isfile(direct) else nested
 
     if os.path.isfile(candidate):
         return candidate
 
     found = find_executable(binary)
-
     if found:
-        logger.debug("ffmpeg path %s resolved to %s from PATH", source, found)
         return found
 
     logger.warning(
-        "No %s binary found. Install ffmpeg, or set ffmpeg.path in the config "
-        "to the directory containing it.",
-        binary,
+        "No %s executable was found. Run bootstrap_windows.py again or set "
+        "ffmpeg.path to its directory.",
+        executable,
     )
     return candidate
+
+
+def default_ffmpeg_binary(binary: str = "ffmpeg") -> str:
+    return resolve_ffmpeg_path("default", binary)
 
 
 def redact_credential(obj: dict[str, Any], key: str) -> None:
@@ -243,20 +143,7 @@ def migrate_frigate_config(config_file: str):
     # version and still use the pre-models detectors and model keys
     needs_models = "detectors" in config or "model" in config
 
-    # likewise, it may already be on the models list and still name the hailo
-    # detector by its old key
-    needs_detector_rename = any(
-        isinstance(device, str) and device.partition(":")[0] == "hailo8l"
-        for model in (config.get("models") or [])
-        if isinstance(model, dict)
-        for device in (model.get("devices") or [])
-    )
-
-    if (
-        previous_version == CURRENT_CONFIG_VERSION
-        and not needs_models
-        and not needs_detector_rename
-    ):
+    if previous_version == CURRENT_CONFIG_VERSION and not needs_models:
         logger.info("frigate config does not need migration...")
         return
 
@@ -327,12 +214,6 @@ def migrate_frigate_config(config_file: str):
     if needs_models:
         logger.info("Migrating frigate detectors and model to models...")
         new_config = migrate_models(new_config)
-        with open(config_file, "w", encoding="utf-8") as f:
-            yaml.dump(new_config, f)
-
-    if needs_detector_rename:
-        logger.info("Migrating renamed frigate detectors...")
-        new_config = rename_hailo_detector(new_config)
         with open(config_file, "w", encoding="utf-8") as f:
             yaml.dump(new_config, f)
 
@@ -869,41 +750,6 @@ def migrate_018_0(config: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]
     return new_config
 
 
-def rename_hailo_detector(
-    config: dict[str, dict[str, Any]],
-) -> dict[str, dict[str, Any]]:
-    """Rename the hailo8l detector, which drives every Hailo device.
-
-    Args:
-        config: The loaded config
-
-    Returns:
-        The config with every models entry naming the detector 'hailo'
-    """
-    new_config = config.copy()
-
-    for model in new_config.get("models") or []:
-        if not isinstance(model, dict):
-            continue
-
-        devices = model.get("devices")
-
-        if not isinstance(devices, list):
-            continue
-
-        # assigned per index so ruamel keeps the comments on the list
-        for index, device in enumerate(devices):
-            if not isinstance(device, str):
-                continue
-
-            detector, separator, rest = device.partition(":")
-
-            if detector == "hailo8l":
-                devices[index] = f"hailo{separator}{rest}"
-
-    return new_config
-
-
 def _camera_enables_transcription(camera: dict[str, Any]) -> bool:
     """Whether a camera or one of its profiles turns audio transcription on."""
     sections = [camera.get("audio_transcription")]
@@ -957,7 +803,7 @@ def _migrate_transcription_language(config: dict[str, Any]) -> None:
 
 def migrate_019_0(config: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Handle migrating Frigate config to 0.19-0."""
-    new_config = rename_hailo_detector(config)
+    new_config = config.copy()
 
     _migrate_birdseye_mode(new_config.get("birdseye"))
 
@@ -1004,11 +850,6 @@ def migrate_models(config: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any
         detector = detector or {}
         detector_type = detector.get("type", "cpu")
         device = detector.get(DETECTOR_DEVICE_FIELDS.get(detector_type, "device"))
-
-        # hailo8l named one device, but the detector drives every Hailo device
-        if detector_type == "hailo8l":
-            detector_type = "hailo"
-
         device_string = detector_type if device is None else f"{detector_type}:{device}"
 
         # repeating a device now means running an extra inference process on it,

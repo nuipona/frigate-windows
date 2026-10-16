@@ -1586,15 +1586,6 @@
       "selectPreset": "Öntanımlıyı seçin",
       "manualPlaceholder": "FFMpeg parametrelerini girin",
       "presetLabels": {
-        "preset-rpi-64-h264": "Raspberry Pi (H.264)",
-        "preset-rpi-64-h265": "Raspberry Pi (H.265)",
-        "preset-vaapi": "VAAPI (Intel/AMD GPU)",
-        "preset-intel-qsv-h264": "Intel QuickSync (H.264)",
-        "preset-intel-qsv-h265": "Intel QuickSync (H.265)",
-        "preset-nvidia": "NVIDIA GPU",
-        "preset-jetson-h264": "NVIDIA Jetson (H.264)",
-        "preset-jetson-h265": "NVIDIA Jetson (H.265)",
-        "preset-rkmpp": "Rockchip RKMPP",
         "preset-http-jpeg-generic": "HTTP JPEG (Jenerik)",
         "preset-http-mjpeg-generic": "HTTP MJPEG (Jenerik)",
         "preset-http-reolink": "HTTP - Reolink Kameraları",
@@ -1609,9 +1600,7 @@
         "preset-record-generic-audio-aac": "Kayıt (Jenerik + Ses AAC'ye)",
         "preset-record-mjpeg": "Kayıt - MPEG Kameraları",
         "preset-record-jpeg": "Kayıt - JPEG Kameraları",
-        "preset-record-ubiquiti": "Kayıt - Ubiquiti Kameraları",
-        "preset-apple-silicon-h264": "Apple Silicon (H.264)",
-        "preset-apple-silicon-h265": "Apple Silicon (H.265)"
+        "preset-record-ubiquiti": "Kayıt - Ubiquiti Kameraları"
       }
     },
     "cameraInputs": {
@@ -1912,11 +1901,8 @@
       "audioExclude": "Hariç tut",
       "hardwareNone": "Donanım hızlandırması yok",
       "hardwareAuto": "Otomatik (önerilir)",
-      "hardwareVaapi": "VAAPI",
       "hardwareCuda": "CUDA",
-      "hardwareV4l2m2m": "V4L2 M2M",
       "hardwareDxva2": "DXVA2",
-      "hardwareVideotoolbox": "VideoToolBox",
       "addVideoCodec": "Video kodeği ekle",
       "addAudioCodec": "Ses kodeği ekle",
       "removeCodec": "Kodeği kaldır"
@@ -2087,8 +2073,7 @@
       "countRecommended_other": "{{count}} kamera için önerilir",
       "unrecognized": "Bu model bu sistemde bulunmayan donanım(lar) için yapılandırılmış: {{devices}}",
       "description": "Bu modelin algılama işlemlerini çalıştırdığı donanım.",
-      "detectorCountDescription": "Bu donanımda çalışan algılama işlemi (process) sayısı. Daha fazla algılayıcı daha fazla kameraya yetişir; karşılığında fazladan aygıt hafızası harcar.",
-      "unitsDescription": "Her birim kendi algılama işlemini çalıştırır. Paylaşılamayacak bir birim (örn. Coral) yalnızca tek bir model tarafından kullanılabilir."
+      "detectorCountDescription": "Bu donanımda çalışan algılama işlemi (process) sayısı. Daha fazla algılayıcı daha fazla kameraya yetişir; karşılığında fazladan aygıt hafızası harcar."
     },
     "tabs": {
       "plus": "Frigate+",

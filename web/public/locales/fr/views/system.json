@@ -6,7 +6,6 @@
     "enrichments": "Statistiques d'enrichissements - Frigate",
     "logs": {
       "frigate": "Journaux de Frigate - Frigate",
-      "nginx": "Journaux Nginx - Frigate",
       "go2rtc": "Journaux Go2RTC - Frigate",
       "websocket": "Journaux des messages - Frigate"
     }

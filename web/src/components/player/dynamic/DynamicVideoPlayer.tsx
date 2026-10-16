@@ -48,7 +48,7 @@ const SUB_STREAM_BUFFER_LENGTH_S = 30;
 
 // seeks rebuild the source starting at the seek target so the vod
 // bootstrap segment ladder applies to every seek; quantizing keeps
-// seek URLs repeatable for nginx's mapping/response caches
+// seek URLs repeatable for the native VOD mapping and response caches
 const SOURCE_START_GRID_S = 10;
 
 // seeks beyond this bridge the source load with the preview player (the

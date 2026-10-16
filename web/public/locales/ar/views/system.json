@@ -7,7 +7,6 @@
     "logs": {
       "frigate": "سجلات Frigate - Frigate",
       "go2rtc": "Go2RTC  سجلات  -  Frigate",
-      "nginx": "سجلات إنجنإكس - Frigate",
       "websocket": "سجلات الرسائل"
     }
   },

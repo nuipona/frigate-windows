@@ -1037,8 +1037,7 @@
         "description": "در صورت فعال بودن، فریگیت در حالت امن با ویژگی‌های کاهش‌یافته برای رفع اشکال راه‌اندازی می‌شود."
     },
     "environment_vars": {
-        "label": "متغیر های محیطی",
-        "description": "جفت‌های کلید/مقدار متغیرهای محیطی برای تنظیم فرآیند فریگیت در Home Assistant OS. کاربران غیر HAOS باید از پیکربندی متغیرهای محیطی Docker استفاده کنند."
+        "label": "متغیر های محیطی"
     },
     "logger": {
         "label": "گزارش گیری",
@@ -1133,7 +1132,6 @@
         },
         "listen": {
             "label": "پیکربندی پورت‌های شنود",
-            "description": "پیکربندی پورت‌های شنود داخلی و خارجی. این برای کاربران پیشرفته است. برای اکثر موارد استفاده، توصیه می‌شود بخش پورت‌های فایل Docker compose خود را تغییر دهید.",
             "internal": {
                 "label": "پورت داخلی",
                 "description": "پورت شنود داخلی فریگیت (پیش‌فرض 5000)."
@@ -1203,8 +1201,7 @@
                 "description": "فعال‌سازی پایش پهنای باند شبکه به ازای هر فرآیند برای فرآیندهای ffmpeg دوربین و آشکارسازها (نیازمند قابلیت‌ها)."
             },
             "intel_gpu_device": {
-                "label": "دستگاه GPU اینتل",
-                "description": "PCI bus address or DRM device path (e.g. /dev/dri/card1) used to pin آمار GPU اینتل to a specific device when multiple are present."
+                "label": "دستگاه GPU اینتل"
             }
         },
         "version_check": {

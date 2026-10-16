@@ -5,8 +5,7 @@
     "enrichments": "Thống kê Làm giàu Dữ liệu - Frigate",
     "logs": {
       "frigate": "Nhật ký Frigate - Frigate",
-      "go2rtc": "Nhật ký Go2RTC - Frigate",
-      "nginx": "Nhật ký Nginx - Frigate"
+      "go2rtc": "Nhật ký Go2RTC - Frigate"
     },
     "cameras": "Thống kê Camera - Frigate"
   },

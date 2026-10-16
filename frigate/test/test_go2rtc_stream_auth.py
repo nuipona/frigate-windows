@@ -261,7 +261,7 @@ class TestDenyResponseForGo2rtcStream(unittest.TestCase):
             self._deny("http://host/live/mse/api/ws?src=wizard_test", "admin"), 403
         )
 
-    # --- path spellings nginx normalizes before matching its location ---
+    # --- path spellings the native gateway normalizes before route matching ---
 
     def test_path_variants_are_checked(self):
         for path in (
@@ -282,10 +282,6 @@ class TestDenyResponseForGo2rtcStream(unittest.TestCase):
 
     def test_path_variants_allow_existing_stream(self):
         self.assertIsNone(self._deny("/live/mse/api/%77s?src=front_door", "viewer"))
-
-    def test_nginx_marker_applies_check(self):
-        self.request.headers = {"x-go2rtc-stream-proxy": "1"}
-        self.assertEqual(self._deny("/unexpected?src=nonexistent", "viewer"), 403)
 
     def test_unrelated_paths_not_checked(self):
         for path in ("/live/mse/api", "/api/go2rtc/streams", "/live/jsmpeg/x"):

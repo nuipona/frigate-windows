@@ -220,7 +220,6 @@
     "logs": {
       "frigate": "Protokoly Frigate - Frigate",
       "go2rtc": "Protokoly Go2RTC - Frigate",
-      "nginx": "Protokoly Nginx - Frigate",
       "websocket": "Protokoly zpráv – Frigate"
     },
     "health": "Stav systému – Frigate"
@@ -313,7 +312,6 @@
         "skipped_detections": "Detekce nestíhala a déle než minutu vynechávala {{pct}} % snímků",
         "ffmpeg_high_cpu": "Využití CPU procesem FFmpeg je vysoké (průměr {{cpu}} %)",
         "detect_high_cpu": "Využití CPU detekcí je vysoké (průměr {{cpu}} %)",
-        "shm_too_low": "Přidělenou paměť /dev/shm ({{total}} MB) je třeba zvýšit alespoň na {{min}} MB",
         "object_processing_behind": "Zpracování sledovaných objektů nestíhalo, proto byly snímky kamer vynechány. Zkontrolujte využití CPU a zda limity CPU nebo přiřazení jader kontejneru či virtuálního stroje neposkytují Frigate příliš málo výkonu CPU",
         "failed_login_one": "Neúspěšný pokus o přihlášení uživatele {{user}}",
         "failed_login_other": "Neúspěšné pokusy o přihlášení uživatele {{user}}",

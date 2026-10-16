@@ -1,21 +1,17 @@
-"""Run go2rtc as a child process of a native Frigate install.
+"""Run go2rtc as a managed Windows child process.
 
-The container image starts go2rtc from an s6 service and lets s6 restart it if
-it dies. A native install has no supervisor, so Frigate starts the binary it
-found, keeps its output in the log directory the web UI reads, and stops it on
-the way out.
-
-Live view needs go2rtc: MSE and WebRTC are served by it, and it is the only
-thing that can restream a camera without recording it. Frigate still runs
-without it, so a missing binary is a warning rather than a failure.
+Frigate starts the installed executable, writes its output to the native log
+directory, and terminates it during shutdown. Live view needs go2rtc for MSE,
+WebRTC, and camera restreaming; a missing executable is reported as a warning so
+the rest of Frigate can still start.
 """
 
 import logging
 import os
 import subprocess as sp
 
+from frigate.util.go2rtc_config import prepare_homekit_config
 from frigate.util.platform import (
-    IS_WINDOWS,
     find_executable,
     get_install_dir,
     get_service_log_path,
@@ -32,11 +28,7 @@ BINARY_LOCATIONS = (
 
 
 def find_go2rtc(config_dir: str | None = None) -> str | None:
-    """Locate a go2rtc binary.
-
-    Looks next to the config file first, so a user can drop a build in the same
-    place as ``config.yml`` the way the container allows, then on ``PATH``.
-    """
+    """Locate ``go2rtc.exe`` in the native install or on ``PATH``."""
     from frigate.util.platform import executable_name, get_config_dir
 
     roots = [config_dir or get_config_dir(), get_install_dir()]
@@ -51,11 +43,7 @@ def find_go2rtc(config_dir: str | None = None) -> str | None:
             if not os.path.isfile(candidate):
                 continue
 
-            # os.access with X_OK is derived from the file extension on
-            # Windows, so a go2rtc.exe is executable by definition there and
-            # only the POSIX permission bit is worth checking
-            if IS_WINDOWS or os.access(candidate, os.X_OK):
-                return candidate
+            return candidate
 
     return find_executable("go2rtc")
 
@@ -95,19 +83,29 @@ class Go2rtcProcess:
             logger.warning("Unable to open %s for go2rtc's output: %s", log_path, err)
             self.log_file = None
 
-        command = [binary, "-config", self.config_path]
+        command = [binary]
+        try:
+            homekit_config = prepare_homekit_config()
+        except (OSError, ValueError) as err:
+            logger.warning(
+                "HomeKit pairing state will not persist because its config "
+                "could not be prepared: %s",
+                err,
+            )
+        else:
+            # go2rtc writes HomeKit pairings to the first config file.
+            command.extend(["-config", homekit_config])
+        command.extend(["-config", self.config_path])
+
         kwargs: dict = {
             "stdout": self.log_file or sp.DEVNULL,
             "stderr": sp.STDOUT,
             "stdin": sp.DEVNULL,
         }
 
-        if IS_WINDOWS:
-            # keep go2rtc out of the console's Ctrl+C group so Frigate can stop
-            # it after its own shutdown work is done
-            kwargs["creationflags"] = sp.CREATE_NEW_PROCESS_GROUP
-        else:
-            kwargs["start_new_session"] = True
+        # Keep go2rtc out of the console's Ctrl+C group so Frigate can stop it
+        # after its own shutdown work is done.
+        kwargs["creationflags"] = sp.CREATE_NEW_PROCESS_GROUP
 
         try:
             self.process = sp.Popen(command, **kwargs)

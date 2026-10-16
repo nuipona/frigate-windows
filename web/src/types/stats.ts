@@ -66,7 +66,7 @@ export type ExtraProcessStats = {
   mem?: string;
 };
 
-export type GpuVendor = "intel" | "amd" | "nvidia" | "rockchip" | "rpi";
+export type GpuVendor = "intel" | "amd" | "nvidia";
 
 export type GpuStats = {
   vendor?: GpuVendor;

@@ -1598,17 +1598,6 @@
       "selectPreset": "Select preset",
       "manualPlaceholder": "Enter FFmpeg arguments",
       "presetLabels": {
-        "preset-rpi-64-h264": "Raspberry Pi (H.264)",
-        "preset-rpi-64-h265": "Raspberry Pi (H.265)",
-        "preset-apple-silicon-h264": "Apple Silicon (H.264)",
-        "preset-apple-silicon-h265": "Apple Silicon (H.265)",
-        "preset-vaapi": "VAAPI (Intel/AMD GPU)",
-        "preset-intel-qsv-h264": "Intel QuickSync (H.264)",
-        "preset-intel-qsv-h265": "Intel QuickSync (H.265)",
-        "preset-nvidia": "NVIDIA GPU",
-        "preset-jetson-h264": "NVIDIA Jetson (H.264)",
-        "preset-jetson-h265": "NVIDIA Jetson (H.265)",
-        "preset-rkmpp": "Rockchip RKMPP",
         "preset-http-jpeg-generic": "HTTP JPEG (Generic)",
         "preset-http-mjpeg-generic": "HTTP MJPEG (Generic)",
         "preset-http-reolink": "HTTP - Reolink Cameras",
@@ -1623,7 +1612,15 @@
         "preset-record-generic-audio-aac": "Record (Generic + Audio to AAC)",
         "preset-record-mjpeg": "Record - MJPEG Cameras",
         "preset-record-jpeg": "Record - JPEG Cameras",
-        "preset-record-ubiquiti": "Record - Ubiquiti Cameras"
+        "preset-record-ubiquiti": "Record - Ubiquiti Cameras",
+        "preset-windows-d3d11va": "D3D11VA (Windows)",
+        "preset-windows-dxva2": "DXVA2 (Windows)",
+        "preset-windows-qsv": "Intel QuickSync (Windows)",
+        "preset-windows-qsv-h264": "Intel QuickSync H.264 (Windows)",
+        "preset-windows-qsv-h265": "Intel QuickSync H.265/HEVC (Windows)",
+        "preset-windows-nvenc": "NVIDIA CUDA/NVENC (Windows)",
+        "preset-windows-amf": "AMD AMF (Windows)",
+        "preset-windows-vulkan": "Vulkan (Windows)"
       }
     },
     "cameraInputs": {
@@ -1912,11 +1909,8 @@
       "audioExclude": "Exclude",
       "hardwareNone": "No hardware acceleration",
       "hardwareAuto": "Automatic (recommended)",
-      "hardwareVaapi": "VAAPI",
       "hardwareCuda": "CUDA",
-      "hardwareV4l2m2m": "V4L2 M2M",
       "hardwareDxva2": "DXVA2",
-      "hardwareVideotoolbox": "VideoToolbox",
       "addVideoCodec": "Add video codec",
       "addAudioCodec": "Add audio codec",
       "removeCodec": "Remove codec"
@@ -2091,7 +2085,7 @@
       "unrecognized": "This model is configured for hardware that was not found on this system: {{devices}}",
       "description": "The hardware this model runs its detection on.",
       "detectorCountDescription": "How many detection processes to run on this hardware. More detectors keep up with more cameras, at the cost of extra device memory.",
-      "unitsDescription": "Each unit runs its own detection process. A unit that can't be shared, such as a Coral, can only be used by one model."
+      "unitsDescription": "Each unit runs its own detection process. Shareable CPU, ONNX, and OpenVINO devices may be assigned according to the hardware shown by Frigate."
     },
     "tabs": {
       "plus": "Frigate+",

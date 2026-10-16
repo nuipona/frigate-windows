@@ -1,34 +1,36 @@
 ---
 id: hardware_acceleration_enrichments
-title: Enrichments
+title: Enrichment Acceleration
 ---
 
-# Enrichments
+# Enrichment acceleration on Windows
 
-Some of Frigate's enrichments can use a discrete GPU or integrated GPU for accelerated processing.
+Semantic search, face recognition, license-plate recognition, classification, and other enrichment models use ONNX Runtime or OpenVINO when the model supports them.
 
-## Requirements
+## Device values
 
-Object detection and enrichments (like Semantic Search, Face Recognition, and License Plate Recognition) are independent features. To use a GPU / NPU for object detection, see the [Object Detectors](/configuration/object_detectors.md) documentation. If you want to use your GPU for any supported enrichments, you must choose the appropriate Frigate Docker image for your GPU / NPU and configure the enrichment according to its specific documentation.
+Common values are:
 
-- **AMD**
-  - ROCm support in the `-rocm` Frigate image is automatically detected for enrichments, but only some enrichment models are available due to ROCm's focus on LLMs and limited stability with certain neural network models. Frigate disables models that perform poorly or are unstable to ensure reliable operation, so only compatible enrichments may be active.
+- `CPU` — force CPU inference;
+- `AUTO` — choose an available provider automatically;
+- `GPU` or `GPU.0` — use an OpenVINO Intel GPU;
+- `NPU` — use an OpenVINO Intel NPU;
+- a numeric DirectML adapter index where the relevant setting accepts one.
 
-- **Intel**
-  - OpenVINO will automatically be detected and used for enrichments in the default Frigate image.
-  - **Note:** Intel NPUs have limited model support for enrichments. GPU is recommended for enrichments when available.
+The System page reports the provider selected by each loaded enrichment model.
 
-- **Nvidia**
-  - Nvidia GPUs will automatically be detected and used for enrichments in the `-tensorrt` Frigate image.
-  - Jetson devices will automatically be detected and used for enrichments in the `-tensorrt-jp6` Frigate image.
+## DirectML
 
-- **RockChip**
-  - RockChip NPU will automatically be detected and used for semantic search v1 and face recognition in the `-rk` Frigate image.
+The default bootstrap swaps CPU ONNX Runtime for `onnxruntime-directml`. DirectML can use AMD, Intel, and NVIDIA display adapters without a CUDA-specific Python package. Use `bootstrap_windows.py --no-directml` when CPU-only behavior is preferred.
 
-Utilizing a GPU for enrichments does not require you to use the same GPU for object detection. For example, you can run the `tensorrt` Docker image to run enrichments on an Nvidia GPU and still use other dedicated hardware like a Coral or Hailo for object detection. However, one combination that is not supported is the `tensorrt` image for object detection on an Nvidia GPU and Intel iGPU for enrichments.
+## OpenVINO
 
-:::note
+OpenVINO is included in the Windows requirements. Intel GPU and NPU devices appear only when the matching Windows driver exposes them to OpenVINO. `CPU` remains available as a fallback.
 
-A Google Coral is a TPU (Tensor Processing Unit), not a dedicated GPU (Graphics Processing Unit) and therefore does not provide any kind of acceleration for Frigate's enrichments.
+## NVIDIA CUDA
 
-:::
+Advanced users may replace the standard ONNX Runtime package with a CUDA-capable build that supports CPython 3.12 on Windows. The CUDA runtime, cuDNN, driver, and ONNX Runtime versions must match. DirectML is the supported default because it avoids that additional native dependency chain.
+
+## Memory considerations
+
+A model loaded by more than one process consumes memory per process. Start with `AUTO`, inspect runtime-device and memory statistics, and pin a device only when automatic selection is unsuitable. If a GPU runs out of memory, move some enrichments to `CPU` or reduce the number of concurrently enabled models.

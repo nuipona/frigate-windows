@@ -22,7 +22,7 @@ import useSWR from "swr";
 
 // these ship no default model, so configuring one without a model leaves the
 // detector unable to start
-const MODEL_REQUIRED_DETECTORS = ["onnx", "tensorrt"];
+const MODEL_REQUIRED_DETECTORS = ["onnx"];
 
 const CPU_FALLBACK: DetectionHardware[] = [
   {

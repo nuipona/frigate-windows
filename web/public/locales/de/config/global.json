@@ -44,8 +44,7 @@
         "description": "Einstellungen für die audiobasierte Ereigniserkennung für alle Kameras; können für jede Kamera individuell überschrieben werden."
     },
     "environment_vars": {
-        "label": "Umgebungsvariablen",
-        "description": "Schlüssel-/Wertpaare für Umgebungsvariablen des Frigate-Prozesses in Home Assistant OS. Nicht-HAOS Benutzer müssen anstatt dessen Docker Umgebungsvariablen nutzen."
+        "label": "Umgebungsvariablen"
     },
     "logger": {
         "label": "Protokollierung",
@@ -452,7 +451,6 @@
         },
         "listen": {
             "label": "Konfiguration der Listening-Ports",
-            "description": "Konfiguration für interne und externe Listening-Ports. Dies ist für fortgeschrittene Benutzer gedacht. Für die meisten Anwendungsfälle wird empfohlen, den Abschnitt „Ports“ Ihrer Docker-Compose-Datei zu ändern.",
             "internal": {
                 "label": "interne port",
                 "description": "Interner Listening-Port für Frigate (Standard 5000)."
@@ -538,8 +536,7 @@
                 "description": "Prozessbezogene Überwachung der Netzwerkbandbreite für Kamera-FFmpeg-Prozesse und Detektoren aktivieren (erfordert entsprechende Funktionen)."
             },
             "intel_gpu_device": {
-                "label": "Intel GPU",
-                "description": "PCI-Bus-Adresse oder DRM-Gerätepfad (z. B. /dev/dri/card1), der verwendet wird, um die Intel-GPU-Statistiken einem bestimmten Gerät zuzuordnen, wenn mehrere vorhanden sind."
+                "label": "Intel GPU"
             }
         },
         "version_check": {

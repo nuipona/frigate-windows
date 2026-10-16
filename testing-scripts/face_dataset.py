@@ -1,4 +1,4 @@
-"""
+r"""
 Face recognition investigation script.
 
 Standalone replica of Frigate's ArcFace pipeline (see
@@ -19,12 +19,11 @@ Layout:
   - Optional diagnostics (flags): vector-outlier filter behavior, degenerate
     "tiny crop" embedding clustering, and multi-identity contamination
 
-Usage:
-    python3 face_investigate.py \\
-        --positive <positive_folder> \\
-        --negative <negative_folder> \\
-        [--model-cache /path/to/model_cache] \\
-        [--vector-outlier] [--degenerate] [--contamination]
+PowerShell usage:
+    .\.venv\Scripts\python.exe testing-scripts\face_dataset.py `
+        --positive 'D:\FaceSamples\positive' `
+        --negative 'D:\FaceSamples\negative' `
+        --vector-outlier --degenerate --contamination
 
 The positive folder should contain training images for a single identity
 (same layout as FACE_DIR/<name>/*.webp). The negative folder should contain
@@ -44,6 +43,8 @@ import numpy as np
 import onnxruntime as ort
 from PIL import Image
 from scipy import stats
+
+from frigate.util.platform import get_model_cache_dir
 
 ARCFACE_INPUT_SIZE = 112
 
@@ -704,7 +705,7 @@ def main() -> int:
     )
     ap.add_argument(
         "--model-cache",
-        default="/config/model_cache",
+        default=get_model_cache_dir(),
         help="Directory containing facedet/arcface.onnx and facedet/landmarkdet.yaml",
     )
     ap.add_argument(

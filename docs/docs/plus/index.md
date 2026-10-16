@@ -3,55 +3,33 @@ id: index
 title: Models
 ---
 
-<a href="https://frigate.video/plus" target="_blank" rel="nofollow">Frigate+</a> offers models trained on images submitted by Frigate+ users from their security cameras and is specifically designed for the way Frigate NVR analyzes video footage. These models offer higher accuracy with less resources. The images you upload are used to fine tune a base model trained from images uploaded by all Frigate+ users. This fine tuning process results in a model that is optimized for accuracy in your specific conditions.
+<a href="https://frigate.video/plus" target="_blank" rel="nofollow">Frigate+</a> provides object-detection models trained for security-camera images. Account-specific training fine-tunes a base model with verified images from your cameras.
 
-With a subscription, 12 model trainings to fine tune your model per year are included. In addition, you will have access to any base models published while your subscription is active. If you cancel your subscription, you will retain access to any trained and base models in your account. An active subscription is required to submit model requests or purchase additional trainings. New base models are published quarterly with target dates of January 15th, April 15th, July 15th, and October 15th.
-
-Information on how to integrate Frigate+ with Frigate can be found in the [integration docs](../integrations/plus.md).
+A subscription includes model trainings and access to base models published while the subscription is active. See the [integration guide](../integrations/plus.md) to connect the native Windows application.
 
 ## Available model types
 
-There are three model types offered in Frigate+, `mobiledet`, `yolonas`, and `yolov9`. All of these models are object detection models and are trained to detect the same set of labels [listed below](#available-label-types).
+Frigate+ may offer several architectures. The model picker shows only files compatible with the native Windows detector selected for that model.
 
-Not all model types are supported by all detectors, so it's important to choose a model type to match your detector as shown in the table under [supported detector types](#supported-detector-types). You can test model types for compatibility and speed on your hardware by using the base models.
+| Model type | Windows use |
+| --- | --- |
+| `mobiledet` | TFLite on the CPU detector |
+| `yolonas` | ONNX Runtime or OpenVINO, depending on the published variant |
+| `yolov9` | ONNX Runtime or OpenVINO, depending on the published variant |
 
-| Model Type  | Description                                                                                                                                                    |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mobiledet` | Based on the same architecture as the default model included with Frigate. Runs on Google Coral devices and CPUs.                                              |
-| `yolonas`   | A newer architecture that offers slightly higher accuracy and improved detection of small objects. Runs on Intel, NVidia GPUs, and AMD GPUs.                   |
-| `yolov9`    | A leading SOTA (state of the art) object detection model with similar performance to yolonas, but on a wider range of hardware options. Runs on most hardware. |
-
-### YOLOv9 Details
-
-YOLOv9 models are available in `s`, `t`, `edgetpu` variants. When requesting a `yolov9` model, you will be prompted to choose a variant. If you want the model to be compatible with a Google Coral, you will need to choose the `edgetpu` variant. If you are unsure what variant to choose, you should perform some tests with the base models to find the performance level that suits you. The `s` size is most similar to the current `yolonas` models in terms of inference times and accuracy, and a good place to start is the `320x320` resolution model for `yolov9s`.
-
-:::info
-
-When switching to YOLOv9, you may need to adjust your thresholds for some objects.
-
-:::
-
-#### Hailo Support
-
-If you have a Hailo device, you will need to specify the hardware you have when submitting a model request because they are not cross compatible. Please test using the available base models before submitting your model request.
-
-#### Rockchip (RKNN) Support
-
-Rockchip models are automatically converted as of 0.17. For 0.16, YOLOv9 onnx models will need to be manually converted. First, you will need to configure Frigate to use the model id for your YOLOv9 onnx model so it downloads the model to your `model_cache` directory. From there, you can follow the [documentation](/configuration/object_detectors.md#converting-your-own-onnx-model-to-rknn-format) to convert it.
+Test a base model before spending a training request. Resolution and architecture affect both accuracy and inference time. Object-filter scores often need retuning after changing architecture.
 
 ## Supported detector types
 
-Currently, Frigate+ models support CPU (`cpu`), Google Coral (`edgetpu`), OpenVino (`openvino`), ONNX (`onnx`), Hailo (`hailo`), and Rockchip (`rknn`) detectors.
+The native Windows application accepts Frigate+ variants for:
 
-| Hardware                                                                         | Recommended Detector Type | Recommended Model Type |
-| -------------------------------------------------------------------------------- | ------------------------- | ---------------------- |
-| [CPU](/configuration/object_detectors.md#cpu-detector-not-recommended)           | `cpu`                     | `mobiledet`            |
-| [Coral (all form factors)](/configuration/object_detectors.md#edge-tpu-detector) | `edgetpu`                 | `yolov9`               |
-| [Intel](/configuration/object_detectors.md#openvino-detector)                    | `openvino`                | `yolov9`               |
-| [NVidia GPU](/configuration/object_detectors#onnx)                               | `onnx`                    | `yolov9`               |
-| [AMD ROCm GPU](/configuration/object_detectors#amdrocm-gpu-detector)             | `onnx`                    | `yolov9`               |
-| [Hailo8/Hailo8L/Hailo8R](/configuration/object_detectors#hailo)                  | `hailo`                   | `yolov9`               |
-| [Rockchip NPU](/configuration/object_detectors#rockchip-platform)                | `rknn`                    | `yolov9`               |
+| Hardware | Detector | Typical model |
+| --- | --- | --- |
+| CPU TFLite | `cpu` | `mobiledet` |
+| Intel CPU/GPU/NPU through OpenVINO | `openvino` | `yolonas` or `yolov9` |
+| CPU, DirectML, or CUDA through ONNX Runtime | `onnx` | `yolonas` or `yolov9` |
+
+Models that contain only unsupported detector variants are hidden by the API. If a model supports several detectors, its metadata is reduced to the Windows-compatible variants.
 
 ## Improving your model
 

@@ -21,7 +21,7 @@ from frigate.util.platform import (
     install_service_stop_watcher,
     install_signal_handlers,
     long_path_warning,
-    supports_forkserver,
+    require_windows,
 )
 
 
@@ -31,16 +31,14 @@ def _create_process_manager() -> SyncManager:
     # its job object first so the manager and every later child inherit it.
     install_job_object()
 
-    # The manager must not start the forkserver before the config applies
-    # environment_vars, or workers and their ffmpeg processes inherit the old
-    # environment. Windows and macOS use spawn and have no forkserver.
-    if supports_forkserver():
-        return mp.get_context("fork").Manager()
-
     return mp.Manager()
 
 
 def main() -> None:
+    # This is a native Windows application. Reject other operating systems
+    # before creating child processes, directories, loggers, or services.
+    require_windows()
+
     logger = logging.getLogger("frigate")
     manager = _create_process_manager()
     faulthandler.enable()
@@ -160,23 +158,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # Windows has no fork, so the start method has to be spawn; the preload
-    # list below only applies to forkserver and is skipped there.
-    if supports_forkserver():
-        mp.set_forkserver_preload(
-            [
-                # Standard library and core dependencies
-                "sqlite3",
-                # Third-party libraries commonly used in Frigate
-                "numpy",
-                "cv2",
-                "peewee",
-                "zmq",
-                "ruamel.yaml",
-                # Frigate core modules
-                "frigate.camera.maintainer",
-            ]
-        )
-
     mp.set_start_method(get_mp_start_method(), force=True)
     main()

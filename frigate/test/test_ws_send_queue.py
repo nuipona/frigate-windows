@@ -3,7 +3,6 @@
 import socket
 import threading
 import unittest
-from unittest.mock import patch
 
 from frigate.comms.ws import WS_MAX_PENDING_MESSAGES, WS_SEND_TIMEOUT, WebSocket
 
@@ -58,8 +57,7 @@ class TestWebSocketSendQueue(unittest.TestCase):
 
     def test_windows_send_timeout_uses_milliseconds(self):
         sock = _FakeSock()
-        with patch("frigate.comms.ws.IS_WINDOWS", True):
-            ws = self._open(sock)
+        ws = self._open(sock)
 
         try:
             self.assertEqual(

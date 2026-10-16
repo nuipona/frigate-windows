@@ -20,7 +20,7 @@ When a profile is activated, Frigate merges each camera's profile overrides on t
 
 :::info
 
-Profile changes are applied in-memory and take effect immediately. No restart is required. The active profile is persisted across Frigate restarts (stored in the `/config/.profiles` file).
+Profile changes are applied in-memory and take effect immediately. No restart is required. The active profile is persisted across Frigate restarts in `.profiles` inside the Windows config directory.
 
 :::
 

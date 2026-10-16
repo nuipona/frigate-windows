@@ -4,7 +4,6 @@
     "general": "Opća Statistika - Frigate",
     "logs": {
       "go2rtc": "Zapisnici Go2RTC - Frigate",
-      "nginx": "Zapisnici Nginx - Frigate",
       "frigate": "Zapisnici Frigate - Frigate"
     },
     "storage": "Statistika Pohrane - Frigate",

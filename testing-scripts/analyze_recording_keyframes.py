@@ -1,70 +1,42 @@
-#!/usr/bin/env python3
-"""Analyze keyframe and timestamp structure of Frigate recording segments.
+r"""Analyze keyframes and timestamps in native Windows recordings.
 
-This is a diagnostic tool for investigating seek precision / GOP behavior on
-recorded segments. It does not modify anything.
+This read-only diagnostic uses Frigate's bundled ``ffprobe.exe`` and defaults
+to the recordings directory selected by ``FRIGATE_BASE_DIR``. Run from the
+repository root in PowerShell::
 
-ffprobe is only available inside the Frigate container, at
-    /usr/lib/ffmpeg/$DEFAULT_FFMPEG_VERSION/bin/ffprobe
-This script auto-resolves that path from the DEFAULT_FFMPEG_VERSION env var
-(or falls back to scanning /usr/lib/ffmpeg/*/bin/ffprobe). Pass --ffprobe to
-override if needed.
+    .\.venv\Scripts\python.exe testing-scripts\analyze_recording_keyframes.py front
+    .\.venv\Scripts\python.exe testing-scripts\analyze_recording_keyframes.py front `
+      --count 10 --timestamp 1713471234.567
+    .\.venv\Scripts\python.exe testing-scripts\analyze_recording_keyframes.py front `
+      --recordings-dir 'E:\FrigateMedia\recordings'
 
-All recording segments on the filesystem are in UTC. The --timestamp flag
-expects a UTC Unix timestamp.
-
-Typical use:
-    # Inside the Frigate container (or wherever recordings are mounted)
-    python3 analyze_recording_keyframes.py <camera_name>
-
-    # Analyze 10 most recent segments
-    python3 analyze_recording_keyframes.py <camera_name> --count 10
-
-    # Locate the segment that contains a specific UTC Unix timestamp and
-    # show it plus surrounding segments
-    python3 analyze_recording_keyframes.py <camera> --timestamp 1713471234.567
-
-    # Custom recordings directory
-    python3 analyze_recording_keyframes.py <camera> --recordings-dir /media/frigate/recordings
-
-    # Override the ffprobe path explicitly
-    python3 analyze_recording_keyframes.py <camera> --ffprobe /usr/lib/ffmpeg/7.0/bin/ffprobe
+Pass ``--ffprobe`` only to override the installed Windows executable.
 """
 
 import argparse
 import datetime
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 from statistics import mean, median, stdev
 
+from frigate.util.platform import find_executable, get_media_dir
+
 
 def resolve_ffprobe_path(override: str | None) -> str:
-    """Resolve the ffprobe binary path.
-
-    Inside the Frigate container, ffprobe lives at
-    /usr/lib/ffmpeg/{DEFAULT_FFMPEG_VERSION}/bin/ffprobe — the exact version
-    depends on the image build and is exposed as an env var.
-    """
+    """Resolve the native Windows ffprobe executable."""
     if override:
-        return override
-    version = os.environ.get("DEFAULT_FFMPEG_VERSION", "")
-    if version:
-        path = f"/usr/lib/ffmpeg/{version}/bin/ffprobe"
-        if Path(path).is_file():
-            return path
-    # Fall back to scanning the Frigate ffmpeg install root.
-    for candidate in sorted(Path("/usr/lib/ffmpeg").glob("*/bin/ffprobe")):
-        if candidate.is_file():
-            return str(candidate)
-    print(
-        "Could not locate ffprobe. Pass --ffprobe <path> or set "
-        "DEFAULT_FFMPEG_VERSION.",
-        file=sys.stderr,
+        if Path(override).is_file():
+            return str(Path(override).resolve())
+        raise FileNotFoundError(f"ffprobe does not exist: {override}")
+
+    found = find_executable("ffprobe")
+    if found:
+        return found
+    raise FileNotFoundError(
+        "Could not locate ffprobe.exe; rerun bootstrap_windows.py or pass --ffprobe"
     )
-    sys.exit(1)
 
 
 def find_recent_segments(recordings_dir: Path, camera: str, count: int) -> list[Path]:
@@ -129,7 +101,7 @@ def filename_to_timestamp(segment: Path) -> float | None:
         dt = datetime.datetime.strptime(
             f"{date} {hour}:{minute}:{second}",
             "%Y-%m-%d %H:%M:%S",
-        ).replace(tzinfo=datetime.timezone.utc)
+        ).replace(tzinfo=datetime.UTC)
         return dt.timestamp()
     except (ValueError, IndexError):
         return None
@@ -202,7 +174,7 @@ def analyze(ffprobe: str, segment: Path, highlight: bool = False) -> None:
     filename_ts = filename_to_timestamp(segment)
     filename_iso = (
         datetime.datetime.fromtimestamp(
-            filename_ts, tz=datetime.timezone.utc
+            filename_ts, tz=datetime.UTC
         ).isoformat()
         if filename_ts is not None
         else "?"
@@ -302,15 +274,14 @@ def main() -> None:
     )
     parser.add_argument(
         "--recordings-dir",
-        default="/media/frigate/recordings",
-        help="Path to the recordings directory (default: /media/frigate/recordings)",
+        default=str(Path(get_media_dir()) / "recordings"),
+        help="Recordings directory (defaults to the active Windows media layout)",
     )
     parser.add_argument(
         "--ffprobe",
         default=None,
         help=(
-            "Full path to the ffprobe binary. Defaults to the Frigate-bundled "
-            "binary at /usr/lib/ffmpeg/$DEFAULT_FFMPEG_VERSION/bin/ffprobe."
+            "Full path to ffprobe.exe (defaults to Frigate's bundled executable)."
         ),
     )
     parser.add_argument(
@@ -343,7 +314,7 @@ def main() -> None:
             recordings_dir, args.camera, args.timestamp, args.count
         )
         target_iso = datetime.datetime.fromtimestamp(
-            args.timestamp, tz=datetime.timezone.utc
+            args.timestamp, tz=datetime.UTC
         ).isoformat()
         mode = f"around timestamp {args.timestamp} ({target_iso})"
     else:

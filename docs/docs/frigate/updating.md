@@ -3,130 +3,51 @@ id: updating
 title: Updating
 ---
 
-# Updating Frigate
+# Updating Frigate on Windows
 
-The current stable version of Frigate is **0.18.1**. The release notes and any breaking changes for this version can be found on the [Frigate GitHub releases page](https://github.com/blakeblackshear/frigate/releases/tag/v0.18.1).
+Before updating, back up `%LOCALAPPDATA%\Frigate\config` and any media or database paths overridden through environment variables.
 
-Keeping Frigate up to date ensures you benefit from the latest features, performance improvements, and bug fixes. The update process varies slightly depending on your installation method (Docker, Home Assistant App, etc.). Below are instructions for the most common setups.
+## Source checkout installation
 
-## Before You Begin
+From PowerShell in the Frigate checkout:
 
-- **Stop Frigate**: For most methods, you’ll need to stop the running Frigate instance before backing up and updating.
-- **Backup Your Configuration**: Always back up your `/config` directory (e.g., `config.yml` and `frigate.db`, the SQLite database) before updating. This ensures you can roll back if something goes wrong.
-- **Check Release Notes**: Carefully review the [Frigate GitHub releases page](https://github.com/blakeblackshear/frigate/releases) for breaking changes or configuration updates that might affect your setup.
+```powershell
+git fetch origin
+git checkout dev
+git pull --ff-only
+py -3.12 bootstrap_windows.py
+```
 
-## Updating with Docker
+The bootstrap reuses the virtual environment, installs the pinned dependency set, verifies the pinned FFmpeg, go2rtc, and model downloads, rebuilds the web interface when Node.js is installed, and rewrites the launcher.
 
-If you’re running Frigate via Docker (recommended method), follow these steps:
+If Frigate is installed as a Windows service, stop it before updating and start it afterward:
 
-1. **Stop the Container**:
-   - If using Docker Compose:
-     ```bash
-     docker compose down frigate
-     ```
-   - If using `docker run`:
-     ```bash
-     docker stop frigate
-     ```
+```powershell
+Stop-Service Frigate
+py -3.12 bootstrap_windows.py --install-service
+Start-Service Frigate
+```
 
-2. **Update and Pull the Latest Image**:
-   - If using Docker Compose:
-     - Edit your `docker-compose.yml` file to specify the desired version tag (e.g., `0.18.1` instead of `0.17.1`). For example:
-       ```yaml
-       services:
-         frigate:
-           image: ghcr.io/blakeblackshear/frigate:0.18.1
-       ```
-     - Then pull the image:
-       ```bash
-       docker pull ghcr.io/blakeblackshear/frigate:0.18.1
-       ```
-     - **Note for `stable` Tag Users**: If your `docker-compose.yml` uses the `stable` tag (e.g., `ghcr.io/blakeblackshear/frigate:stable`), you don’t need to update the tag manually. The `stable` tag always points to the latest stable release after pulling.
-   - If using `docker run`:
-     - Pull the image with the appropriate tag (e.g., `0.18.1`, `0.18.1-tensorrt`, or `stable`):
-       ```bash
-       docker pull ghcr.io/blakeblackshear/frigate:0.18.1
-       ```
+Run those commands from an elevated PowerShell when changing the service registration.
 
-3. **Start the Container**:
-   - If using Docker Compose:
-     ```bash
-     docker compose up -d
-     ```
-   - If using `docker run`, re-run your original command (e.g., from the [Installation](./installation.md#docker) section) with the updated image tag.
+## Release bundle
 
-4. **Verify the Update**:
-   - Check the container logs to ensure Frigate starts successfully:
-     ```bash
-     docker logs frigate
-     ```
-   - Visit the Frigate Web UI (default: `http://<your-ip>:5000`) to confirm the new version is running. The version number is displayed at the top of the Health and Metrics page.
+For a packaged release, stop Frigate, extract the new bundle over a new application directory, run its bootstrap or installer, and point the service at the new interpreter. Do not delete the data directory. Keep the old application directory until the new version has started and recordings play correctly.
 
-### Notes
+## Configuration migrations
 
-- If you’ve customized other settings (e.g., `shm-size`), ensure they’re still appropriate after the update.
-- Docker will automatically use the updated image when you restart the container, as long as you pulled the correct version.
+Frigate backs up and migrates older `config.yml` files at startup. Review release notes before skipping versions. A configuration using a detector, FFmpeg preset, path, or service option removed by the Windows-only release must be updated before startup.
 
-## Updating the Home Assistant App (formerly Addon)
+Validate before restarting production:
 
-For users running Frigate as a Home Assistant App:
+```powershell
+.\.venv\Scripts\python.exe -m frigate --validate-config
+```
 
-1. **Check for Updates**:
-   - Navigate to **Settings > Apps** in Home Assistant.
-   - Find your installed Frigate app (e.g., "Frigate NVR" or "Frigate NVR (Full Access)").
-   - If an update is available, you’ll see an "Update" button.
-
-2. **Update the App**:
-   - Make a backup of the current version of the app.
-   - Click the "Update" button next to the Frigate app.
-   - Wait for the process to complete. Home Assistant will handle downloading and installing the new version.
-
-3. **Restart the App**:
-   - After updating, go to the app’s page and click "Restart" to apply the changes.
-
-4. **Verify the Update**:
-   - Check the app logs (under the "Log" tab) to ensure Frigate starts without errors.
-   - Access the Frigate Web UI to confirm the new version is running.
-
-### Notes
-
-- Ensure your `/config/frigate.yml` is compatible with the new version by reviewing the [Release notes](https://github.com/blakeblackshear/frigate/releases).
-- If using custom hardware (e.g., Coral or GPU), verify that configurations still work, as app updates don’t modify your hardware settings.
-
-## Updating a native Windows install
-
-1. **Stop Frigate**: Ctrl+C in the launcher window, or `.\scripts\install_frigate_service.ps1 -Action Stop` when it runs as a service.
-2. **Back up your data**: copy `%LOCALAPPDATA%\Frigate\config`, which holds `config.yml`, `frigate.db` and the model cache.
-3. **Update the checkout**:
-   ```powershell
-   git pull
-   ```
-4. **Refresh the install**:
-   ```powershell
-   py -3.12 bootstrap_windows.py
-   ```
-   This reinstalls the requirements, re-checks the pinned FFmpeg and go2rtc builds, and rebuilds the web interface. Use `--skip-binaries` or `--skip-web` to skip a step you know has not changed.
-5. **Start Frigate** again. Database migrations run automatically at startup.
-
-If you installed from a [release zip](https://github.com/nuipona/frigate-windows/releases) instead of a git checkout, unpack the newer one over the old one and run the bootstrap script again. Your data directory is not touched either way.
-
-## Rolling Back
-
-If an update causes issues:
+## Rollback
 
 1. Stop Frigate.
-2. Restore your backed-up config file and database.
-3. Revert to the previous image version:
-   - For Docker: Specify an older tag (e.g., `ghcr.io/blakeblackshear/frigate:0.18.0`) in your `docker run` command.
-   - For Docker Compose: Edit your `docker-compose.yml`, specify the older version tag (e.g., `ghcr.io/blakeblackshear/frigate:0.16.4`), and re-run `docker compose up -d`.
-   - For Home Assistant: Restore from the app/addon backup you took before you updated.
-   - For a native Windows install: check out the previous commit with `git checkout <sha>` and run `py -3.12 bootstrap_windows.py` again.
-4. Verify the old version is running again.
-
-## Troubleshooting
-
-- **Container Fails to Start**: Check logs (`docker logs frigate`) for errors.
-- **UI Not Loading**: Ensure ports (e.g., 5000, 8971) are still mapped correctly and the service is running.
-- **Hardware Issues**: Revisit hardware-specific setup (e.g., Coral, GPU) if detection or decoding fails post-update.
-
-Common questions are often answered in the [FAQ](https://github.com/blakeblackshear/frigate/discussions), pinned at the top of the support discussions.
+2. Restore the previous application directory and virtual environment.
+3. Restore the matching configuration/database backup if the newer version performed an incompatible migration.
+4. Reinstall or repoint the Windows service.
+5. Start Frigate and inspect the logs under `%LOCALAPPDATA%\Frigate\logs`.

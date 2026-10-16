@@ -30,8 +30,8 @@ _requestor_lock = threading.Lock()
 def install_registry(registry: "NoticeRegistry | None") -> None:
     """Send this process's notices straight to the registry.
 
-    Only the main process installs one. Children start from the forkserver,
-    so they never inherit it and send over IPC instead.
+    Only the main process installs one. Spawned Windows children do not inherit
+    it and send over IPC instead.
     """
     global _registry
     _registry = registry

@@ -8,8 +8,7 @@
         "description": "Si activé, Frigate démarre en mode sans échec avec des fonctionnalités réduites pour le dépannage."
     },
     "environment_vars": {
-        "label": "Variables d'environnement",
-        "description": "Paires clé/valeur des variables d'environnement à définir pour le processus Frigate sous Home Assistant OS. Les utilisateurs sans HAOS doivent utiliser la configuration des variables d'environnement de Docker à la place."
+        "label": "Variables d'environnement"
     },
     "logger": {
         "label": "Journalisation",

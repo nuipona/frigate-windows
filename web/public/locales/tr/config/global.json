@@ -4,8 +4,7 @@
         "description": "Sorun gidermek için Frigate'i kısıtlı özelliklere sahip güvenli modda başlatır."
     },
     "environment_vars": {
-        "label": "Ortam değişkenleri",
-        "description": "Home Assistant OS'teki Frigate işlemi (process) için ayarlanacak ortam değişkenlerinin anahtar/değer çiftleri. HAOS kullanmayanlar bunun yerine Docker ortam değişkeni yapılandırmasını kullanmalıdırlar."
+        "label": "Ortam değişkenleri"
     },
     "audio": {
         "label": "Ses algılaması",
@@ -1233,7 +1232,6 @@
         },
         "listen": {
             "label": "Dinleme portları yapılandırması",
-            "description": "İç ve dış dinleme portları yapılandırması. İleri düzey kullanıcılar içindir. Çoğu durumda Docker compose dosyanızdaki portlar bölümünü değiştirmeniz önerilir.",
             "internal": {
                 "label": "İç port",
                 "description": "Frigate dahili dinleme portu (varsayılan 5000)."
@@ -1303,8 +1301,7 @@
                 "description": "Kamera ffmpeg işlemleri ve algılayıcıları için süreç bazlı ağ bant genişliği gözlemini etkinleştir (sistem yetkileri gerektirir)."
             },
             "intel_gpu_device": {
-                "label": "Intel GPU aygıtı",
-                "description": "Birden fazla aygıt olduğunda Intel GPU istatistiklerini belirlenen bir aygıta sabitlemek için kullanılan PCI veriyolu adresi veya DRM aygıt yolu (örn: /dev/dri/card1)."
+                "label": "Intel GPU aygıtı"
             }
         },
         "version_check": {
@@ -1344,8 +1341,7 @@
             "description": "Bu modelin kullanıldığı kamera ortamının adı, örneğin \"termal\". Kameralar detect.scene'i eşleşen bir değere ayarlayarak model seçerler. Seçmeyen kameralar için \"varsayılan\" (default) model kullanılır."
         },
         "devices": {
-            "label": "Algılama donanımı",
-            "description": "Bu modelin çalıştığı donanım; '<algılayıcı>' veya <'algılayıcı'>:<'aygıt'> şeklinde (örneğin 'edgetpu:pci0' veya 'openvino:GPU'). Aynı aygıtı birden fazla kes listelemek o aygıt üzerinde ek çıkarım (inference) işlemlerinin çalışmasına yol açar."
+            "label": "Algılama donanımı"
         },
         "path": {
             "label": "Özelleştirilmiş nesne algılayıcı model yolu",

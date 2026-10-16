@@ -1145,8 +1145,7 @@
         "description": "Při zapnutí se Frigate spustí v nouzovém režimu s omezenými funkcemi pro řešení problémů."
     },
     "environment_vars": {
-        "label": "Proměnné prostředí",
-        "description": "Dvojice klíč/hodnota proměnných prostředí pro proces Frigate v Home Assistant OS. Mimo HAOS použijte nastavení proměnných prostředí Dockeru."
+        "label": "Proměnné prostředí"
     },
     "logger": {
         "label": "Protokolování",
@@ -1233,7 +1232,6 @@
         },
         "listen": {
             "label": "Konfigurace naslouchajících portů",
-            "description": "Konfigurace interních a externích naslouchajících portů. Určeno pro pokročilé uživatele. Ve většině případů se doporučuje změnit sekci ports v souboru Docker Compose.",
             "internal": {
                 "label": "Interní port",
                 "description": "Interní naslouchající port Frigate (výchozí 5000)."
@@ -1303,8 +1301,7 @@
                 "description": "Povolit sledování síťové přenosové rychlosti procesů FFmpeg kamer a detektorů (vyžaduje oprávnění capabilities)."
             },
             "intel_gpu_device": {
-                "label": "Zařízení Intel GPU",
-                "description": "Adresa sběrnice PCI nebo cesta k zařízení DRM (např. /dev/dri/card1) pro přiřazení statistik Intel GPU konkrétnímu zařízení, pokud je jich přítomno více."
+                "label": "Zařízení Intel GPU"
             }
         },
         "version_check": {
@@ -1344,8 +1341,7 @@
             "description": "Název prostředí kamery, pro které se model používá, například 'thermal'. Kamery vybírají model nastavením detect.scene na odpovídající hodnotu. Model 'default' používají kamery, které scénu nenastaví."
         },
         "devices": {
-            "label": "Hardware pro detekci",
-            "description": "Hardware, na kterém model běží, ve tvaru '<detector>' nebo '<detector>:<device>' (například 'edgetpu:pci:0' nebo 'openvino:GPU'). Vícenásobné uvedení stejného zařízení na něm spustí další procesy inference."
+            "label": "Hardware pro detekci"
         },
         "path": {
             "label": "Cesta k vlastnímu modelu detekce objektů",

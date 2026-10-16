@@ -4,8 +4,7 @@
     "storage": "Lagrings Statistik - Frigate",
     "logs": {
       "frigate": "Frigate Logs - Frigate",
-      "go2rtc": "Go2RTC Logs - Frigate",
-      "nginx": "Nginx Logs - Frigate"
+      "go2rtc": "Go2RTC Logs - Frigate"
     },
     "general": "Generelle statistikker - Frigate",
     "enrichments": "Beredningsstatistikker - Frigate"

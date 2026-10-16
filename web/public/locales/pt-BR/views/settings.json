@@ -1556,15 +1556,6 @@
       "none": "Nenhum",
       "useGlobalSetting": "Herdar da configuração global",
       "presetLabels": {
-        "preset-rpi-64-h264": "Raspberry Pi (H.264)",
-        "preset-vaapi": "VAAPI (GPU Intel/AMD)",
-        "preset-rpi-64-h265": "Raspberry Pi (H.265)",
-        "preset-intel-qsv-h264": "Intel QuickSync (H.264)",
-        "preset-intel-qsv-h265": "Intel QuickSync (H.265)",
-        "preset-nvidia": "GPU NVIDIA",
-        "preset-jetson-h264": "NVIDIA Jetson (H.264)",
-        "preset-jetson-h265": "NVIDIA Jetson (H.265)",
-        "preset-rkmpp": "Rockchip RKMPP",
         "preset-http-jpeg-generic": "HTTP JPEG (Genérico)",
         "preset-http-mjpeg-generic": "HTTP MJPEG (Genérico)",
         "preset-rtmp-generic": "RTMP (Genérico)",
@@ -1579,9 +1570,7 @@
         "preset-record-generic": "Gravação (Genérico, sem áudio)",
         "preset-record-jpeg": "Gravação - Câmeras JPEG",
         "preset-record-ubiquiti": "Gravação - Câmeras Ubiquiti",
-        "preset-record-mjpeg": "Gravação - Câmeras MJPEG",
-        "preset-apple-silicon-h264": "Apple Silicon (H.264)",
-        "preset-apple-silicon-h265": "Apple Silicon (H.265)"
+        "preset-record-mjpeg": "Gravação - Câmeras MJPEG"
       },
       "sameAsRecord": "Igual aos argumentos de saída da gravação"
     },
@@ -1893,13 +1882,10 @@
       "audioExclude": "Excluir",
       "hardwareNone": "Sem aceleração de hardware",
       "hardwareAuto": "Automático (recomendado)",
-      "hardwareVaapi": "VAAPI",
       "hardwareCuda": "CUDA",
-      "hardwareV4l2m2m": "V4L2 M2M",
       "hardwareDxva2": "DXVA2",
       "addVideoCodec": "Adicionar codec de vídeo",
       "addAudioCodec": "Adicionar codec de áudio",
-      "hardwareVideotoolbox": "VideoToolbox",
       "removeCodec": "Remover codec"
     },
     "sourceNumber": "Origem {{index}}"

@@ -1,17 +1,14 @@
-"""Utilities for services."""
+"""Native Windows service, diagnostics, and media-probe utilities."""
 
 import asyncio
 import contextlib
-import glob
 import json
 import logging
 import os
 import re
-import shutil
 import signal
 import subprocess as sp
 import time
-import traceback
 from datetime import datetime
 from enum import Enum
 from typing import Any
@@ -21,1197 +18,142 @@ import psutil
 import py3nvml.py3nvml as nvml
 import requests
 
-from frigate.const import (
-    DRIVER_AMD,
-    DRIVER_ENV_VAR,
-    FFMPEG_HWACCEL_NVIDIA,
-    FFMPEG_HWACCEL_VAAPI,
-    SHM_FRAMES_VAR,
-)
+from frigate.const import SHM_FRAMES_VAR
 from frigate.util.builtin import clean_camera_user_pass, escape_special_characters
 from frigate.util.env import UnknownVariableError, substitute_frigate_vars
 from frigate.util.platform import (
-    IS_WINDOWS,
-    get_fs_type,
-    get_shared_memory_total_mb,
     get_tmp_dir,
-    resolve_ffmpeg_binary,  # noqa: F401 - re-exported for backwards compatibility
+    resolve_ffmpeg_binary,  # noqa: F401 - public compatibility import
 )
 
-try:  # POSIX only
-    import resource
-except ImportError:  # pragma: no cover - Windows
-    resource = None  # type: ignore[assignment]
-
 logger = logging.getLogger(__name__)
-
-
 RESTART_MARKER_NAME = "restart.requested"
-"""File Frigate drops in its tmp directory on Windows before exiting for a restart.
-
-Native Windows has no supervisor to intercept the exit and start Frigate
-again, so the launcher the bootstrap script generates watches for this file:
-if it exists when the process exits, the launcher starts Frigate again, and
-otherwise it lets the process stay exited. It is how the UI's restart action
-and the watchdog's restart of a dead detector keep working outside of a
-console that a user restarts by hand.
-"""
+PROCESS_KEYWORDS = ("ffmpeg", "go2rtc", "frigate.", "python.exe")
 
 
 def _stop_self() -> None:
-    """Ask this process to shut down the way Ctrl+C would.
-
-    ``os.kill`` cannot be used for this on Windows. Every signal other than
-    ``CTRL_C_EVENT`` and ``CTRL_BREAK_EVENT`` is handed to ``TerminateProcess``
-    there, so ``os.kill(pid, SIGINT)`` does not run the SIGINT handler, it
-    kills the process outright: no ``finally`` block runs, the database is not
-    closed cleanly, recording segments are not finalized and every child
-    process is orphaned.
-
-    ``signal.raise_signal`` invokes whatever Python handler is installed for
-    the signal, on every platform. uvicorn installs its own SIGINT handler
-    while it is serving and only sets a flag from it, so the HTTP request
-    that asked for the restart still completes before the shutdown begins.
-    """
+    """Invoke the installed SIGINT handler for a graceful Windows shutdown."""
     signal.raise_signal(signal.SIGINT)
 
 
 def _mark_restart_requested() -> None:
-    """Tell the launcher Frigate should be started again after it exits.
-
-    Best effort: a launcher that never sees the marker simply leaves Frigate
-    stopped, which is the behaviour a user can recover from by hand, so a
-    failure to write the file is never worth crashing the shutdown over.
-    """
     try:
         path = os.path.join(get_tmp_dir(), RESTART_MARKER_NAME)
-
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as file:
             file.write("restart")
-
-        logger.debug("Restart marker written to %s", path)
     except OSError as err:
         logger.debug("Unable to write the restart marker: %s", err)
 
 
 def consume_restart_request() -> bool:
-    """Take Frigate's restart marker and say whether a restart was requested.
-
-    Frigate writes the marker just before it exits when it wants to be started
-    again: the UI's restart action, a restart after a config save, a detector
-    watchdog restart. Its supervisor consumes the marker exactly once and
-    starts Frigate again, which is also what keeps a stop that follows a
-    restart from starting a second Frigate.
-
-    Returns whether the marker was there. A marker that exists but cannot be
-    removed is still a request, so it is honoured rather than swallowed.
-    """
     path = os.path.join(get_tmp_dir(), RESTART_MARKER_NAME)
-
     try:
         os.remove(path)
     except FileNotFoundError:
         return False
     except OSError as err:
-        logger.debug("Unable to clear the restart marker %s: %s", path, err)
+        logger.debug("Unable to clear restart marker %s: %s", path, err)
         return True
-
-    logger.debug("Consumed the restart marker %s", path)
     return True
 
 
-def restart_frigate():
-    if IS_WINDOWS or not hasattr(signal, "SIGINT"):
-        # no supervisor outside of the container: exiting is the closest
-        # equivalent, and a launcher restarts the application if asked to
-        if IS_WINDOWS:
-            _mark_restart_requested()
-
-        _stop_self()
-        return
-
-    proc = psutil.Process(1)
-
-    # if this is running via s6, sigterm pid 1
-    if proc.name() == "s6-svscan":
-        try:
-            proc.terminate()
-            return
-        except psutil.AccessDenied:
-            # frigate runs unprivileged, so it cannot signal root's s6-svscan.
-            # exiting this process instead runs frigate/finish, which halts s6
-            logger.debug("Not permitted to signal s6-svscan, exiting instead")
-
-    # otherwise, just try and exit frigate
-    os.kill(os.getpid(), signal.SIGINT)
-
-
-def print_stack(sig, frame):
-    traceback.print_stack(frame)
-
-
-def listen():
-    # there is no way to send a signal to a process on Windows, so the stack
-    # dump helper only exists where SIGUSR1 does
-    sigusr1 = getattr(signal, "SIGUSR1", None)
-
-    if sigusr1 is not None:
-        signal.signal(sigusr1, print_stack)
-
-
-def get_cgroups_version() -> str:
-    """Determine what version of cgroups is enabled."""
-
-    if IS_WINDOWS:
-        return "unknown"
-
-    cgroup_path = "/sys/fs/cgroup"
-
-    if not os.path.ismount(cgroup_path):
-        logger.debug(f"{cgroup_path} is not a mount point.")
-        return "unknown"
-
-    try:
-        with open("/proc/mounts") as f:
-            mounts = f.readlines()
-
-        for mount in mounts:
-            mount_info = mount.split()
-            if mount_info[1] == cgroup_path:
-                fs_type = mount_info[2]
-                if fs_type == "cgroup2fs" or fs_type == "cgroup2":
-                    return "cgroup2"
-                elif fs_type == "tmpfs":
-                    return "cgroup"
-                else:
-                    logger.debug(
-                        f"Could not determine cgroups version: unhandled filesystem {fs_type}"
-                    )
-                break
-    except Exception as e:
-        logger.debug(f"Could not determine cgroups version: {e}")
-
-    return "unknown"
-
-
-def get_docker_memlimit_bytes() -> int:
-    """Get mem limit in bytes set in docker if present. Returns -1 if no limit detected."""
-
-    # check running a supported cgroups version
-    if get_cgroups_version() == "cgroup2":
-        memlimit_path = "/sys/fs/cgroup/memory.max"
-
-        try:
-            with open(memlimit_path) as f:
-                value = f.read().strip()
-
-            if value.isnumeric():
-                return int(value)
-            elif value.lower() == "max":
-                return -1
-        except Exception as e:
-            logger.debug(f"Unable to get docker memlimit: {e}")
-
-    return -1
-
-
-#: process names that identify a Frigate related process
-PROCESS_KEYWORDS = ("ffmpeg", "go2rtc", "frigate.", "python3", "python.exe")
-
-
-def get_cpu_stats() -> dict[str, dict]:
-    """Get cpu usages for each process id"""
-    usages = {}
-    docker_memlimit = get_docker_memlimit_bytes() / 1024
-    total_mem = psutil.virtual_memory().total / 1024
-
-    system_cpu = psutil.cpu_percent(
-        interval=None
-    )  # no interval as we don't want to be blocking
-    system_mem = psutil.virtual_memory()
-    usages["frigate.full_system"] = {
-        "cpu": str(system_cpu),
-        "mem": str(system_mem.percent),
-    }
-
-    for process in psutil.process_iter(
-        ["pid", "name", "cpu_percent", "cmdline", "memory_percent", "create_time"]
-    ):
-        pid = str(process.info["pid"])
-        try:
-            cpu_percent = process.info["cpu_percent"]
-            cmdline = " ".join(process.info["cmdline"] or []).rstrip()
-
-            if not any(keyword in cmdline for keyword in PROCESS_KEYWORDS):
-                continue
-
-            user, system, start_time = _process_cpu_times(process)
-            cpu_average_usage = _process_cpu_average(user, system, start_time)
-            mem_res = _process_resident_memory(process)
-
-            if docker_memlimit > 0:
-                mem_pct = round((mem_res / docker_memlimit) * 100, 1)
-            else:
-                mem_pct = round((mem_res / total_mem) * 100, 1)
-
-            usages[pid] = {
-                "cpu": str(cpu_percent),
-                "cpu_average": str(round(cpu_average_usage, 2)),
-                "mem": f"{mem_pct}",
-                "cmdline": clean_camera_user_pass(cmdline),
-            }
-        except Exception:
-            continue
-
-    return usages
+def restart_frigate() -> None:
+    """Request restart from the PowerShell launcher or SCM wrapper."""
+    _mark_restart_requested()
+    _stop_self()
 
 
 def _process_cpu_times(process: psutil.Process) -> tuple[float, float, float]:
-    """CPU time in seconds and process start time.
-
-    Reads /proc on Linux, where the tick counts give the same numbers psutil
-    reports, and falls back to psutil itself everywhere else.
-    """
-    if not IS_WINDOWS:
-        with open(f"/proc/{process.pid}/stat") as f:
-            stats = f.readline().split()
-
-        clk_tck = os.sysconf(os.sysconf_names["SC_CLK_TCK"])
-        return (
-            int(stats[13]) / clk_tck,
-            int(stats[14]) / clk_tck,
-            int(stats[21]) / clk_tck,
-        )
-
     times = process.cpu_times()
-    created = process.create_time()
-
-    return float(times.user), float(times.system), float(created)
+    return float(times.user), float(times.system), float(process.create_time())
 
 
 def _process_cpu_average(user: float, system: float, start_time: float) -> float:
-    """Average cpu percentage of a process over its lifetime.
-
-    The process start time is an uptime value on Linux and a unix timestamp on
-    Windows, so the elapsed time is computed against the matching clock.
-    """
-    if IS_WINDOWS:
-        elapsed = max(time.time() - start_time, 1.0)
-    else:
-        with open("/proc/uptime") as f:
-            system_uptime_sec = int(float(f.read().split()[0]))
-
-        elapsed = max(system_uptime_sec - start_time, 1.0)
-
-    return (user + system) * 100 / elapsed
+    return (user + system) * 100 / max(time.time() - start_time, 1.0)
 
 
 def _process_resident_memory(process: psutil.Process) -> float:
-    """Resident memory of a process in KB."""
-    if IS_WINDOWS:
-        return process.memory_info().rss / 1024
-
-    with open(f"/proc/{process.pid}/statm") as f:
-        mem_stats = f.readline().split()
-
-    return int(mem_stats[1]) * os.sysconf("SC_PAGE_SIZE") / 1024
+    return process.memory_info().rss / 1024
 
 
-# Name fragments Windows gives adapters that do not carry camera traffic:
-# Hyper-V/WSL vEthernet switches, VPN and tunnel adapters, loopback and
-# Bluetooth pseudo interfaces, and the WAN Miniport drivers.
-_WINDOWS_VIRTUAL_NIC_TAGS = (
-    "vethernet",
-    "loopback",
-    "bluetooth",
-    "virtual",
-    "vmware",
-    "virtualbox",
-    "hyper-v",
-    "tap-",
-    "tun-",
-    "wireguard",
-    "openvpn",
-    "wan miniport",
-    "wi-fi direct",
-    "kernel debug",
-    "teredo",
-    "isatap",
-    "local area connection*",
-)
+def get_cpu_stats() -> dict[str, dict]:
+    """Return system and Frigate-related Windows process usage."""
+    usages: dict[str, dict] = {}
+    total_mem = psutil.virtual_memory().total / 1024
+    memory = psutil.virtual_memory()
+    usages["frigate.full_system"] = {
+        "cpu": str(psutil.cpu_percent(interval=None)),
+        "mem": str(memory.percent),
+    }
 
-
-def get_physical_interfaces(interfaces) -> list:
-    if not interfaces:
-        return []
-
-    if IS_WINDOWS:
-        # psutil reports the same interface list without /proc/net/dev, but it
-        # includes every adapter Windows knows about, including Hyper-V and
-        # VPN pseudo interfaces that would never carry camera traffic. Only
-        # adapters that are up and not a known virtual kind are monitored.
-        stats = psutil.net_if_stats()
-
-        physical_interfaces = []
-
-        for name in psutil.net_if_addrs():
-            if not name.startswith(tuple(interfaces)):
+    for process in psutil.process_iter(
+        ["pid", "name", "cpu_percent", "cmdline", "create_time"]
+    ):
+        try:
+            process_name = str(process.info["name"] or "")
+            cmdline = " ".join(process.info["cmdline"] or []).rstrip()
+            searchable = f"{process_name} {cmdline}".casefold()
+            if not any(keyword.casefold() in searchable for keyword in PROCESS_KEYWORDS):
                 continue
-
-            lowered = name.lower()
-
-            if any(tag in lowered for tag in _WINDOWS_VIRTUAL_NIC_TAGS):
-                continue
-
-            if name in stats and not stats[name].isup:
-                continue
-
-            physical_interfaces.append(name)
-
-        return physical_interfaces
-
-    with open("/proc/net/dev") as file:
-        lines = file.readlines()
-
-    physical_interfaces = []
-    for line in lines:
-        if ":" in line:
-            interface = line.split(":")[0].strip()
-            for int in interfaces:
-                if interface.startswith(int):
-                    physical_interfaces.append(interface)
-
-    return physical_interfaces
-
-
-_bandwidth_warning_logged = False
-
-
-def get_bandwidth_stats(config) -> dict[str, dict]:
-    """Get bandwidth usages for each ffmpeg process id"""
-    global _bandwidth_warning_logged
-
-    if not hasattr(os, "geteuid"):
-        # nethogs is Linux only, and Windows has no capability model to grant
-        return {}
-
-    if os.geteuid() != 0:
-        if not _bandwidth_warning_logged:
-            logger.warning(
-                "Network bandwidth stats require root (nethogs needs CAP_NET_ADMIN/CAP_NET_RAW) "
-                "and are disabled; set FRIGATE_ROOT_SERVICES=frigate (or FRIGATE_RUN_AS_ROOT=true) "
-                "or disable telemetry.stats.network_bandwidth to silence this warning"
-            )
-            _bandwidth_warning_logged = True
-        return {}
-
-    usages = {}
-    top_command = ["nethogs", "-t", "-v0", "-c5", "-d1"] + get_physical_interfaces(
-        config.telemetry.network_interfaces
-    )
-
-    p = sp.run(
-        top_command,
-        encoding="ascii",
-        capture_output=True,
-    )
-
-    if p.returncode != 0:
-        logger.error(f"Error getting network stats :: {p.stderr}")
-        return usages
-    else:
-        lines = p.stdout.split("\n")
-        for line in lines:
-            stats = list(filter(lambda a: a != "", line.strip().split("\t")))
-            try:
-                if re.search(
-                    r"(^ffmpeg|\/go2rtc|frigate\.detector\.[a-z]+)/([0-9]+)/", stats[0]
-                ):
-                    process = stats[0].split("/")
-                    usages[process[len(process) - 2]] = {
-                        "bandwidth": round(float(stats[1]) + float(stats[2]), 1),
-                    }
-            except (IndexError, ValueError):
-                continue
-
+            user, system, started = _process_cpu_times(process)
+            mem_pct = round((_process_resident_memory(process) / total_mem) * 100, 1)
+            usages[str(process.info["pid"])] = {
+                "cpu": str(process.info["cpu_percent"]),
+                "cpu_average": str(round(_process_cpu_average(user, system, started), 2)),
+                "mem": str(mem_pct),
+                "name": process_name,
+                "cmdline": clean_camera_user_pass(cmdline),
+            }
+        except (psutil.Error, OSError, TypeError, ValueError):
+            continue
     return usages
 
 
-def is_vaapi_amd_driver() -> bool:
-    if IS_WINDOWS:
-        return False
-
-    # Use the explicitly configured driver, if available
-    driver = os.environ.get(DRIVER_ENV_VAR)
-    if driver:
-        return driver == DRIVER_AMD
-
-    # Otherwise, ask vainfo what is has autodetected
-    p = vainfo_hwaccel()
-
-    if p.returncode != 0:
-        logger.error(f"Unable to poll vainfo: {p.stderr}")
-        return False
-    else:
-        output = p.stdout.decode("unicode_escape").split("\n")
-
-        # VA Info will print out the friendly name of the driver
-        return any("AMD Radeon Graphics" in line for line in output)
-
-
-def get_amd_gpu_stats() -> dict[str, str] | None:
-    """Get stats using radeontop."""
-    if IS_WINDOWS:
-        return None
-
-    radeontop_command = ["radeontop", "-d", "-", "-l", "1"]
-
-    p = sp.run(
-        radeontop_command,
-        encoding="ascii",
-        capture_output=True,
-    )
-
-    if p.returncode != 0:
-        logger.error(f"Unable to poll radeon GPU stats: {p.stderr}")
-        return None
-    else:
-        usages = p.stdout.split(",")
-        results: dict[str, str] = {}
-
-        for hw in usages:
-            if "gpu" in hw:
-                results["gpu"] = f"{hw.strip().split(' ')[1].replace('%', '')}%"
-            elif "vram" in hw:
-                results["mem"] = f"{hw.strip().split(' ')[1].replace('%', '')}%"
-
-        return results
-
-
-_INTEL_FDINFO_SAMPLE_SECONDS = 1.0
-
-# Engines we track. Render/3D and Compute are pooled into "compute"; Video and
-# VideoEnhance into "dec" (VideoEnhance is the post-process engine that handles
-# VAAPI scaling/deinterlace/CSC, e.g. ffmpeg `-vf scale_vaapi=...`). The Copy
-# (DMA blitter) engine is intentionally ignored — it represents transparent
-# memory transfers, not user-visible GPU work.
-# i915 fdinfo keys (cumulative ns) → logical engine name.
-_I915_ENGINE_KEYS = {
-    "drm-engine-render": "render",
-    "drm-engine-video": "video",
-    "drm-engine-video-enhance": "video-enhance",
-    "drm-engine-compute": "compute",
-}
-# Xe fdinfo suffixes (cumulative cycles, paired with drm-total-cycles-*).
-_XE_ENGINE_KEYS = {
-    "rcs": "render",
-    "vcs": "video",
-    "vecs": "video-enhance",
-    "ccs": "compute",
-}
-_INTEL_DRM_DRIVERS = ("i915", "xe")
-_PCI_ADDRESS_RE = re.compile(
-    r"^[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-9a-fA-F]$"
-)
-
-
-def _resolve_intel_gpu_pdev(device: str | None) -> str | None:
-    """Map a configured GPU hint (/dev/dri/card1, renderD128, or a PCI bus
-    address) to its drm-pdev string so we can filter fdinfo entries to that
-    device. Returns None when no hint is supplied or it cannot be resolved."""
-    if not device:
-        return None
-
-    if _PCI_ADDRESS_RE.match(device):
-        return device
-
-    name = os.path.basename(device.rstrip("/"))
+def try_get_info(function, handle, default="N/A", sensor=None):
     try:
-        pdev = os.path.basename(os.path.realpath(f"/sys/class/drm/{name}/device"))
-    except OSError:
-        return None
-
-    # realpath does not raise on a nonexistent node; it returns the input
-    # path unchanged, so validate the result actually looks like a PCI
-    # address before trusting it.
-    return pdev if _PCI_ADDRESS_RE.match(pdev) else None
-
-
-def enumerate_drm_devices() -> dict[str, str]:
-    """Map each PCI-attached DRM device to its bound kernel driver.
-
-    Reads /sys/class/drm, which reflects every GPU on the host even when only
-    some render nodes are mapped into the container, so device presence can be
-    verified without /dev access. Returns {pdev: driver}, e.g.
-    {"0000:00:02.0": "i915"}.
-    """
-    if IS_WINDOWS:
-        return {}
-
-    devices: dict[str, str] = {}
-
-    try:
-        entries = os.listdir("/sys/class/drm")
-    except OSError:
-        return devices
-
-    for entry in entries:
-        device_dir = f"/sys/class/drm/{entry}/device"
-        pdev = os.path.basename(os.path.realpath(device_dir))
-
-        if not _PCI_ADDRESS_RE.match(pdev):
-            continue
-
-        try:
-            driver = os.path.basename(os.readlink(f"{device_dir}/driver"))
-        except OSError:
-            continue
-
-        devices[pdev] = driver
-
-    return devices
-
-
-def _read_intel_drm_fdinfo(target_pdev: str | None) -> dict | None:
-    """Snapshot DRM fdinfo for every Intel client visible in /proc.
-
-    Returns a dict keyed by (pdev, drm-client-id, pid) so the same context
-    seen via multiple file descriptors on a single process collapses to one
-    entry. Clients whose fdinfo carries no engine counters are still included
-    with an empty "engines" dict so the caller can distinguish "clients exist
-    but the kernel publishes no busyness" from "no clients at all". Returns
-    None when /proc itself cannot be scanned, which is a different failure
-    than a scan that finds nothing.
-    """
-    snapshot: dict = {}
-
-    try:
-        proc_entries = os.listdir("/proc")
-    except OSError:
-        return None
-
-    for entry in proc_entries:
-        if not entry.isdigit():
-            continue
-
-        fdinfo_dir = f"/proc/{entry}/fdinfo"
-        try:
-            fds = os.listdir(fdinfo_dir)
-        except (FileNotFoundError, PermissionError, NotADirectoryError, OSError):
-            continue
-
-        for fd in fds:
-            try:
-                with open(f"{fdinfo_dir}/{fd}") as f:
-                    content = f.read()
-            except (FileNotFoundError, PermissionError, OSError):
-                continue
-
-            if "drm-driver" not in content:
-                continue
-
-            fields: dict[str, str] = {}
-            for line in content.splitlines():
-                key, sep, value = line.partition(":")
-                if sep:
-                    fields[key.strip()] = value.strip()
-
-            driver = fields.get("drm-driver")
-            if driver not in ("i915", "xe"):
-                continue
-
-            pdev = fields.get("drm-pdev", "")
-            if target_pdev and pdev != target_pdev:
-                continue
-
-            client_id = fields.get("drm-client-id")
-            if not client_id:
-                continue
-
-            key = (pdev, client_id, entry)
-            if key in snapshot:
-                continue
-
-            engines: dict[str, tuple[int, int, int]] = {}
-
-            if driver == "i915":
-                for fkey, engine in _I915_ENGINE_KEYS.items():
-                    raw = fields.get(fkey)
-                    if not raw:
-                        continue
-                    try:
-                        engines[engine] = (int(raw.split()[0]), 0, 1)
-                    except (ValueError, IndexError):
-                        continue
-            else:
-                for suffix, engine in _XE_ENGINE_KEYS.items():
-                    busy_raw = fields.get(f"drm-cycles-{suffix}")
-                    total_raw = fields.get(f"drm-total-cycles-{suffix}")
-
-                    if not (busy_raw and total_raw):
-                        continue
-
-                    # drm-cycles-* is summed across every instance of the engine
-                    # class while drm-total-cycles-* tracks a single instance, so
-                    # busy/total scales up to the capacity (e.g. Battlemage
-                    # reports 2 for vcs/vecs). Capture it to divide back out;
-                    # absent means a single engine, so default to 1.
-                    capacity_raw = fields.get(f"drm-engine-capacity-{suffix}")
-
-                    try:
-                        capacity = int(capacity_raw.split()[0]) if capacity_raw else 1
-                    except (ValueError, IndexError):
-                        capacity = 1
-
-                    try:
-                        engines[engine] = (
-                            int(busy_raw.split()[0]),
-                            int(total_raw.split()[0]),
-                            max(1, capacity),
-                        )
-                    except (ValueError, IndexError):
-                        continue
-
-            snapshot[key] = {"driver": driver, "pid": entry, "engines": engines}
-
-    return snapshot
-
-
-def _idle_intel_gpu_stats(
-    target_pdev: str | None, intel_pdevs: dict[str, str]
-) -> dict[str, dict[str, Any]]:
-    """Build a 0% reading for the configured (or every) Intel GPU.
-
-    Used when the device is confirmed present but no DRM client is currently
-    attached, e.g. while camera processes are restarting. That is an idle
-    state, not a collection failure, so it must produce a valid reading:
-    returning None would latch the hwaccel error cooldown and blank GPU stats
-    for an hour over a momentary gap.
-    """
-    from frigate.stats.intel_gpu_info import intel_gpu_name_resolver
-
-    names = intel_gpu_name_resolver.get_names()
-    pdevs = [target_pdev] if target_pdev else sorted(intel_pdevs)
-
-    return {
-        pdev: {
-            "name": names.get(pdev) or "Intel iGPU",
-            "vendor": "intel",
-            "gpu": "0.0%",
-            "mem": "-%",
-            "compute": "0.0%",
-            "dec": "0.0%",
-        }
-        for pdev in pdevs
-    }
-
-
-def get_intel_gpu_stats(
-    intel_gpu_device: str | None,
-) -> dict[str, dict[str, Any]] | None:
-    """Get stats by reading DRM fdinfo files, bucketed per-pdev.
-
-    Each DRM client FD exposes monotonic per-engine busy counters via
-    /proc/<pid>/fdinfo/<fd>. For i915 this requires kernel 6.5 or newer:
-    earlier kernels omit the per-engine counters whenever GuC submission is
-    active, which is the default on 12th gen and newer. i915 never exposes
-    them on GPUs older than Broadwell (Gen8). Xe has exposed them since its
-    first release. We sample twice and divide busy-time deltas by
-    wall-clock to derive utilization. Render/3D and Compute are pooled into
-    "compute"; Video and VideoEnhance into "dec". Overall "gpu" is the sum of
-    those pools (clamped to 100%).
-
-    The return value is keyed by the GPU's drm-pdev string so multiple Intel
-    GPUs in the same system are reported separately. Each entry carries a
-    "name" populated from OpenVINO (falling back to the pdev) so callers can
-    surface a real device name in the UI.
-
-    A device that exists but has no attached DRM clients reports an idle 0%
-    reading. None is returned only for durable failures (no Intel GPU, a bad
-    intel_gpu_device config, unreadable /proc, or a kernel that publishes no
-    counters), each of which logs a distinct warning, and the caller latches
-    it against retries for an hour.
-    """
-    if IS_WINDOWS:
-        return None
-
-    from frigate.stats.intel_gpu_info import intel_gpu_name_resolver
-
-    target_pdev = _resolve_intel_gpu_pdev(intel_gpu_device)
-    if intel_gpu_device and not target_pdev:
-        logger.warning(
-            "Unable to collect Intel GPU stats: configured intel_gpu_device %s "
-            "does not exist or could not be resolved to a PCI device",
-            intel_gpu_device,
-        )
-        return None
-
-    drm_devices = enumerate_drm_devices()
-    intel_pdevs = {
-        pdev: driver
-        for pdev, driver in drm_devices.items()
-        if driver in _INTEL_DRM_DRIVERS
-    }
-
-    if not intel_pdevs:
-        logger.warning(
-            "Unable to collect Intel GPU stats: no Intel GPU (i915/xe) found in "
-            "/sys/class/drm. Check that the driver is loaded on the host"
-        )
-        return None
-
-    if target_pdev and target_pdev not in intel_pdevs:
-        logger.warning(
-            "Unable to collect Intel GPU stats: configured intel_gpu_device %s "
-            "resolved to %s (driver: %s), which is not an Intel GPU",
-            intel_gpu_device,
-            target_pdev,
-            drm_devices.get(target_pdev, "unknown"),
-        )
-        return None
-
-    snapshot_a = _read_intel_drm_fdinfo(target_pdev)
-    if snapshot_a is None:
-        logger.warning("Unable to collect Intel GPU stats: /proc could not be read")
-        return None
-
-    if not snapshot_a:
-        # No process currently holds the GPU open, e.g. while camera processes
-        # are restarting. The device is confirmed present, so report idle
-        # rather than an error; the next stats cycle re-samples normally.
-        logger.debug("No active DRM clients for Intel GPU, reporting idle")
-        return _idle_intel_gpu_stats(target_pdev, intel_pdevs)
-
-    if not any(client["engines"] for client in snapshot_a.values()):
-        # Clients exist but the kernel published no busyness for them, so
-        # there is nothing to sample and a second snapshot would not help.
-        # i915 suppresses per-client engine counters while GuC submission is
-        # active on kernels older than 6.5 (kernel commit 1324680a80eb lifted
-        # this), which covers stock Debian 12 and Ubuntu 22.04 on 12th gen
-        # and newer. It never publishes them for pre-Broadwell GPUs.
-        logger.warning(
-            "Unable to collect Intel GPU stats: found %d DRM client(s) for %s but "
-            "the kernel reports no usage for them. GPUs older than Broadwell "
-            "(5th gen) are not supported. 12th gen and newer need kernel 6.5+",
-            len(snapshot_a),
-            "/".join(sorted({client["driver"] for client in snapshot_a.values()})),
-        )
-        return None
-
-    start = time.monotonic()
-    time.sleep(_INTEL_FDINFO_SAMPLE_SECONDS)
-    elapsed_ns = (time.monotonic() - start) * 1e9
-
-    snapshot_b = _read_intel_drm_fdinfo(target_pdev)
-    if snapshot_b is None:
-        logger.warning("Unable to collect Intel GPU stats: /proc could not be read")
-        return None
-
-    if not snapshot_b or elapsed_ns <= 0:
-        # Every client disappeared during the sample window; transient by
-        # definition, so report idle instead of latching an error.
-        logger.debug(
-            "No DRM clients persisted across Intel GPU samples, reporting idle"
-        )
-        return _idle_intel_gpu_stats(target_pdev, intel_pdevs)
-
-    def _new_engine_pct() -> dict[str, float]:
-        return {"render": 0.0, "video": 0.0, "video-enhance": 0.0, "compute": 0.0}
-
-    per_pdev_engine_pct: dict[str, dict[str, float]] = {}
-    per_pdev_pid_pct: dict[str, dict[str, float]] = {}
-
-    for key, data_b in snapshot_b.items():
-        data_a = snapshot_a.get(key)
-        if not data_a or data_a["driver"] != data_b["driver"]:
-            continue
-
-        # Skip before the setdefault below so a counter-less client cannot
-        # register its pdev on its own.
-        if not data_b["engines"]:
-            continue
-
-        pdev = key[0]
-        engine_pct = per_pdev_engine_pct.setdefault(pdev, _new_engine_pct())
-        pid_pct = per_pdev_pid_pct.setdefault(pdev, {})
-
-        client_total = 0.0
-        for engine, (busy_b, total_b, capacity) in data_b["engines"].items():
-            if engine not in engine_pct:
-                continue
-
-            busy_a, total_a, _ = data_a["engines"].get(
-                engine, (busy_b, total_b, capacity)
-            )
-
-            if data_b["driver"] == "i915":
-                delta = max(0, busy_b - busy_a)
-                pct = min(100.0, delta / elapsed_ns * 100.0)
-            else:
-                delta_busy = max(0, busy_b - busy_a)
-                delta_total = total_b - total_a
-                if delta_total <= 0:
-                    continue
-                # Normalize by capacity so a class with N engine instances
-                # (busy summed across all N) reports 0-100%, not 0-N*100%.
-                pct = min(100.0, delta_busy / (delta_total * capacity) * 100.0)
-
-            engine_pct[engine] += pct
-            client_total += pct
-
-        pid_pct[data_b["pid"]] = pid_pct.get(data_b["pid"], 0.0) + client_total
-
-    if not per_pdev_engine_pct:
-        # Clients were seen in both snapshots but none persisted as the same
-        # (pdev, client-id, pid); process churn, so report idle.
-        logger.debug(
-            "No DRM clients persisted across Intel GPU samples, reporting idle"
-        )
-        return _idle_intel_gpu_stats(target_pdev, intel_pdevs)
-
-    names = intel_gpu_name_resolver.get_names()
-    results: dict[str, dict[str, Any]] = {}
-
-    for pdev, engine_pct in per_pdev_engine_pct.items():
-        for engine in engine_pct:
-            engine_pct[engine] = min(100.0, engine_pct[engine])
-
-        compute_pct = min(100.0, engine_pct["render"] + engine_pct["compute"])
-        dec_pct = min(100.0, engine_pct["video"] + engine_pct["video-enhance"])
-        overall_pct = min(100.0, compute_pct + dec_pct)
-
-        entry: dict[str, Any] = {
-            "name": names.get(pdev) or "Intel iGPU",
-            "vendor": "intel",
-            "gpu": f"{round(overall_pct, 2)}%",
-            "mem": "-%",
-            "compute": f"{round(compute_pct, 2)}%",
-            "dec": f"{round(dec_pct, 2)}%",
-        }
-
-        pid_pct = per_pdev_pid_pct.get(pdev)
-        if pid_pct:
-            entry["clients"] = {
-                pid: f"{round(min(100.0, pct), 2)}%" for pid, pct in pid_pct.items()
-            }
-
-        results[pdev] = entry
-
-    return results
-
-
-def get_openvino_npu_stats() -> dict[str, str] | None:
-    """Get NPU stats using openvino."""
-    if IS_WINDOWS:
-        return None
-
-    for accel_path in sorted(glob.glob("/sys/class/accel/accel*")):
-        try:
-            driver = os.path.basename(os.readlink(f"{accel_path}/device/driver"))
-        except OSError:
-            continue
-
-        if driver != "intel_vpu":
-            continue
-
-        try:
-            runtime_path = f"{accel_path}/device/power/runtime_active_time"
-            with open(runtime_path) as f:
-                initial_runtime = float(f.read().strip())
-            break
-        except (FileNotFoundError, PermissionError, ValueError):
-            continue
-    else:
-        return None
-
-    try:
-        initial_time = time.time()
-
-        # Sleep for 1 second to get an accurate reading
-        time.sleep(1.0)
-
-        # Read runtime value again
-        with open(runtime_path) as f:
-            current_runtime = float(f.read().strip())
-
-        current_time = time.time()
-
-        # Calculate usage percentage
-        runtime_diff = current_runtime - initial_runtime
-        time_diff = (current_time - initial_time) * 1000.0  # Convert to milliseconds
-
-        if time_diff > 0:
-            usage = min(100.0, max(0.0, (runtime_diff / time_diff * 100.0)))
-        else:
-            usage = 0.0
-
-        return {"npu": f"{round(usage, 2)}", "mem": "-%"}
-    except (FileNotFoundError, PermissionError, ValueError):
-        return None
-
-
-def get_rockchip_gpu_stats() -> dict[str, str | float] | None:
-    """Get GPU stats using rk."""
-    if IS_WINDOWS:
-        return None
-
-    try:
-        with open("/sys/kernel/debug/rkrga/load") as f:
-            content = f.read()
-    except FileNotFoundError:
-        return None
-
-    load_values = []
-    for line in content.splitlines():
-        match = re.search(r"load = (\d+)%", line)
-        if match:
-            load_values.append(int(match.group(1)))
-
-    if not load_values:
-        return None
-
-    average_load = f"{round(sum(load_values) / len(load_values), 2)}%"
-    stats: dict[str, str | float] = {"gpu": average_load, "mem": "-%"}
-
-    try:
-        with open("/sys/class/thermal/thermal_zone5/temp") as f:
-            line = f.readline().strip()
-            stats["temp"] = round(int(line) / 1000, 1)
-    except (FileNotFoundError, OSError, ValueError):
-        pass
-
-    return stats
-
-
-def get_rockchip_npu_stats() -> dict[str, float | str] | None:
-    """Get NPU stats using rk."""
-    if IS_WINDOWS:
-        return None
-
-    try:
-        with open("/sys/kernel/debug/rknpu/load") as f:
-            npu_output = f.read()
-
-            if "Core0:" in npu_output:
-                # multi core NPU
-                core_loads = re.findall(r"Core\d+:\s*(\d+)%", npu_output)
-            else:
-                # single core NPU
-                core_loads = re.findall(r"NPU load:\s+(\d+)%", npu_output)
-    except FileNotFoundError:
-        core_loads = None
-
-    if not core_loads:
-        return None
-
-    percentages = [int(load) for load in core_loads]
-    mean = round(sum(percentages) / len(percentages), 2)
-    stats: dict[str, float | str] = {"npu": mean, "mem": "-%"}
-
-    try:
-        with open("/sys/class/thermal/thermal_zone6/temp") as f:
-            line = f.readline().strip()
-            stats["temp"] = round(int(line) / 1000, 1)
-    except (FileNotFoundError, OSError, ValueError):
-        pass
-
-    return stats
-
-
-def get_axcl_npu_stats() -> dict[str, str | float] | None:
-    """Get NPU stats using axcl."""
-    if IS_WINDOWS:
-        return None
-
-    # Check if axcl-smi exists
-    axcl_smi_path = "/usr/bin/axcl/axcl-smi"
-    if not os.path.exists(axcl_smi_path):
-        return None
-
-    try:
-        # Run axcl-smi command to get NPU stats
-        axcl_command = [axcl_smi_path, "sh", "cat", "/proc/ax_proc/npu/top"]
-        p = sp.run(
-            axcl_command,
-            capture_output=True,
-            text=True,
-        )
-
-        if p.returncode != 0:
-            pass
-        else:
-            utilization = None
-
-            for line in p.stdout.strip().splitlines():
-                line = line.strip()
-                if line.startswith("utilization:"):
-                    match = re.search(r"utilization:(\d+)%", line)
-                    if match:
-                        utilization = float(match.group(1))
-
-            if utilization is not None:
-                stats: dict[str, str | float] = {"npu": utilization, "mem": "-%"}
-                return stats
-    except Exception:
-        pass
-
-    return None
-
-
-def try_get_info(f, h, default="N/A", sensor=None):
-    try:
-        if h:
-            if sensor is not None:
-                v = f(h, sensor)
-            else:
-                v = f(h)
-        else:
-            v = f()
+        if handle:
+            return function(handle, sensor) if sensor is not None else function(handle)
+        return function()
     except nvml.NVMLError_NotSupported:
-        v = default
-    return v
+        return default
+
+
+def _nvml_text(value: Any) -> str:
+    return value.decode("utf-8", errors="replace") if isinstance(value, bytes) else str(value)
 
 
 def get_nvidia_gpu_stats() -> dict[int, dict]:
+    """Read Windows NVIDIA utilization through NVML."""
     names: dict[str, int] = {}
-    results = {}
+    results: dict[int, dict] = {}
     try:
         nvml.nvmlInit()
-        deviceCount = nvml.nvmlDeviceGetCount()
-        for i in range(deviceCount):
-            handle = nvml.nvmlDeviceGetHandleByIndex(i)
-            gpu_name = nvml.nvmlDeviceGetName(handle)
-
-            # handle case where user has multiple of same GPU
-            if gpu_name in names:
-                names[gpu_name] += 1
-                gpu_name += f" ({names.get(gpu_name)})"
-            else:
-                names[gpu_name] = 1
-
-            meminfo = try_get_info(nvml.nvmlDeviceGetMemoryInfo, handle)
-            util = try_get_info(nvml.nvmlDeviceGetUtilizationRates, handle)
-            enc = try_get_info(nvml.nvmlDeviceGetEncoderUtilization, handle)
-            dec = try_get_info(nvml.nvmlDeviceGetDecoderUtilization, handle)
-            temp = try_get_info(
+        for index in range(nvml.nvmlDeviceGetCount()):
+            handle = nvml.nvmlDeviceGetHandleByIndex(index)
+            base_name = _nvml_text(nvml.nvmlDeviceGetName(handle))
+            names[base_name] = names.get(base_name, 0) + 1
+            name = base_name if names[base_name] == 1 else f"{base_name} ({names[base_name]})"
+            memory = try_get_info(nvml.nvmlDeviceGetMemoryInfo, handle)
+            utilization = try_get_info(nvml.nvmlDeviceGetUtilizationRates, handle)
+            encoder = try_get_info(nvml.nvmlDeviceGetEncoderUtilization, handle)
+            decoder = try_get_info(nvml.nvmlDeviceGetDecoderUtilization, handle)
+            temperature = try_get_info(
                 nvml.nvmlDeviceGetTemperature, handle, default=None, sensor=0
             )
-            pstate = try_get_info(nvml.nvmlDeviceGetPowerState, handle, default=None)
-
-            if util != "N/A":
-                gpu_util = util.gpu
-            else:
-                gpu_util = 0
-
-            if meminfo != "N/A":
-                gpu_mem_util = meminfo.used / meminfo.total * 100
-            else:
-                gpu_mem_util = -1
-
-            if temp != "N/A" and temp is not None:
-                temp = float(temp)
-            else:
-                temp = None
-
-            if enc != "N/A":
-                enc_util = enc[0]
-            else:
-                enc_util = -1
-
-            if dec != "N/A":
-                dec_util = dec[0]
-            else:
-                dec_util = -1
-
-            results[i] = {
-                "name": gpu_name,
-                "gpu": gpu_util,
-                "mem": gpu_mem_util,
-                "enc": enc_util,
-                "dec": dec_util,
-                "pstate": pstate or "unknown",
-                "temp": temp,
+            power_state = try_get_info(nvml.nvmlDeviceGetPowerState, handle, default=None)
+            results[index] = {
+                "name": name,
+                "gpu": utilization.gpu if utilization != "N/A" else 0,
+                "mem": memory.used / memory.total * 100 if memory != "N/A" else -1,
+                "enc": encoder[0] if encoder != "N/A" else -1,
+                "dec": decoder[0] if decoder != "N/A" else -1,
+                "pstate": power_state or "unknown",
+                "temp": float(temperature) if temperature is not None else None,
             }
     except Exception:
-        pass
-    finally:
-        return results
-
-
-def get_jetson_stats() -> dict[str, str] | None:
-    if IS_WINDOWS:
-        return None
-
-    results: dict[str, str] = {}
-
-    try:
-        results["mem"] = "-"  # no discrete gpu memory
-
-        if os.path.exists("/sys/devices/gpu.0/load"):
-            with open("/sys/devices/gpu.0/load") as f:
-                gpuload = float(f.readline()) / 10
-                results["gpu"] = f"{gpuload}%"
-        elif os.path.exists("/sys/devices/platform/gpu.0/load"):
-            with open("/sys/devices/platform/gpu.0/load") as f:
-                gpuload = float(f.readline()) / 10
-                results["gpu"] = f"{gpuload}%"
-        else:
-            results["gpu"] = "-"
-    except Exception:
-        return None
-
+        logger.debug("Unable to query NVIDIA GPU stats", exc_info=True)
     return results
-
-
-def get_hailo_temps() -> dict[str, float]:
-    """Get temperatures for Hailo devices."""
-    if IS_WINDOWS:
-        return {}
-
-    try:
-        from hailo_platform import Device
-    except ModuleNotFoundError:
-        return {}
-
-    temps = {}
-
-    try:
-        device_ids = Device.scan()
-        for i, device_id in enumerate(device_ids):
-            try:
-                with Device(device_id) as device:
-                    temp_info = device.control.get_chip_temperature()
-
-                    # Get board name and normalise it
-                    identity = device.control.identify()
-                    board_name = None
-                    for line in str(identity).split("\n"):
-                        if line.startswith("Board Name:"):
-                            board_name = (
-                                line.split(":", 1)[1].strip().lower().replace("-", "")
-                            )
-                            break
-
-                    if not board_name:
-                        board_name = f"hailo{i}"
-
-                    # Use indexed name if multiple devices, otherwise just the board name
-                    device_name = (
-                        f"{board_name}-{i}" if len(device_ids) > 1 else board_name
-                    )
-
-                    # ts1_temperature is also available, but appeared to be the same as ts0 in testing.
-                    temps[device_name] = round(temp_info.ts0_temperature, 1)
-            except Exception as e:
-                logger.debug(
-                    f"Failed to get temperature for Hailo device {device_id}: {e}"
-                )
-                continue
-    except Exception as e:
-        logger.debug(f"Failed to scan for Hailo devices: {e}")
-
-    return temps
-
 
 # Snapshot: environment_vars lands in os.environ after import and must not
 # be able to enable this.
@@ -1219,29 +161,8 @@ _GO2RTC_ARBITRARY_EXEC_ENV = os.environ.get("GO2RTC_ALLOW_ARBITRARY_EXEC")
 
 
 def is_go2rtc_arbitrary_exec_allowed() -> bool:
-    """Read the GO2RTC_ALLOW_ARBITRARY_EXEC override from env, docker
-    secrets, or the Home Assistant add-on options file."""
-    raw: str | None = None
-    if _GO2RTC_ARBITRARY_EXEC_ENV is not None:
-        raw = _GO2RTC_ARBITRARY_EXEC_ENV
-    elif (
-        os.path.isdir("/run/secrets")
-        and os.access("/run/secrets", os.R_OK)
-        and "GO2RTC_ALLOW_ARBITRARY_EXEC" in os.listdir("/run/secrets")
-    ):
-        try:
-            with open("/run/secrets/GO2RTC_ALLOW_ARBITRARY_EXEC") as f:
-                raw = f.read().strip()
-        except OSError:
-            raw = None
-    elif os.path.isfile("/data/options.json"):
-        try:
-            with open("/data/options.json") as f:
-                options = json.loads(f.read())
-            raw = options.get("go2rtc_allow_arbitrary_exec")
-        except (OSError, json.JSONDecodeError):
-            raw = None
-
+    """Read the process-start Windows environment override."""
+    raw = _GO2RTC_ARBITRARY_EXEC_ENV
     return raw is not None and str(raw).lower() in ("true", "1", "yes")
 
 
@@ -1557,28 +478,6 @@ async def analyze_record_keyframes(
     return result
 
 
-def vainfo_hwaccel(device_name: str | None = None) -> sp.CompletedProcess:
-    """Run vainfo."""
-    if not device_name:
-        cmd = ["vainfo"]
-    else:
-        if os.path.isabs(device_name) and device_name.startswith("/dev/dri/"):
-            device_path = device_name
-        else:
-            device_path = f"/dev/dri/{device_name}"
-
-        cmd = ["vainfo", "--display", "drm", "--device", device_path]
-
-    try:
-        return sp.run(cmd, capture_output=True)
-    except FileNotFoundError:
-        # vainfo belongs to libva, which Windows has no equivalent of, and a
-        # minimal Linux install may not have it either
-        return sp.CompletedProcess(
-            cmd, 127, b"", b"vainfo was not found on this system"
-        )
-
-
 def get_nvidia_driver_info() -> dict[str, Any]:
     """Get general hardware info for nvidia GPU."""
     results = {}
@@ -1623,47 +522,17 @@ def get_go2rtc_hardware_sources() -> list[dict[str, str]]:
 
 
 def auto_detect_hwaccel() -> str:
-    """Detect hwaccel args by default."""
-    sources = get_go2rtc_hardware_sources()
+    """Resolve automatic decoding against native Windows accelerators."""
+    from frigate.util.hwaccel import windows_hwaccel_preset
 
-    if IS_WINDOWS:
-        # Windows has no libva and no dummy device to probe: the presets come
-        # from the accelerators go2rtc reports, or from the GPUs Windows
-        # reports when go2rtc is not up yet
-        from frigate.util.hwaccel import windows_hwaccel_preset
-
-        preset = windows_hwaccel_preset(sources)
-
-        if preset:
-            logger.info("Automatically detected %s for video decoding", preset)
-            return preset
-
-        logger.warning(
-            "Did not detect a hardware decoder, set ffmpeg.hwaccel_args to a "
-            "preset-windows-* value if this machine has a GPU"
-        )
-        return ""
-
-    cuda = False
-    vaapi = False
-
-    for source in sources:
-        if "cuda" in source.get("url", "") and source.get("name") == "OK":
-            cuda = True
-
-        if "vaapi" in source.get("url", "") and source.get("name") == "OK":
-            vaapi = True
-
-    if cuda:
-        logger.info("Automatically detected nvidia hwaccel for video decoding")
-        return FFMPEG_HWACCEL_NVIDIA
-
-    if vaapi:
-        logger.info("Automatically detected vaapi hwaccel for video decoding")
-        return FFMPEG_HWACCEL_VAAPI
+    preset = windows_hwaccel_preset(get_go2rtc_hardware_sources())
+    if preset:
+        logger.info("Automatically detected %s for video decoding", preset)
+        return preset
 
     logger.warning(
-        "Did not detect hwaccel, using a GPU for accelerated video decoding is highly recommended"
+        "Did not detect a hardware decoder; set ffmpeg.hwaccel_args to a "
+        "preset-windows-* value if this machine has a supported GPU"
     )
     return ""
 
@@ -1945,7 +814,7 @@ def process_logs(
         if len(clean_line) < 10:
             continue
 
-        # Handle cases where S6 does not include date in log line
+        # Normalize native tool output that does not include a timestamp.
         if "  " not in clean_line:
             clean_line = f"{datetime.now()}  {clean_line}"
 
@@ -1997,97 +866,36 @@ def process_logs(
 
 
 def set_file_limit() -> None:
-    # Windows has no file descriptor limit to raise, and no resource module
-    if resource is None:
-        return
-
-    # Newer versions of containerd 2.X+ impose a very low soft file limit of 1024
-    # This applies to OSs like HA OS (see https://github.com/home-assistant/operating-system/issues/4110)
-    # Attempt to increase this limit
-    soft_limit = int(os.getenv("SOFT_FILE_LIMIT", "65536") or "65536")
-
-    current_soft, current_hard = resource.getrlimit(resource.RLIMIT_NOFILE)
-    logger.debug(f"Current file limits - Soft: {current_soft}, Hard: {current_hard}")
-
-    new_soft = min(soft_limit, current_hard)
-    resource.setrlimit(resource.RLIMIT_NOFILE, (new_soft, current_hard))
-    logger.debug(
-        f"File limit set. New soft limit: {new_soft}, Hard limit remains: {current_hard}"
-    )
+    """Windows manages handle limits dynamically; no RLIMIT adjustment exists."""
 
 
 def calculate_shm_requirements(config) -> dict:
-    """Shared memory available for decoded frames.
+    """Describe page-file-backed shared memory used by decoded frames."""
+    memory = psutil.virtual_memory()
+    total_mb = round(memory.total / pow(2, 20), 1)
+    free_mb = round(memory.available / pow(2, 20), 1)
 
-    Inside the container frames live in /dev/shm, which has a fixed size and
-    therefore has to be checked against what the cameras need. On Windows and
-    macOS shared memory is backed by the page file, so there is no separate
-    limit to warn about and every camera gets the configured frame count. The
-    same numbers are still reported so the storage panel has something to show.
-    """
-    shm_total = get_shared_memory_total_mb()
-
-    if shm_total is None:
-        total_mb = round(psutil.virtual_memory().total / pow(2, 20), 1)
-        used_mb = 0.0
-        free_mb = round(psutil.virtual_memory().available / pow(2, 20), 1)
-        mount_type = get_fs_type(get_tmp_dir())
-        page_file_backed = True
-    else:
-        try:
-            storage_stats = shutil.disk_usage(get_tmp_dir())
-        except (FileNotFoundError, OSError):
-            return {}
-
-        total_mb = round(storage_stats.total / pow(2, 20), 1)
-        used_mb = round(storage_stats.used / pow(2, 20), 1)
-        free_mb = round(storage_stats.free / pow(2, 20), 1)
-        mount_type = get_fs_type(get_tmp_dir())
-        page_file_backed = False
-
-    # required for log files + the web server cache
-    min_req_shm = 40 + 10
-
-    if config.birdseye.restream:
-        min_req_shm += 8
-
-    available_shm = total_mb - min_req_shm
-    cam_total_frame_size = 0.0
-
+    reserved_mb = 50 + (8 if config.birdseye.restream else 0)
+    frame_size_mb = 0.0
     for camera in config.cameras.values():
         if camera.enabled_in_config and camera.detect.width and camera.detect.height:
-            cam_total_frame_size += round(
+            frame_size_mb += round(
                 (camera.detect.width * camera.detect.height * 1.5 + 270480) / 1048576,
                 1,
             )
 
-    # leave room for 2 cameras that are added dynamically, if a user wants to add more cameras they may need to increase the SHM size and restart after adding them.
-    cam_total_frame_size += 2 * round(
-        (1280 * 720 * 1.5 + 270480) / 1048576,
-        1,
-    )
-
+    # Reserve capacity for two cameras added at runtime.
+    frame_size_mb += 2 * round((1280 * 720 * 1.5 + 270480) / 1048576, 1)
     configured_frames = int(os.environ.get(SHM_FRAMES_VAR, "50"))
-
-    if page_file_backed:
-        shm_frame_count = configured_frames
-    else:
-        shm_frame_count = min(
-            configured_frames,
-            int(available_shm / cam_total_frame_size),
-        )
-
-    # minimum required shm recommendation
-    min_shm = round(min_req_shm + cam_total_frame_size * 20)
 
     return {
         "total": total_mb,
-        "used": used_mb,
+        "used": round(total_mb - free_mb, 1),
         "free": free_mb,
-        "mount_type": mount_type,
-        "page_file_backed": page_file_backed,
-        "available": round(available_shm, 1),
-        "camera_frame_size": cam_total_frame_size,
-        "shm_frame_count": shm_frame_count,
-        "min_shm": min_shm,
+        "mount_type": "pagefile",
+        "page_file_backed": True,
+        "available": round(total_mb - reserved_mb, 1),
+        "camera_frame_size": frame_size_mb,
+        "shm_frame_count": configured_frames,
+        "min_shm": round(reserved_mb + frame_size_mb * 20),
     }

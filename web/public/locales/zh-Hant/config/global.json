@@ -44,8 +44,7 @@
         "description": "開啟後，Frigate 將以安全模式啟動，將會關閉部分功能，以便排查問題。"
     },
     "environment_vars": {
-        "label": "環境變數",
-        "description": "用於在 Home Assistant OS 中為 Frigate 程序設定的環境變數。非 HAOS 使用者不能使用該配置項，而必須使用 Docker 的環境變數配置。"
+        "label": "環境變數"
     },
     "logger": {
         "label": "日誌",
@@ -208,7 +207,6 @@
         },
         "listen": {
             "label": "監聽埠配置",
-            "description": "內部和外部監聽埠的配置。此選項適用於高階使用者。對於大多數用例，建議在 Docker compose 檔案的 ports 部分進行更改。",
             "internal": {
                 "label": "內部埠",
                 "description": "Frigate 的內部監聽埠（預設 5000）。"
@@ -278,8 +276,7 @@
                 "description": "為攝影機 ffmpeg 程序和偵測器啟用按程序網路頻寬監控（需要權限）。"
             },
             "intel_gpu_device": {
-                "label": "Intel GPU 裝置",
-                "description": "當系統存在多個 Intel 顯示卡時，用於將顯示卡執行資料繫結到指定裝置的 PCI 匯流排位址或 DRM 裝置路徑（範例：/dev/dri/card1）。"
+                "label": "Intel GPU 裝置"
             }
         },
         "version_check": {

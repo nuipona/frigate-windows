@@ -100,30 +100,10 @@ class TestAudioSpawnIfNeeded(unittest.TestCase):
         config = _build_config()
         processor = self._processor(config, {"front_door": object()})
 
-        with (
-            patch("frigate.events.audio.IS_WINDOWS", True),
-            patch("frigate.events.audio.AudioEventMaintainer") as maintainer,
-        ):
+        with patch("frigate.events.audio.AudioEventMaintainer") as maintainer:
             processor.spawn_if_needed(config.cameras["front_door"])
 
         self.assertTrue(maintainer.return_value.daemon)
-
-    def test_stop_unblocks_ffmpeg_audio_read(self):
-        maintainer = AudioEventMaintainer.__new__(AudioEventMaintainer)
-        maintainer.camera_stop_event = MagicMock()
-        maintainer.audio_listener = MagicMock()
-        maintainer.logger = MagicMock()
-
-        with (
-            patch("frigate.events.audio.IS_WINDOWS", False),
-            patch("frigate.events.audio.request_ffmpeg_stop") as stop_ffmpeg,
-        ):
-            maintainer.stop()
-
-        maintainer.camera_stop_event.set.assert_called_once()
-        stop_ffmpeg.assert_called_once_with(
-            maintainer.audio_listener, maintainer.logger
-        )
 
     def test_windows_audio_stop_uses_a_nonblocking_quit_poll(self):
         maintainer = AudioEventMaintainer.__new__(AudioEventMaintainer)
@@ -131,10 +111,7 @@ class TestAudioSpawnIfNeeded(unittest.TestCase):
         maintainer.audio_listener = MagicMock()
         maintainer.logger = MagicMock()
 
-        with (
-            patch("frigate.events.audio.IS_WINDOWS", True),
-            patch("frigate.events.audio.request_ffmpeg_stop") as stop_ffmpeg,
-        ):
+        with patch("frigate.events.audio.request_ffmpeg_stop") as stop_ffmpeg:
             maintainer.stop()
 
         maintainer.camera_stop_event.set.assert_called_once()
@@ -147,7 +124,6 @@ class TestAudioSpawnIfNeeded(unittest.TestCase):
         camera = config.cameras["front_door"]
 
         with (
-            patch("frigate.events.audio.IS_WINDOWS", True),
             patch("frigate.events.audio.AudioTfl"),
             patch("frigate.events.audio.LogPipe") as logpipe,
             patch("frigate.events.audio.InterProcessRequestor"),
@@ -181,15 +157,12 @@ class TestAudioShutdown(unittest.TestCase):
         }
         return processor, threads
 
-    def test_windows_thread_joins_share_one_deadline(self):
+    def test_thread_joins_share_one_deadline(self):
         processor, threads = self._processor_with_threads(3)
 
-        with (
-            patch("frigate.events.audio.IS_WINDOWS", True),
-            patch(
-                "frigate.events.audio.time.monotonic",
-                side_effect=[100.0, 100.0, 104.0, 111.0],
-            ),
+        with patch(
+            "frigate.events.audio.time.monotonic",
+            side_effect=[100.0, 100.0, 104.0, 111.0],
         ):
             processor._stop_audio_threads()
 
@@ -200,37 +173,14 @@ class TestAudioShutdown(unittest.TestCase):
         for thread in threads:
             thread.stop.assert_called_once()
 
-    def test_linux_keeps_the_existing_per_thread_join_budget(self):
-        processor, threads = self._processor_with_threads(2)
-
-        with patch("frigate.events.audio.IS_WINDOWS", False):
-            processor._stop_audio_threads()
-
-        for thread in threads:
-            self.assertEqual(
-                [call.args for call in thread.join.call_args_list],
-                [(1,), (10,)],
-            )
-            thread.stop.assert_called_once()
-
-    def test_windows_audio_process_join_is_bounded(self):
+    def test_audio_process_join_is_bounded(self):
         process = MagicMock()
         process.is_alive.return_value = False
 
-        with patch("frigate.events.audio.IS_WINDOWS", True):
-            join_audio_process(process)
+        join_audio_process(process)
 
         process.join.assert_called_once_with(timeout=AUDIO_PROCESS_SHUTDOWN_TIMEOUT)
         process.is_alive.assert_called_once()
-
-    def test_linux_audio_process_join_remains_unbounded(self):
-        process = MagicMock()
-
-        with patch("frigate.events.audio.IS_WINDOWS", False):
-            join_audio_process(process)
-
-        process.join.assert_called_once_with()
-        process.is_alive.assert_not_called()
 
     def test_log_pipe_can_be_a_daemon_thread(self):
         logpipe = LogPipe("test.audio.logpipe", daemon=True)

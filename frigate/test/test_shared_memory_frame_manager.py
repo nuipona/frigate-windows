@@ -20,7 +20,6 @@ from frigate.embeddings.maintainer import EmbeddingMaintainer
 from frigate.events.types import EventStateEnum, EventTypeEnum
 from frigate.track.object_processing import TrackedObjectProcessor
 from frigate.util.image import SharedMemoryFrameManager
-from frigate.util.platform import IS_WINDOWS
 from frigate.video.ffmpeg import capture_frames
 
 
@@ -40,31 +39,6 @@ class TestSharedMemoryFrameManagerGet(unittest.TestCase):
         small = _fake_shm(size=100)
         current = _fake_shm(size=2_500)
         manager.shm_store["cam_frame0"] = small
-
-        with patch("frigate.util.image.UntrackedSharedMemory", return_value=current):
-            arr = manager.get("cam_frame0", (50, 50))
-
-        self.assertIsNotNone(arr)
-        self.assertEqual(arr.shape, (50, 50))
-        self.assertIs(manager.shm_store["cam_frame0"], current)
-
-    @unittest.skipIf(
-        IS_WINDOWS,
-        "Windows reports a page aligned size for an opened segment, so a "
-        "larger cached ref cannot be told apart from the current one",
-    )
-    def test_get_reopens_when_cached_segment_is_larger_than_shape(self) -> None:
-        """Symmetric to the smaller-cache case: when detect resolution drops,
-        the SHM is unlinked and recreated at a smaller size. A cached ref to
-        the old, larger segment still satisfies any size check but points at
-        an orphaned inode whose stale bytes get reinterpreted at the new
-        shape — producing miscolored, distorted YUV frames downstream. Drop
-        the cache so we reopen by name and bind to the current segment."""
-        manager = SharedMemoryFrameManager()
-
-        old_large = _fake_shm(size=10_000)
-        current = _fake_shm(size=2_500)
-        manager.shm_store["cam_frame0"] = old_large
 
         with patch("frigate.util.image.UntrackedSharedMemory", return_value=current):
             arr = manager.get("cam_frame0", (50, 50))

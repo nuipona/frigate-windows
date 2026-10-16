@@ -1,220 +1,89 @@
 ---
 id: reverse_proxy
-title: Setting up a reverse proxy
+title: Reverse Proxy
 ---
 
-This guide outlines the basic configuration steps needed to set up a reverse proxy in front of your Frigate instance.
+# Windows reverse proxy
 
-A reverse proxy is typically needed if you want to set up Frigate on a custom URL, on a subdomain, or on a host serving multiple sites. It could also be used to set up your own authentication provider or for more advanced HTTP routing.
+Frigate already provides an authenticated HTTPS listener on port `8971`. A reverse proxy is optional and is useful for a managed certificate, a shared hostname, or an external identity provider.
 
-Before setting up a reverse proxy, check if any of the built-in functionality in Frigate suits your needs:
-|Topic|Docs|
-|-|-|
-|TLS|Please see the `tls` [configuration option](../configuration/tls.md)|
-|Authentication|Please see the [authentication](../configuration/authentication.md) documentation|
-|IPv6|[Enabling IPv6](../configuration/advanced/system.md#enabling-ipv6)
+## Safe topology
 
-**Note about TLS**
-When using a reverse proxy, the TLS session is usually terminated at the proxy, sending the internal request over plain HTTP. If this is the desired behavior, TLS must first be disabled in Frigate, or you will encounter an HTTP 400 error: "The plain HTTP request was sent to HTTPS port."
-To disable TLS, set the following in your Frigate configuration:
+Run IIS, Caddy, or another Windows proxy on the same machine or a trusted host. Forward to Frigate's **public** listener. Never publish the loopback-only internal listener on port `5000`.
 
-```yml
-tls:
+The proxy must support:
+
+- long-lived streaming responses;
+- WebSocket upgrades for `/ws`, `/live`, and go2rtc routes;
+- large uploads where model or configuration uploads are enabled;
+
+Publish Frigate at the root of a dedicated hostname. The native gateway does not support hosting the UI beneath a path prefix.
+
+If the proxy connects to Frigate over HTTPS with its generated certificate, configure the proxy to trust that certificate. Alternatively, bind Frigate's public listener to loopback with `FRIGATE_WEB_HOST=127.0.0.1`, disable Frigate TLS, and let the local proxy provide TLS. Do not use plain HTTP across an untrusted network.
+
+## Forwarded client addresses
+
+Frigate ignores caller-supplied forwarding data unless the immediate proxy is listed under `auth.trusted_proxies`. Add only the proxy's address or a narrow network:
+
+```yaml
+auth:
+  trusted_proxies:
+    - 127.0.0.1/32
+    - ::1/128
+```
+
+The setting controls client-address resolution for login rate limiting; it does not bypass authentication.
+
+## Identity-provider authentication
+
+To let a proxy supply the authenticated user and role, disable native authentication and require a shared secret:
+
+```yaml
+auth:
   enabled: false
+  roles:
+    driveway_viewers:
+      - driveway
+
+proxy:
+  header_map:
+    user: X-Remote-User
+    role: X-Remote-Groups
+    role_map:
+      admin:
+        - frigate-admins
+      driveway_viewers:
+        - driveway-team
+  default_role: none
+  auth_secret: "{FRIGATE_PROXY_AUTH_SECRET}"
 ```
 
-:::warning
-A reverse proxy can be used to secure access to an internal web server, but the user will be entirely reliant on the steps they have taken. You must ensure you are following security best practices.
-This page does not attempt to outline the specific steps needed to secure your internal website.
-Please use your own knowledge to assess and vet the reverse proxy software before you install anything on your system.
-:::
+Set `FRIGATE_PROXY_AUTH_SECRET` in the Windows service environment or `secrets.yaml`. Configure the proxy to overwrite, not append, these headers and send:
 
-## WebSocket support
-
-Frigate relies on WebSockets for real-time communication between the browser and the backend. Features such as camera controls (enabling/disabling a camera, audio, detect, recordings, and other toggles), live stream playback, and other live-updating parts of the UI will not function correctly if WebSocket connections are not proxied.
-
-Your reverse proxy must be configured to forward the `Upgrade` and `Connection` headers so that WebSocket connections can be established. Each proxy example below already includes the directives needed to do this, but if you are adapting your own configuration, ensure these headers are passed through.
-
-Note that some proxies disable WebSocket support by default. For example, Nginx Proxy Manager has a "Websockets Support" toggle that must be enabled.
-
-## Proxies
-
-There are many solutions available to implement reverse proxies and the community is invited to help out documenting others through a contribution to this page.
-
-- [Apache2](#apache2-reverse-proxy)
-- [Nginx](#nginx-reverse-proxy)
-- [Traefik](#traefik-reverse-proxy)
-- [Caddy](#caddy-reverse-proxy)
-
-## Apache2 Reverse Proxy
-
-In the configuration examples below, only the directives relevant to the reverse proxy approach above are included.
-On Debian Apache2 the configuration file will be named along the lines of `/etc/apache2/sites-available/cctv.conf`
-
-### Step 1: Configure the Apache2 Reverse Proxy
-
-Make life easier for yourself by presenting your Frigate interface as a DNS sub-domain rather than as a sub-folder of your main domain.
-Here we access Frigate via https://cctv.mydomain.co.uk
-
-```xml
-<VirtualHost *:443>
-    ServerName cctv.mydomain.co.uk
-
-    ProxyPreserveHost On
-    ProxyPass "/"  "http://frigatepi.local:8971/"
-    ProxyPassReverse "/"  "http://frigatepi.local:8971/"
-
-    ProxyPass /ws ws://frigatepi.local:8971/ws
-    ProxyPassReverse /ws ws://frigatepi.local:8971/ws
-
-    ProxyPass /live/ ws://frigatepi.local:8971/live/
-    ProxyPassReverse /live/ ws://frigatepi.local:8971/live/
-
-    RewriteEngine on
-    RewriteCond %{HTTP:Upgrade} =websocket [NC]
-    RewriteRule /(.*)  ws://frigatepi.local:8971/$1 [P,L]
-    RewriteCond %{HTTP:Upgrade} !=websocket [NC]
-    RewriteRule /(.*)  http://frigatepi.local:8971/$1 [P,L]
-</VirtualHost>
+```text
+X-Proxy-Secret: <the same high-entropy secret>
+X-Remote-User: <authenticated user>
+X-Remote-Groups: <identity-provider groups>
 ```
 
-### Step 2: Use SSL to encrypt access to your Frigate instance
+When mapped proxy identity is active, the native gateway rejects a request without the matching secret. It strips client-supplied identity and secret headers before routing. Use `default_role: none` so an unknown group fails closed.
 
-Whilst this won't, on its own, prevent access to your Frigate webserver it will encrypt all content (such as login credentials).
-Installing SSL is beyond the scope of this document but [Let's Encrypt](https://letsencrypt.org/) is a widely used approach.
-This Apache2 configuration snippet then results in unencrypted requests being redirected to the webserver SSL port
+Do not put the shared secret in browser JavaScript, a query string, or a public proxy configuration repository.
 
-```xml
-<VirtualHost *:80>
-ServerName cctv.mydomain.co.uk
-RewriteEngine on
-RewriteCond %{SERVER_NAME} =cctv.mydomain.co.uk
-RewriteRule ^ https://%{SERVER_NAME}%{REQUEST_URI} [END,NE,R=permanent]
-</VirtualHost>
-```
+## Firewall
 
-### Step 3: Authenticate users at the proxy
+If clients should connect only through the proxy:
 
-There are many ways to authenticate a website but a straightforward approach is to use [Apache2 password files](https://httpd.apache.org/docs/2.4/howto/auth.html).
+1. bind Frigate to loopback when the proxy is local; or
+2. restrict inbound port `8971` to the remote proxy address with Windows Firewall.
 
-```xml
-<VirtualHost *:443>
-    <Location />
-        AuthType Basic
-        AuthName "Restricted Files"
-        AuthUserFile "/var/www/passwords"
-        Require user paul
-    </Location>
-</VirtualHost>
-```
+Keep go2rtc's management port and Frigate port `5000` off external interfaces.
 
-## Nginx Reverse Proxy
+## Validation checklist
 
-This method shows a working example for subdomain type reverse proxy with SSL enabled.
-
-### Setup server and port to reverse proxy
-
-This is set in `$server` and `$port` this should match your ports you have exposed to your docker container. Optionally you listen on port `443` and enable `SSL`
-
-```
-# ------------------------------------------------------------
-# frigate.domain.com
-# ------------------------------------------------------------
-
-server {
-  set $forward_scheme http;
-  set $server         "192.168.100.2"; # FRIGATE SERVER LOCATION
-  set $port           8971;
-
-  listen 80;
-  listen 443 ssl;
-  http2 on;
-
-  server_name frigate.domain.com;
-}
-```
-
-### Setup SSL (optional)
-
-This section points to your SSL files, the example below shows locations to a default Lets Encrypt SSL certificate.
-
-```
-  # Let's Encrypt SSL
-  include conf.d/include/letsencrypt-acme-challenge.conf;
-  include conf.d/include/ssl-ciphers.conf;
-  ssl_certificate /etc/letsencrypt/live/npm-1/fullchain.pem;
-  ssl_certificate_key /etc/letsencrypt/live/npm-1/privkey.pem;
-```
-
-### Setup reverse proxy settings
-
-The settings below enabled connection upgrade, sets up logging (optional) and proxies everything from the `/` context to the docker host and port specified earlier in the configuration
-
-```
-  proxy_set_header Upgrade $http_upgrade;
-  proxy_set_header Connection $http_connection;
-  proxy_http_version 1.1;
-
-  access_log /data/logs/proxy-host-40_access.log proxy;
-  error_log /data/logs/proxy-host-40_error.log warn;
-
-  location / {
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection $http_connection;
-    proxy_http_version 1.1;
-  }
-
-```
-
-## Traefik Reverse Proxy
-
-This example shows how to add a `label` to the Frigate Docker compose file, enabling Traefik to automatically discover your Frigate instance.
-Before using the example below, you must first set up Traefik with the [Docker provider](https://doc.traefik.io/traefik/providers/docker/)
-
-```yml
-services:
-  frigate:
-    container_name: frigate
-    image: ghcr.io/blakeblackshear/frigate:stable
-    ...
-    ...
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.services.frigate.loadbalancer.server.port=8971"
-      - "traefik.http.routers.frigate.rule=Host(`traefik.example.com`)"
-```
-
-The above configuration will create a "service" in Traefik, automatically adding your container's IP on port 8971 as a backend.
-It will also add a router, routing requests to "traefik.example.com" to your local container.
-
-Note that with this approach, you don't need to expose any ports for the Frigate instance since all traffic will be routed over the internal Docker network.
-
-## Caddy Reverse Proxy
-
-This example shows Frigate running under a subdomain with logging and a tls cert (in this case a wildcard domain cert obtained independently of caddy) handled via imports
-
-```caddy
-(logging) {
-        log {
-                output file /var/log/caddy/{args[0]}.log {
-                        roll_size 10MiB
-                        roll_keep 5
-                        roll_keep_for 10d
-                }
-                format json
-                level INFO
-        }
-}
-
-
-(tls) {
-        tls /var/lib/caddy/wildcard.YOUR_DOMAIN.TLD.fullchain.pem /var/lib/caddy/wildcard.YOUR_DOMAIN.TLD.privkey.pem
-}
-
-frigate.YOUR_DOMAIN.TLD {
-        reverse_proxy http://localhost:8971
-        import tls
-        import logging frigate.YOUR_DOMAIN.TLD
-}
-
-```
+- A direct request without a session or proxy secret is rejected.
+- A mapped user receives only cameras granted to the resolved role.
+- WebSockets connect after login.
+- Live video and recorded HLS seek correctly.
+- Logout clears the Frigate session or redirects to the identity provider.
+- Login rate-limit logs show the actual client address rather than the proxy for every request.

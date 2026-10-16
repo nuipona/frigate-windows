@@ -464,7 +464,7 @@ class TestMoveSegmentOwnership(unittest.IsolatedAsyncioTestCase):
         maintainer.last_segment_end = {("test_cam", "main"): 0.0}
         return maintainer
 
-    async def test_move_segment_chowns_all_created_levels(self):
+    async def test_move_segment_creates_windows_directory_tree(self):
         maintainer = self._build_maintainer()
         maintainer.config.ffmpeg.ffmpeg_path = "ffmpeg"
 
@@ -473,7 +473,6 @@ class TestMoveSegmentOwnership(unittest.IsolatedAsyncioTestCase):
         proc = MagicMock()
         proc.returncode = 0
         proc.wait = AsyncMock(return_value=0)
-        chown = MagicMock()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             record_dir = os.path.join(tmpdir, "recordings")
@@ -487,7 +486,6 @@ class TestMoveSegmentOwnership(unittest.IsolatedAsyncioTestCase):
                     "frigate.record.maintainer.asyncio.create_subprocess_exec",
                     AsyncMock(return_value=proc),
                 ),
-                patch("frigate.record.maintainer.chown_to_runtime", chown),
             ):
                 result = await maintainer.move_segment(
                     "test_cam",
@@ -501,11 +499,7 @@ class TestMoveSegmentOwnership(unittest.IsolatedAsyncioTestCase):
 
             self.assertIsNotNone(result)
             camera_dir = os.path.join(record_dir, "2026-06-10", "14", "test_cam")
-            hour_dir = os.path.dirname(camera_dir)
-            date_dir = os.path.dirname(hour_dir)
-            file_path = os.path.join(camera_dir, "30.22.mp4")
-            chowned = [call.args[0] for call in chown.call_args_list]
-            self.assertEqual(chowned, [camera_dir, hour_dir, date_dir, file_path])
+            self.assertTrue(os.path.isdir(camera_dir))
 
 
 class TestSegmentStartChaining(unittest.IsolatedAsyncioTestCase):

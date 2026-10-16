@@ -51,7 +51,7 @@ class ZmqProxy:
 T = TypeVar("T")
 
 
-class Publisher(Generic[T]):
+class Publisher(Generic[T]):  # noqa: UP046 - also parsed by maintenance tooling
     """Publishes messages."""
 
     topic_base: str = ""
@@ -71,7 +71,7 @@ class Publisher(Generic[T]):
         self.context.destroy(linger=0)
 
 
-class Subscriber(Generic[T]):
+class Subscriber(Generic[T]):  # noqa: UP046 - also parsed by maintenance tooling
     """Receives messages."""
 
     topic_base: str = ""

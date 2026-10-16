@@ -1,4 +1,5 @@
 import { baseUrl } from "@/api/baseUrl";
+import { mediaPathToUrl } from "@/utils/mediaPath";
 import { useFormattedTimestamp, use24HourTime } from "@/hooks/use-date-utils";
 import { FrigateConfig } from "@/types/frigateConfig";
 import { REVIEW_PADDING, ReviewSegment } from "@/types/review";
@@ -165,7 +166,7 @@ export default function ReviewCard({
             "outline outline-[3px] -outline-offset-[2.8px] outline-selected duration-200",
           imgLoaded ? "visible" : "invisible",
         )}
-        src={`${baseUrl}${event.thumb_path.replace("/media/frigate/", "")}`}
+        src={`${baseUrl}${mediaPathToUrl(event.thumb_path)}`}
         loading={isSafari ? "eager" : "lazy"}
         style={
           isIOS

@@ -44,7 +44,6 @@
     "logs": {
       "frigate": "Frigaten lokit - Frigate",
       "go2rtc": "Go2RTC lokit - Frigate",
-      "nginx": "Nginx lokit - Frigate",
       "websocket": "Viestilokit - Frigate"
     },
     "health": "Kunto - Frigate"
@@ -134,7 +133,6 @@
         "skipped_detections": "Tunnistaminen ei pysynyt vauhdissa ja pudotti {{pct}}% kuvakehyksistä minuutissa",
         "ffmpeg_high_cpu": "FFmpegin prosessorikäyttö on korkea ({{cpu}}% keskiarvo)",
         "detect_high_cpu": "Tunnistuksen prosessorikäyttö on korkea ({{cpu}}% keskiarvo)",
-        "shm_too_low": "/dev/shm allokaatiota ({{total}} MB) pitäisi lisätä ainakin {{min}} MB",
         "failed_login_one": "Epäonnistunut kirjautuminen käyttäjälle {{user}}",
         "failed_login_other": "Epäonnistuneet kirjautumisyritykset käyttäjälle {{user}}",
         "update_available": "Frigate {{version}} on saatavilla"

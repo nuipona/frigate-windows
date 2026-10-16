@@ -5,7 +5,6 @@
     "general": "Statistici Generale - Frigate",
     "logs": {
       "go2rtc": "Jurnale Go2RTC - Frigate",
-      "nginx": "Jurnale Nginx - Frigate",
       "frigate": "Jurnale Frigate - Frigate",
       "websocket": "Jurnale de mesaje - Frigate"
     },
@@ -296,7 +295,6 @@
         "detector_stuck": "Detectorul {{detector}} a fost repornit după ce a încetat să mai răspundă",
         "model_download_failed": "Descărcarea {{file}} pentru {{model}} a eșuat: {{error}}",
         "skipped_detections": "Detecția nu a putut ține pasul și a omis {{pct}}% din cadre timp de mai mult de un minut",
-        "shm_too_low": "Alocarea /dev/shm ({{total}} MB) ar trebui mărită la cel puțin {{min}} MB",
         "failed_login_one": "Încercare eșuată de autentificare pentru {{user}}",
         "failed_login_other": "Încercări eșuate de autentificare pentru {{user}}",
         "update_available": "Frigate {{version}} este disponibil",

@@ -53,6 +53,7 @@ def _run_main_and_report(result_queue) -> None:
         with (
             patch.object(sys, "argv", ["frigate"]),
             patch.object(FrigateConfig, "load", load),
+            patch("frigate.__main__.require_windows"),
             patch("frigate.__main__.setup_logging", setup_logging),
             patch("frigate.__main__.FrigateApp", FakeApp),
             patch("frigate.__main__.ensure_runtime_dirs"),

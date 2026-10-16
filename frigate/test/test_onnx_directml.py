@@ -31,8 +31,11 @@ class TestGetOrtProvidersDirectML(unittest.TestCase):
         )
 
         self.assertEqual(providers, ["DmlExecutionProvider", "CPUExecutionProvider"])
-        # DML needs no special options; CPU keeps its arena setting
-        self.assertEqual(options, [{}, {"enable_cpu_mem_arena": False}])
+        # DirectML receives the selected adapter index; CPU keeps its arena setting.
+        self.assertEqual(
+            options,
+            [{"device_id": 0}, {"enable_cpu_mem_arena": False}],
+        )
 
     def test_directml_is_used_automatically_when_available(self):
         """A Windows install that swapped in onnxruntime-directml gets it by default."""
@@ -53,7 +56,6 @@ class TestGetOrtProvidersDirectML(unittest.TestCase):
 class TestRunnerWithDirectML(unittest.TestCase):
     def _runner(self, session: MagicMock):
         with (
-            patch.object(detection_runners, "is_rknn_compatible", return_value=False),
             patch.object(
                 detection_runners,
                 "get_ort_providers",

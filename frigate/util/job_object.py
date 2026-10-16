@@ -4,10 +4,8 @@ Frigate runs a lot of processes: one ffmpeg per camera stream, go2rtc for live
 view, and a multiprocessing child for detection, recording, output and each
 other service. Several of those children start ffmpeg processes of their own.
 
-On Linux the container's supervisor (s6) reaps the tree, and a process group
-kill does the same outside of it. On Windows neither exists, and
-``multiprocessing.Process.terminate()`` is ``TerminateProcess`` -- it kills the
-child instantly, so any ffmpeg *that child* started is left behind.
+``multiprocessing.Process.terminate()`` calls ``TerminateProcess`` and can
+leave grandchildren such as FFmpeg running after their parent is gone.
 
 Orphans hold on to the loopback ports Frigate numbers its IPC endpoints from
 (see :func:`frigate.util.platform.ipc_endpoint`), so the next start cannot bind
@@ -39,9 +37,7 @@ import logging
 import os
 from ctypes import wintypes
 
-#: DWORD is c_ulong, which is 4 bytes on Windows and 8 on Linux. The job
-#: object structures are only used on Windows, but pinning the width makes the
-#: layout the same everywhere, so it can be checked on any platform.
+#: Win32 DWORD is always 32 bits.
 _DWORD = ctypes.c_uint32
 
 logger = logging.getLogger(__name__)

@@ -8,7 +8,7 @@ import TabItem from "@theme/TabItem";
 import NavPath from "@site/src/components/NavPath";
 import labels from "../../../labelmap.txt";
 
-Frigate includes the object labels listed below from the Google Coral test data.
+The default Windows CPU model includes the object labels listed below.
 
 Please note:
 
@@ -150,12 +150,6 @@ The global mask is combined with any object-specific mask. Both are checked base
 
 :::
 
-## Custom Models
+## Custom models
 
-Models for both CPU and EdgeTPU (Coral) are bundled in the image. You can use your own models with volume mounts:
-
-- CPU Model: `/cpu_model.tflite`
-- EdgeTPU Model: `/edgetpu_model.tflite`
-- Labels: `/labelmap.txt`
-
-You also need to update the [model config](advanced/system.md#model) if they differ from the defaults.
+The native installer downloads the default CPU TFLite model into the Windows model cache. Custom TFLite, OpenVINO, and ONNX models can use absolute Windows paths in the detection-model settings. Configure the matching label map, dimensions, tensor layout, pixel format, data type, and model architecture. See [Object Detectors](object_detectors.md).

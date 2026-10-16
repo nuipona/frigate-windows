@@ -28,7 +28,7 @@ Designed to be used as an availability topic with Home Assistant. Possible messa
 
 ### `frigate/restart`
 
-Causes Frigate to exit. Docker should be configured to automatically restart the container on exit.
+Requests a Frigate restart. The Windows service wrapper restarts the application when this command is received.
 
 ### `frigate/events`
 
@@ -231,7 +231,7 @@ When the review activity has ended a final `end` message is published.
     "start_time": 1718987129.308396,
     "end_time": null,
     "severity": "detection",
-    "thumb_path": "/media/frigate/clips/review/thumb-front_cam-1718987129.308396-fqk5ka.webp",
+    "thumb_path": "C:\\ProgramData\\Frigate\\media\\clips\\review\\thumb-front_cam-1718987129.308396-fqk5ka.webp",
     "data": {
       "detections": [
         // list of event IDs
@@ -252,7 +252,7 @@ When the review activity has ended a final `end` message is published.
     "start_time": 1718987129.308396,
     "end_time": null,
     "severity": "alert",
-    "thumb_path": "/media/frigate/clips/review/thumb-front_cam-1718987129.308396-fqk5ka.webp",
+    "thumb_path": "C:\\ProgramData\\Frigate\\media\\clips\\review\\thumb-front_cam-1718987129.308396-fqk5ka.webp",
     "data": {
       "detections": [
         "1718987128.947436-g92ztx",

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Generate Frigate UI tab content for documentation files.
 
 This script reads YAML code blocks from documentation markdown files and

@@ -152,20 +152,10 @@ class ServiceProcess(BaseServiceProcess):
                 # Nobody is monitoring stop_event. We should raise SystemExit.
                 sys.exit()
 
-        # SIGTERM can be registered on Windows but is never delivered, and
-        # closing the console window raises SIGBREAK there rather than SIGINT.
-        # A child that does not handle SIGBREAK is killed by the default
-        # action, so it never runs after_run() and never stops the ffmpeg
-        # processes it started.
-        handled: list[signal.Signals] = [signal.SIGTERM, signal.SIGINT]
-
-        # getattr rather than signal.SIGBREAK, which only exists on the
-        # platform it is defined for: mypy resolves the module against the
-        # system it runs on, and CI checks on Linux.
-        break_signal = getattr(signal, "SIGBREAK", None)
-
-        if break_signal is not None:
-            handled.append(break_signal)
+        # Closing a Windows console raises SIGBREAK rather than SIGINT. A child
+        # that does not handle it is killed by the default action and cannot run
+        # after_run() to stop the FFmpeg processes it started.
+        handled: list[signal.Signals] = [signal.SIGINT, signal.SIGBREAK]
 
         for signum in handled:
             try:

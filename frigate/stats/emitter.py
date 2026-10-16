@@ -11,12 +11,11 @@ from typing import Any
 from frigate.comms.inter_process import InterProcessRequestor
 from frigate.config import FrigateConfig
 from frigate.const import FREQUENCY_STATS_POINTS
-from frigate.notices import flush_notices, raise_notice, resolve_kind, resolve_notice
+from frigate.notices import flush_notices, raise_notice, resolve_kind
 from frigate.stats.hardware import HardwareStats
 from frigate.stats.prometheus import update_metrics
 from frigate.stats.util import get_latest_version, is_newer_version, stats_snapshot
 from frigate.types import StatsTrackingTypes
-from frigate.util.platform import storage_stat_key
 from frigate.util.version import VERSION
 
 logger = logging.getLogger(__name__)
@@ -107,8 +106,6 @@ class StatsEmitter(threading.Thread):
         self.detect_cpu = EpisodeTracker(DETECT_HIGH_CPU_PCT)
 
         # the shm notice's params as last sent, so only a change is written
-        self._shm_checked = False
-        self._shm_params: dict[str, Any] | None = None
 
         # create communication for stats
         self.requestor = InterProcessRequestor()
@@ -228,33 +225,6 @@ class StatsEmitter(threading.Thread):
             target=refresh, name="frigate_version_check", daemon=True
         ).start()
 
-    def _update_shm_notice(self, shm: dict[str, Any]) -> None:
-        """Raise the shm notice while /dev/shm is smaller than the cameras need.
-
-        Shared memory backed by the page file (Windows, macOS) has no fixed
-        size to raise, so there is nothing to warn about there.
-        """
-        params = (
-            {"total": shm["total"], "min": shm["min_shm"]}
-            if shm
-            and not shm.get("page_file_backed", False)
-            and shm["total"] < shm["min_shm"]
-            else None
-        )
-
-        # the first tick always sends, so a row the last run left is raised
-        # again or cleared
-        if self._shm_checked and params == self._shm_params:
-            return
-
-        self._shm_checked = True
-        self._shm_params = params
-
-        if params is None:
-            resolve_notice("shm_too_low")
-        else:
-            raise_notice("shm_too_low", params=params)
-
     def _update_notices(self, stats: dict[str, Any], now: float) -> None:
         """Update notices based on current stats or time."""
         cameras = stats["cameras"]
@@ -290,7 +260,6 @@ class StatsEmitter(threading.Thread):
                     raise_notice(kind, scope=camera, params={"cpu": averages[camera]})
 
         # shm too small for the cameras
-        self._update_shm_notice(stats["service"]["storage"][storage_stat_key("shm")])
 
         # repeats of batched kinds, such as failed logins
         flush_notices()

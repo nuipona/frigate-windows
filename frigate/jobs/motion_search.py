@@ -321,17 +321,8 @@ def segment_passes_heatmap_gate(
 
 
 def resolve_internal_port(config: FrigateConfig) -> int:
-    """Return the unauthenticated internal port for VOD requests.
-
-    In the container this is nginx. A native install binds the same port: when
-    it is also the public port the listener is treated as internal, and when
-    they differ the internal port is bound on loopback only, so ffmpeg never
-    needs a session either way.
-    """
-    listen = config.networking.listen.internal
-    if isinstance(listen, str):
-        return int(listen.split(":")[-1])
-    return int(listen)
+    """Return the loopback-only port used by internal VOD jobs."""
+    return config.networking.listen.internal_port
 
 
 def build_vod_url(internal_port: int, camera: str, start: float, end: float) -> str:

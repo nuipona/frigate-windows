@@ -1532,15 +1532,6 @@
       "none": "Cap",
       "useGlobalSetting": "Hereta de l'entorn global",
       "presetLabels": {
-        "preset-rpi-64-h264": "Raspberry Pi (H.264)",
-        "preset-rpi-64-h265": "Raspberry Pi (H.265)",
-        "preset-vaapi": "VAAPI (Intel/AMD GPU)",
-        "preset-intel-qsv-h264": "Intel QuickSync (H.264)",
-        "preset-intel-qsv-h265": "Intel QuickSync (H.265)",
-        "preset-nvidia": "NVIDIA GPU",
-        "preset-jetson-h264": "NVIDIA Jetson (H.264)",
-        "preset-jetson-h265": "NVIDIA Jetson (H.265)",
-        "preset-rkmpp": "Rockchip RKMPP",
         "preset-http-jpeg-generic": "JPEG HTTP (Genèric)",
         "preset-http-mjpeg-generic": "HTTP MJPEG (Generic)",
         "preset-http-reolink": "HTTP - Reolink càmeres",
@@ -1555,9 +1546,7 @@
         "preset-record-generic-audio-aac": "Enregistra (Genèric + Àudio a AAC)",
         "preset-record-mjpeg": "Registre - Càmeres MJPEG",
         "preset-record-jpeg": "Registre - Càmeres JPEG",
-        "preset-record-ubiquiti": "Registre - Càmeres Ubiquiti",
-        "preset-apple-silicon-h265": "Apple Silicon (H.265)",
-        "preset-apple-silicon-h264": "Apple Silicon (H.264)"
+        "preset-record-ubiquiti": "Registre - Càmeres Ubiquiti"
       },
       "sameAsRecord": "Igual que els arguments de sortida del registre"
     },
@@ -1925,11 +1914,8 @@
       "addVideoCodec": "Afegeix un còdec de vídeo",
       "addAudioCodec": "Afegeix un còdec d'àudio",
       "removeCodec": "Elimina el còdec",
-      "hardwareVaapi": "VAAPI",
       "hardwareCuda": "CUDA",
-      "hardwareV4l2m2m": "V4L2 M2M",
-      "hardwareDxva2": "DXVA2",
-      "hardwareVideotoolbox": "VideoToolbox"
+      "hardwareDxva2": "DXVA2"
     },
     "sourceNumber": "Font {{index}}"
   },
@@ -2111,8 +2097,7 @@
       "countRecommended_other": "Recomanat per {{count}} càmeres",
       "unrecognized": "Aquest model està configurat per al maquinari que no s'ha trobat en aquest sistema: {{devices}}",
       "description": "El maquinari en el qual aquest model executa la seva detecció.",
-      "detectorCountDescription": "Quants processos de detecció s'han d'executar en aquest maquinari. Més detectors es mantenen al dia amb més càmeres, a costa de la memòria extra del dispositiu.",
-      "unitsDescription": "Cada unitat executa el seu propi procés de detecció. Una unitat que no es pot compartir, com un Coral, només es pot utilitzar per un model."
+      "detectorCountDescription": "Quants processos de detecció s'han d'executar en aquest maquinari. Més detectors es mantenen al dia amb més càmeres, a costa de la memòria extra del dispositiu."
     },
     "tabs": {
       "plus": "Frigate+",
