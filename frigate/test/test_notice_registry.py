@@ -1,7 +1,6 @@
 """Tests for the notice registry and its kind definitions."""
 
 import logging
-import os
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -12,7 +11,7 @@ from playhouse.sqliteq import SqliteQueueDatabase
 from frigate.models import Notice, NoticeStats
 from frigate.notices.registry import NoticeRegistry
 from frigate.notices.types import NOTICE_KINDS, NoticeKind, NoticeSeverity, notice_id
-from frigate.test.const import TEST_DB, TEST_DB_CLEANUPS
+from frigate.test.const import TEST_DB, cleanup_test_db
 
 # kinds that switch on the lifecycle knobs, so the tests do not depend on the
 # values the real catalog picks
@@ -61,14 +60,7 @@ class RegistryTestCase(unittest.TestCase):
         self.registry.subscribe(self.listener)
 
     def tearDown(self):
-        if not self.db.is_closed():
-            self.db.close()
-
-        try:
-            for file in TEST_DB_CLEANUPS:
-                os.remove(file)
-        except OSError:
-            pass
+        cleanup_test_db(self.db)
 
     def _raise_at(self, timestamp: float, kind: str, **kwargs) -> None:
         with patch("frigate.notices.registry.datetime") as mock_datetime:

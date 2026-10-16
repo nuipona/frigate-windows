@@ -22,7 +22,7 @@ from frigate.api.media_auth import (
 from frigate.config import FrigateConfig
 from frigate.const import EXPORT_DIR
 from frigate.models import Event, Export, Recordings, ReviewSegment
-from frigate.test.const import TEST_DB, TEST_DB_CLEANUPS
+from frigate.test.const import TEST_DB, cleanup_test_db
 
 _CONFIG = {
     "mqtt": {"host": "mqtt"},
@@ -218,13 +218,7 @@ class TestExportResolution(unittest.TestCase):
         self.config = FrigateConfig(**_CONFIG)
 
     def tearDown(self):
-        if not self.db.is_closed():
-            self.db.close()
-        for f in TEST_DB_CLEANUPS:
-            try:
-                os.remove(f)
-            except OSError:
-                pass
+        cleanup_test_db(self.db)
 
     def _insert_export(self, export_id, camera, filename):
         Export.insert(

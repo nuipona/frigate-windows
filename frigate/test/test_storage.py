@@ -13,7 +13,7 @@ from frigate.config import FrigateConfig
 from frigate.const import STREAM_TYPE_MAIN, STREAM_TYPE_SUB
 from frigate.models import Event, Recordings
 from frigate.storage import MAX_CALCULATED_BANDWIDTH, StorageMaintainer
-from frigate.test.const import TEST_DB, TEST_DB_CLEANUPS
+from frigate.test.const import TEST_DB, cleanup_test_db
 
 
 class TestHttp(unittest.TestCase):
@@ -89,14 +89,7 @@ class TestHttp(unittest.TestCase):
         }
 
     def tearDown(self):
-        if not self.db.is_closed():
-            self.db.close()
-
-        try:
-            for file in TEST_DB_CLEANUPS:
-                os.remove(file)
-        except OSError:
-            pass
+        cleanup_test_db(self.db)
 
     def test_segment_calculations(self):
         """Test that the segment calculations are correct."""

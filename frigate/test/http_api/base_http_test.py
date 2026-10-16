@@ -18,7 +18,7 @@ from frigate.debug_replay import DebugReplayManager
 from frigate.jobs.export import JobStatePublisher
 from frigate.models import Event, Recordings, ReviewSegment
 from frigate.review.types import SeverityEnum
-from frigate.test.const import TEST_DB, TEST_DB_CLEANUPS
+from frigate.test.const import TEST_DB, cleanup_test_db
 
 
 class AuthTestClient(TestClient):
@@ -135,14 +135,7 @@ class BaseTestHttp(unittest.TestCase):
         }
 
     def tearDown(self):
-        if not self.db.is_closed():
-            self.db.close()
-
-        try:
-            for file in TEST_DB_CLEANUPS:
-                os.remove(file)
-        except OSError:
-            pass
+        cleanup_test_db(self.db)
 
     def create_app(
         self,
