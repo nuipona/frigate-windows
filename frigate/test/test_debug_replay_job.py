@@ -1,5 +1,7 @@
 """Tests for the debug replay job runner and factory."""
 
+import os
+import tempfile
 import threading
 import time
 import unittest
@@ -18,6 +20,11 @@ from frigate.jobs.debug_replay import (
 from frigate.jobs.export import JobStatePublisher
 from frigate.jobs.manager import _completed_jobs, _current_jobs
 from frigate.types import JobStatusTypesEnum
+
+
+def _tmp_path(*parts: str) -> str:
+    """Native temp path so fixtures carry the separators the OS carries."""
+    return os.path.join(tempfile.gettempdir(), *parts)
 
 
 def _reset_job_manager() -> None:
@@ -89,7 +96,9 @@ class TestStartDebugReplayJob(unittest.TestCase):
 
         self.recordings_qs = MagicMock()
         self.recordings_qs.count.return_value = 1
-        self.recordings_qs.__iter__.return_value = iter([MagicMock(path="/tmp/r1.mp4")])
+        self.recordings_qs.__iter__.return_value = iter(
+            [MagicMock(path=_tmp_path("r1.mp4"))]
+        )
 
     def tearDown(self) -> None:
         runner = get_active_runner()
@@ -244,7 +253,9 @@ class TestRunnerHappyPath(unittest.TestCase):
 
         self.recordings_qs = MagicMock()
         self.recordings_qs.count.return_value = 1
-        self.recordings_qs.__iter__.return_value = iter([MagicMock(path="/tmp/r1.mp4")])
+        self.recordings_qs.__iter__.return_value = iter(
+            [MagicMock(path=_tmp_path("r1.mp4"))]
+        )
 
     def tearDown(self) -> None:
         runner = get_active_runner()
@@ -327,7 +338,9 @@ class TestRunnerFailurePath(unittest.TestCase):
         self.publisher = MagicMock()
         self.recordings_qs = MagicMock()
         self.recordings_qs.count.return_value = 1
-        self.recordings_qs.__iter__.return_value = iter([MagicMock(path="/tmp/r1.mp4")])
+        self.recordings_qs.__iter__.return_value = iter(
+            [MagicMock(path=_tmp_path("r1.mp4"))]
+        )
 
     def tearDown(self) -> None:
         runner = get_active_runner()
@@ -401,7 +414,9 @@ class TestRunnerCancellation(unittest.TestCase):
         self.publisher = MagicMock()
         self.recordings_qs = MagicMock()
         self.recordings_qs.count.return_value = 1
-        self.recordings_qs.__iter__.return_value = iter([MagicMock(path="/tmp/r1.mp4")])
+        self.recordings_qs.__iter__.return_value = iter(
+            [MagicMock(path=_tmp_path("r1.mp4"))]
+        )
 
     def tearDown(self) -> None:
         runner = get_active_runner()

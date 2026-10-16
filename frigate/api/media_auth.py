@@ -1,10 +1,11 @@
-"""URI-aware authorization for nginx-served static media.
+"""URI-aware authorization for static media served by the native server.
 
-The `/auth` endpoint (used as nginx `auth_request` target) calls into this
-module to classify the requested URI from the `X-Original-URL` header and, for
-camera-scoped resources, decide whether the current role may access them.
+The `/auth` endpoint (run in process by `frigate.api.web` for every media
+request) calls into this module to classify the requested URI from the
+`X-Original-URL` header and, for camera-scoped resources, decide whether the
+current role may access them.
 
-Without this, `auth_request` only verifies the JWT — every authenticated user
+Without this, the auth check only verifies the JWT — every authenticated user
 could read clips, recordings, and exports for *any* camera, bypassing the
 per-camera authorization the regular API enforces via `require_camera_access`.
 """
@@ -35,21 +36,21 @@ class MediaAuthResolution(str, Enum):
     # Under a recognized media root (/clips, /recordings, /exports) but
     # unclassifiable (unknown subtree, no matching DB row, DB error).
     # Restricted users are denied; admins/full-access roles are allowed
-    # (nginx will likely return 404 if the file genuinely doesn't exist).
+    # (the server will likely return 404 if the file genuinely doesn't exist).
     UNRESOLVED_MEDIA = "unresolved_media"
     # Not a media URI at all (e.g. /api/events, /login).
     UNKNOWN = "unknown"
 
 
 def extract_path(original_url: str | None) -> str | None:
-    """Return the decoded path component of nginx's `X-Original-URL` header.
+    """Return the decoded path component of the `X-Original-URL` header.
 
-    nginx forwards the *raw* request URI (with `..` segments intact) via
-    `$request_uri`. nginx normalizes the path before serving the file, so a
-    request like `/recordings/.../allowed_cam/../forbidden_cam/file.mp4`
-    would (1) parse as the allowed camera in our auth check, (2) be served
-    as the forbidden camera by nginx. To close the bypass we reject any URI
-    whose path contains `.` or `..` segments outright.
+    The web server forwards the *raw* request URI (with `..` segments
+    intact), then normalizes the path before serving the file, so a request
+    like `/recordings/.../allowed_cam/../forbidden_cam/file.mp4` would
+    (1) parse as the allowed camera in our auth check, (2) be served as the
+    forbidden camera by the file handler. To close the bypass we reject any
+    URI whose path contains `.` or `..` segments outright.
     """
     if not original_url:
         return None
@@ -253,7 +254,7 @@ def deny_response_for_media_uri(
 
     # `extract_path` returns None for URIs containing `.` or `..` segments.
     # For media-root URIs that's a traversal attempt — deny outright. For
-    # non-media URIs, pass through (nginx / the backend handle them).
+    # non-media URIs, pass through (the API handles them).
     if path is None:
         raw = urlparse(original_url).path or original_url
         decoded = unquote(raw)

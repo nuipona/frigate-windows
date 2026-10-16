@@ -263,8 +263,8 @@ class TestEnvVars(unittest.TestCase):
                 self.assertFalse(is_go2rtc_arbitrary_exec_allowed())
         self.assertEqual(os.environ.get("OTHER_VAR"), "value")
 
-    def test_install_keeps_container_go2rtc_exec_override(self):
-        """An override set in the container environment is left untouched."""
+    def test_install_keeps_process_go2rtc_exec_override(self):
+        """An override set in the process environment is left untouched."""
         ctx = self._make_context(install=True)
         with patch.dict(os.environ, {"GO2RTC_ALLOW_ARBITRARY_EXEC": "true"}):
             validate_env_vars({"GO2RTC_ALLOW_ARBITRARY_EXEC": "false"}, ctx)
@@ -286,27 +286,32 @@ class TestVariableSources(unittest.TestCase):
         os.environ.clear()
         os.environ.update(self._original_os_environ)
 
-    def test_container_env_beats_config_env_vars(self):
-        """A container env var wins over the same key in environment_vars."""
+    def test_process_env_beats_config_env_vars(self):
+        """A process env var wins over the same key in environment_vars."""
         with patch.dict(env._PROCESS_ENV, {"FRIGATE_MQTT_HOST": "from_env"}):
             env.apply_config_env_vars({"FRIGATE_MQTT_HOST": "from_config"})
             self.assertEqual(env.FRIGATE_ENV_VARS["FRIGATE_MQTT_HOST"], "from_env")
 
-    def test_credentials_dir_beats_container_env(self):
-        """A credentials directory file wins over a container env var."""
-        with (
-            patch.dict(env._PROCESS_ENV, {"FRIGATE_MQTT_HOST": "from_env"}),
-            patch.dict(env._CREDENTIALS_DIR, {"FRIGATE_MQTT_HOST": "from_creds"}),
-        ):
-            env._rebuild()
-            self.assertEqual(env.FRIGATE_ENV_VARS["FRIGATE_MQTT_HOST"], "from_creds")
+    def test_credentials_directory_is_not_a_source(self):
+        """A directory of files named after variables feeds nothing.
+
+        That was the container secrets pattern; the native Windows build
+        reads the process environment, secrets.yaml, and environment_vars
+        only, so a stray CREDENTIALS_DIRECTORY must have no effect.
+        """
+        with tempfile.TemporaryDirectory() as creds:
+            with open(os.path.join(creds, "FRIGATE_MQTT_HOST"), "w") as f:
+                f.write("from_creds\n")
+            with patch.dict(os.environ, {"CREDENTIALS_DIRECTORY": creds}):
+                env.reload_sources()
+        self.assertNotEqual(env.FRIGATE_ENV_VARS.get("FRIGATE_MQTT_HOST"), "from_creds")
 
     def test_config_env_vars_used_when_no_other_source(self):
         """environment_vars still resolves when nothing else defines the key."""
         env.apply_config_env_vars({"FRIGATE_CAM_PASS": "hunter2"})
         self.assertEqual(env.FRIGATE_ENV_VARS["FRIGATE_CAM_PASS"], "hunter2")
 
-    def test_config_env_vars_do_not_become_container_env(self):
+    def test_config_env_vars_do_not_become_process_env(self):
         """environment_vars writes os.environ but must not gain env precedence."""
         env.apply_config_env_vars({"FRIGATE_CAM_PASS": "from_config"})
         self.assertEqual(os.environ["FRIGATE_CAM_PASS"], "from_config")
@@ -325,7 +330,7 @@ class TestVariableSources(unittest.TestCase):
                 env.apply_config_env_vars({"FRIGATE_MQTT_HOST": "from_config"})
             self.assertEqual(len(logs.output), 1)
             self.assertIn("FRIGATE_MQTT_HOST", logs.output[0])
-            self.assertIn("using the value from container environment", logs.output[0])
+            self.assertIn("using the value from process environment", logs.output[0])
             self.assertNotIn("environment_vars", logs.output[0])
 
             with self.assertNoLogs("frigate.util.env", level="WARNING"):
@@ -378,7 +383,7 @@ class TestSecretsFile(unittest.TestCase):
         self.assertEqual(env._load_secrets_file(), {"FRIGATE_MQTT_PORT": "1883"})
 
     def test_unprefixed_key_is_ignored_with_a_warning(self):
-        """Names must start with FRIGATE_, matching the credentials directory."""
+        """Names must start with FRIGATE_ to be read from secrets.yaml."""
         self._write("cam_pass: hunter2\nFRIGATE_CAM_PASS: hunter2\n")
         with self.assertLogs("frigate.util.env", level="WARNING") as logs:
             values = env._load_secrets_file()
@@ -406,8 +411,8 @@ class TestSecretsFile(unittest.TestCase):
         env._rebuild()
         self.assertEqual(env.FRIGATE_ENV_VARS["FRIGATE_CAM_PASS"], "from_secrets")
 
-    def test_container_env_beats_secrets_file(self):
-        """The container environment outranks secrets.yaml."""
+    def test_process_env_beats_secrets_file(self):
+        """The process environment outranks secrets.yaml."""
         self._write("FRIGATE_CAM_PASS: from_secrets\n")
         env._SECRETS_FILE.update(env._load_secrets_file())
         with patch.dict(env._PROCESS_ENV, {"FRIGATE_CAM_PASS": "from_env"}):
@@ -465,18 +470,14 @@ class TestSourceRobustness(unittest.TestCase):
         self._original_env_vars = dict(env.FRIGATE_ENV_VARS)
         self._original_os_environ = dict(os.environ)
         self._dir = tempfile.TemporaryDirectory()
-        self._creds = tempfile.TemporaryDirectory()
         self.addCleanup(self._dir.cleanup)
-        self.addCleanup(self._creds.cleanup)
         os.environ["CONFIG_FILE"] = os.path.join(self._dir.name, "config.yml")
-        os.environ["CREDENTIALS_DIRECTORY"] = self._creds.name
 
     def tearDown(self):
         env.FRIGATE_ENV_VARS.clear()
         env.FRIGATE_ENV_VARS.update(self._original_env_vars)
         env._SECRETS_FILE.clear()
         env._CONFIG_ENV_VARS.clear()
-        env._CREDENTIALS_DIR.clear()
         env._WARNED_COLLISIONS.clear()
         os.environ.clear()
         os.environ.update(self._original_os_environ)
@@ -542,24 +543,22 @@ class TestSourceRobustness(unittest.TestCase):
         env.reload_sources()
         self.assertNotIn("FRIGATE_GONE", env.FRIGATE_ENV_VARS)
 
-    def test_reload_rereads_the_credentials_directory(self):
-        """The credentials directory is refreshed, not just secrets.yaml."""
-        with open(os.path.join(self._creds.name, "FRIGATE_CRED"), "w") as f:
-            f.write("from_creds\n")
+    def test_reload_ignores_a_credentials_directory(self):
+        """CREDENTIALS_DIRECTORY is not consulted, however often we reload."""
+        with tempfile.TemporaryDirectory() as creds:
+            with open(os.path.join(creds, "FRIGATE_CRED"), "w") as f:
+                f.write("from_creds\n")
+            with patch.dict(os.environ, {"CREDENTIALS_DIRECTORY": creds}):
+                env.reload_sources()
+        self.assertNotEqual(env.FRIGATE_ENV_VARS.get("FRIGATE_CRED"), "from_creds")
+
+    def test_a_directory_named_like_the_secrets_file_is_skipped(self):
+        """A directory called secrets.yaml must not take down every parse."""
+        os.mkdir(os.path.join(self._dir.name, "secrets.yaml"))
+
         env.reload_sources()
-        self.assertEqual(env.FRIGATE_ENV_VARS["FRIGATE_CRED"], "from_creds")
 
-    def test_unreadable_credentials_entry_is_skipped(self):
-        """A subdirectory must not take down validation on every parse."""
-        os.mkdir(os.path.join(self._creds.name, "FRIGATE_NOT_A_FILE"))
-        with open(os.path.join(self._creds.name, "FRIGATE_CRED"), "w") as f:
-            f.write("from_creds\n")
-
-        with self.assertLogs("frigate.util.env", level="WARNING") as logs:
-            env.reload_sources()
-
-        self.assertIn("FRIGATE_NOT_A_FILE", logs.output[0])
-        self.assertEqual(env.FRIGATE_ENV_VARS["FRIGATE_CRED"], "from_creds")
+        self.assertNotIn("FRIGATE_CAM_PASS", env.FRIGATE_ENV_VARS)
 
 
 if __name__ == "__main__":

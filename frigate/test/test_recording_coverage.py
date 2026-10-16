@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+import os
+import tempfile
 import unittest
 from types import SimpleNamespace
 
@@ -19,6 +21,11 @@ from frigate.util.recording_coverage import (
     resolve_coverage,
     stream_media_summary,
 )
+
+
+def _tmp_path(*parts: str) -> str:
+    """Native temp path so fixtures carry the separators the OS carries."""
+    return os.path.join(tempfile.gettempdir(), *parts)
 
 
 class CoverageDbTestCase(unittest.TestCase):
@@ -50,7 +57,7 @@ class CoverageDbTestCase(unittest.TestCase):
         Recordings.create(
             id=id,
             camera=camera,
-            path=f"/tmp/{id}.mp4",
+            path=_tmp_path(f"{id}.mp4"),
             start_time=start,
             end_time=end,
             duration=end - start,
@@ -173,7 +180,7 @@ class TestRecordingCoverage(CoverageDbTestCase):
         self._insert("s3", 1020.0, 1030.0, "sub", has_audio=False)
         kept = null_audio_glitches(resolve_coverage("front_door", 1000.0, 1030.0))
         self.assertEqual(
-            [i.sub.path for i in kept], [f"/tmp/s{n}.mp4" for n in (1, 2, 3)]
+            [i.sub.path for i in kept], [_tmp_path(f"s{n}.mp4") for n in (1, 2, 3)]
         )
 
     def test_video_only_glitch_dropped_on_audio_stream(self):
@@ -181,7 +188,9 @@ class TestRecordingCoverage(CoverageDbTestCase):
         self._insert("s2", 1010.0, 1020.0, "sub", has_audio=False)
         self._insert("s3", 1020.0, 1030.0, "sub", has_audio=None)
         kept = null_audio_glitches(resolve_coverage("front_door", 1000.0, 1030.0))
-        self.assertEqual([i.sub.path for i in kept], ["/tmp/s1.mp4", "/tmp/s3.mp4"])
+        self.assertEqual(
+            [i.sub.path for i in kept], [_tmp_path("s1.mp4"), _tmp_path("s3.mp4")]
+        )
 
     def test_other_camera_rows_excluded(self):
         self._insert("m1", 1000.0, 1010.0, "main")
@@ -265,7 +274,7 @@ class TestRecordingCoverage(CoverageDbTestCase):
     def test_plan_clip_skips_too_short(self):
         """A clip left with under 100ms of media is skipped (duration 0 in timelines)."""
         row = SimpleNamespace(
-            path="/tmp/x.mp4",
+            path=_tmp_path("x.mp4"),
             start_time=1000.0,
             end_time=1000.15,
             duration=0.15,
@@ -327,7 +336,7 @@ class TestClipKeyFrames(unittest.TestCase):
 
     def _row(self, keyframes):
         return SimpleNamespace(
-            path="/tmp/kf.mp4",
+            path=_tmp_path("kf.mp4"),
             start_time=1000.0,
             end_time=1010.0,
             duration=10.0,
