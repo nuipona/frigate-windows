@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SPECS_DIR = resolve(__dirname, "..", "specs");
 const META_PREFIX = resolve(SPECS_DIR, "_meta");
+const SETTINGS_PREFIX = resolve(SPECS_DIR, "settings");
 
 const BANNED_PATTERNS = [
   {
