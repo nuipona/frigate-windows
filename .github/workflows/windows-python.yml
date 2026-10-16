@@ -92,4 +92,20 @@ jobs:
         working-directory: ${{ env.pythonLocation }}\Scripts
 
       - name: Run the unit suite
-        run: python testing-scripts/run_windows_unit_suite.py
+        shell: pwsh
+        run: |
+          python testing-scripts/run_windows_unit_suite.py 2>&1 |
+            Tee-Object -FilePath suite.log
+          exit $LASTEXITCODE
+
+      # Surface failures in the Checks view; the full log is an artifact.
+      - name: Report suite failures
+        if: failure()
+        run: python testing-scripts/ci_report_suite_log.py suite.log
+
+      - name: Upload suite log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-unit-suite-log
+          path: suite.log
