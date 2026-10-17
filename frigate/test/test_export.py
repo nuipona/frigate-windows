@@ -18,6 +18,11 @@ from frigate.record.export import (
 )
 
 
+def _tmp_file(name: str) -> str:
+    """Native temp file path for fixtures that build ffmpeg commands."""
+    return str(Path(tempfile.gettempdir()) / name)
+
+
 class TestValidateFfmpegArgs(unittest.TestCase):
     """Tests for the non-admin custom export ffmpeg arg validator.
 
@@ -113,6 +118,14 @@ class TestValidateFfmpegArgs(unittest.TestCase):
         self.assertRejected("-f tee [f=mpegts]/etc/frigate/x.ts")
         self.assertRejected("tee:/tmp/x")
 
+    def test_windows_write_paths_rejected(self):
+        # the native build must refuse the same writes spelled with
+        # drive-letter, tee and UNC paths
+        self.assertRejected(r"-f tee [f=mpegts]C:\Frigate\owned.ts")
+        self.assertRejected(r"tee:C:\Frigate\x.ts")
+        self.assertRejected(r"C:\Frigate\owned.mp4")
+        self.assertRejected(r"\\server\share\owned.mp4")
+
     def test_bare_output_token_rejected(self):
         self.assertRejected("evil.mp4")
         self.assertRejected("-c copy evil.mp4")
@@ -198,7 +211,9 @@ class TestUniqueArchiveName(unittest.TestCase):
 
     def test_uses_the_on_disk_file_name(self):
         export = self.build_export(
-            "/media/frigate/exports/front_door_20260823_020615-20260823_020734_abc123.mp4"
+            os.path.join(
+                EXPORT_DIR, "front_door_20260823_020615-20260823_020734_abc123.mp4"
+            )
         )
         self.assertEqual(
             _unique_archive_name(export, set()),
@@ -206,13 +221,13 @@ class TestUniqueArchiveName(unittest.TestCase):
         )
 
     def test_follows_a_renamed_file(self):
-        export = self.build_export("/media/frigate/exports/Package thief_abc123.mp4")
+        export = self.build_export(os.path.join(EXPORT_DIR, "Package thief_abc123.mp4"))
         self.assertEqual(
             _unique_archive_name(export, set()), "Package thief_abc123.mp4"
         )
 
     def test_entries_are_deduplicated(self):
-        export = self.build_export("/media/frigate/exports/Package thief_abc123.mp4")
+        export = self.build_export(os.path.join(EXPORT_DIR, "Package thief_abc123.mp4"))
         used: set[str] = set()
         self.assertEqual(_unique_archive_name(export, used), "Package thief_abc123.mp4")
         self.assertEqual(
@@ -355,13 +370,13 @@ class TestStageRunCommand(unittest.TestCase):
     """Each run is rendered on its own so its parameter sets travel with it."""
 
     def _run(self, stream_type: str = "sub") -> StreamRun:
-        return StreamRun(stream_type, 1_020.0, 1_040.0, "/media/s1.mp4")
+        return StreamRun(stream_type, 1_020.0, 1_040.0, _tmp_file("s1.mp4"))
 
     def test_copy_pins_the_playlist_to_one_stream(self) -> None:
         # the merged /vod route is exactly what breaks: ffmpeg binds the
         # track's parameter sets from the first init segment only
         exporter = _make_exporter([], {"h264"})
-        cmd = exporter._stage_run_command(self._run(), "/tmp/s.mp4", None, False)
+        cmd = exporter._stage_run_command(self._run(), _tmp_file("s.mp4"), None, False)
 
         self.assertIn(
             "http://127.0.0.1:5000/vod/front/sub/start/1020.0/end/1040.0/index.m3u8",
@@ -371,19 +386,21 @@ class TestStageRunCommand(unittest.TestCase):
     def test_copy_forces_a_common_track_timescale(self) -> None:
         # without this a 5fps sub run is replayed at the main stream's rate
         exporter = _make_exporter([], {"h264"})
-        cmd = exporter._stage_run_command(self._run(), "/tmp/s.mp4", None, False)
+        cmd = exporter._stage_run_command(self._run(), _tmp_file("s.mp4"), None, False)
 
         self.assertEqual(
             cmd[cmd.index("-video_track_timescale") + 1], str(EXPORT_TRACK_TIMESCALE)
         )
         self.assertIn("copy", cmd)
-        self.assertEqual(cmd[-1], "/tmp/s.mp4")
+        self.assertEqual(cmd[-1], _tmp_file("s.mp4"))
 
     def test_audio_is_dropped_unless_both_streams_agree(self) -> None:
         exporter = _make_exporter([], {"h264"})
 
-        dropped = exporter._stage_run_command(self._run(), "/tmp/s.mp4", None, False)
-        kept = exporter._stage_run_command(self._run(), "/tmp/s.mp4", None, True)
+        dropped = exporter._stage_run_command(
+            self._run(), _tmp_file("s.mp4"), None, False
+        )
+        kept = exporter._stage_run_command(self._run(), _tmp_file("s.mp4"), None, True)
 
         self.assertIn("-an", dropped)
         self.assertNotIn("-an", kept)
@@ -394,7 +411,9 @@ class TestStageRunCommand(unittest.TestCase):
         exporter = _make_exporter([], {"h264", "h265"})
 
         for target in (None, (1920, 1080)):
-            cmd = exporter._stage_run_command(self._run(), "/tmp/s.mp4", target, True)
+            cmd = exporter._stage_run_command(
+                self._run(), _tmp_file("s.mp4"), target, True
+            )
             self.assertGreater(
                 cmd.index("-c:a"),
                 cmd.index("-i"),
@@ -420,7 +439,7 @@ class TestStageRunCommand(unittest.TestCase):
         exporter.config.cameras["front"].record.export.hwaccel_args = "preset-vaapi"
 
         cmd = exporter._stage_run_command(
-            self._run(), "/tmp/s.mp4", (1920, 1080), False
+            self._run(), _tmp_file("s.mp4"), (1920, 1080), False
         )
 
         self.assertNotIn("-hwaccel", cmd)
@@ -429,7 +448,7 @@ class TestStageRunCommand(unittest.TestCase):
     def test_target_scales_and_pads_rather_than_stretching(self) -> None:
         exporter = _make_exporter([], {"h264", "h265"})
         cmd = exporter._stage_run_command(
-            self._run(), "/tmp/s.mp4", (1920, 1080), False
+            self._run(), _tmp_file("s.mp4"), (1920, 1080), False
         )
 
         filtergraph = cmd[cmd.index("-vf") + 1]

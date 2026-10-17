@@ -59,7 +59,9 @@ def _subject_alt_names() -> list[x509.GeneralName]:
 
     return [x509.DNSName(name) for name in sorted(dns_names)] + [
         x509.IPAddress(address)
-        for address in sorted(ip_addresses, key=lambda value: (value.version, int(value)))
+        for address in sorted(
+            ip_addresses, key=lambda value: (value.version, int(value))
+        )
     ]
 
 
@@ -82,7 +84,9 @@ def _write_new_certificate(cert_file: Path, key_file: Path) -> None:
         .serial_number(x509.random_serial_number())
         .not_valid_before(now - timedelta(minutes=5))
         .not_valid_after(now + timedelta(days=365))
-        .add_extension(x509.SubjectAlternativeName(_subject_alt_names()), critical=False)
+        .add_extension(
+            x509.SubjectAlternativeName(_subject_alt_names()), critical=False
+        )
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
         .add_extension(
             x509.KeyUsage(

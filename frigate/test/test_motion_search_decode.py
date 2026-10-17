@@ -1,5 +1,7 @@
 """Tests for the motion search hardware-accelerated decode helpers."""
 
+import os
+import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -12,6 +14,11 @@ from frigate.jobs.motion_search_decode import (
     probe_vod_keyframe_pts,
     resolve_motion_decode_args,
 )
+
+
+def _tmp_path(*parts: str) -> str:
+    """Native temp path so fixtures carry the separators the OS carries."""
+    return os.path.join(tempfile.gettempdir(), *parts)
 
 
 def _fake_camera_config(
@@ -42,9 +49,7 @@ class TestResolveMotionDecodeArgs(unittest.TestCase):
         # D3D11VA transfers directly to system memory rather than exposing an
         # nv12 hardware surface for the fixed motion-search download filter.
         self.assertEqual(
-            resolve_motion_decode_args(
-                _fake_camera_config("preset-windows-d3d11va")
-            ),
+            resolve_motion_decode_args(_fake_camera_config("preset-windows-d3d11va")),
             [],
         )
 
@@ -170,7 +175,7 @@ class TestProbeVideoDimensions(unittest.TestCase):
         with mock.patch(
             "frigate.jobs.motion_search_decode.sp.run", return_value=completed
         ):
-            dims = probe_video_dimensions("ffprobe", "/tmp/a.mp4")
+            dims = probe_video_dimensions("ffprobe", _tmp_path("a.mp4"))
         assert dims is not None
         width, height, fps = dims
         self.assertEqual((width, height), (1920, 1080))
@@ -182,7 +187,7 @@ class TestProbeVideoDimensions(unittest.TestCase):
         with mock.patch(
             "frigate.jobs.motion_search_decode.sp.run", return_value=completed
         ):
-            self.assertIsNone(probe_video_dimensions("ffprobe", "/tmp/a.mp4"))
+            self.assertIsNone(probe_video_dimensions("ffprobe", _tmp_path("a.mp4")))
 
 
 if __name__ == "__main__":

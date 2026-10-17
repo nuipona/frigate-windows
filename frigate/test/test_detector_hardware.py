@@ -61,9 +61,7 @@ class TestDirectMlHardware(unittest.TestCase):
         gpu = hardware.detect_directml_gpu()
 
         self.assertEqual(gpu.key, "onnx:directml")
-        self.assertEqual(
-            [unit.device for unit in gpu.units], ["onnx:0", "onnx:1"]
-        )
+        self.assertEqual([unit.device for unit in gpu.units], ["onnx:0", "onnx:1"])
         self.assertEqual(
             [unit.label for unit in gpu.units], ["Intel Arc", "AMD Radeon"]
         )
@@ -82,9 +80,7 @@ class TestDirectMlHardware(unittest.TestCase):
         "frigate.detectors.hardware._onnx_providers",
         return_value={"DmlExecutionProvider"},
     )
-    def test_directml_is_ignored_without_display_adapters(
-        self, _providers, _adapters
-    ):
+    def test_directml_is_ignored_without_display_adapters(self, _providers, _adapters):
         self.assertIsNone(hardware.detect_directml_gpu())
 
 
@@ -111,12 +107,8 @@ class TestNvidiaHardware(unittest.TestCase):
 
         self.assertEqual(gpu.key, "onnx:nvidia")
         self.assertEqual(gpu.name, "NVIDIA GPU")
-        self.assertEqual(
-            [unit.device for unit in gpu.units], ["onnx:0", "onnx:1"]
-        )
-        self.assertEqual(
-            [unit.label for unit in gpu.units], ["RTX 3060", "RTX 4090"]
-        )
+        self.assertEqual([unit.device for unit in gpu.units], ["onnx:0", "onnx:1"])
+        self.assertEqual([unit.label for unit in gpu.units], ["RTX 3060", "RTX 4090"])
 
     @patch(
         "frigate.detectors.hardware._onnx_providers",

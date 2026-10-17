@@ -127,7 +127,14 @@ class TestExpectedOutputDuration(unittest.TestCase):
 
 class TestProgressFlagInjection(unittest.TestCase):
     def test_inserts_before_output_path(self) -> None:
-        cmd = ["ffmpeg", "-i", "input.m3u8", "-c", "copy", "/tmp/output.mp4"]
+        cmd = [
+            "ffmpeg",
+            "-i",
+            "input.m3u8",
+            "-c",
+            "copy",
+            os.path.join(tempfile.gettempdir(), "output.mp4"),
+        ]
 
         result = inject_progress_flags(cmd)
 
@@ -140,7 +147,7 @@ class TestProgressFlagInjection(unittest.TestCase):
             "-progress",
             "pipe:2",
             "-nostats",
-            "/tmp/output.mp4",
+            os.path.join(tempfile.gettempdir(), "output.mp4"),
         ]
 
     def test_handles_empty_cmd(self) -> None:
@@ -176,7 +183,14 @@ class TestFfmpegProgressParsing(unittest.TestCase):
 
         with patch("frigate.util.ffmpeg.sp.Popen", return_value=fake_proc):
             returncode, _stderr = exporter._run_ffmpeg_with_progress(
-                ["ffmpeg", "-i", "x.m3u8", "/tmp/out.mp4"], "playlist", step="encoding"
+                [
+                    "ffmpeg",
+                    "-i",
+                    "x.m3u8",
+                    os.path.join(tempfile.gettempdir(), "out.mp4"),
+                ],
+                "playlist",
+                step="encoding",
             )
 
         assert returncode == 0

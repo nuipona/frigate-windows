@@ -5,7 +5,7 @@ Publisher: Frigate, Inc.
 PackageName: Frigate NVR (Windows Native)
 License: MIT
 ShortDescription: NVR with realtime local object detection for IP cameras — native Windows port.
-Homepage: https://github.com/blakeblackshear/frigate
+Homepage: https://github.com/nuipona/gannet
 Tags:
   - frigate
   - nvr
@@ -17,7 +17,7 @@ ManifestVersion: 1.12.0
 Installers:
   - Architecture: x64
     InstallerType: exe
-    InstallerUrl: https://github.com/nuipona/frigate-windows/releases/download/v0.1.0/frigate-windows-installer.exe
+    InstallerUrl: https://github.com/nuipona/gannet/releases/download/v0.1.0/frigate-windows-installer.exe
     InstallerSha256: PLACEHOLDER_SHA256
     Scope: user
     Silent: False

@@ -15,6 +15,11 @@ from frigate.models import Export, ExportCase, Previews, Recordings
 from frigate.test.http_api.base_http_test import AuthTestClient, BaseTestHttp
 
 
+def _tmp_path(*parts: str) -> str:
+    """Native temp path so fixtures carry the separators the OS carries."""
+    return os.path.join(tempfile.gettempdir(), *parts)
+
+
 class TestHttpExport(BaseTestHttp):
     def setUp(self):
         super().setUp([Export, ExportCase, Previews, Recordings])
@@ -44,7 +49,7 @@ class TestHttpExport(BaseTestHttp):
         Recordings.create(
             id=recording_id,
             camera=camera,
-            path=f"/tmp/{recording_id}.mp4",
+            path=_tmp_path(f"{recording_id}.mp4"),
             start_time=start_time,
             end_time=end_time,
             duration=end_time - start_time,
@@ -57,7 +62,7 @@ class TestHttpExport(BaseTestHttp):
         )
 
     def test_create_export_case_uses_wall_clock_time(self):
-        with patch("frigate.api.export.time.time", return_value=1234.5):
+        with patch("frigate.api.export.time.time", return_value=1700000000.5):
             with AuthTestClient(self.app) as client:
                 response = client.post(
                     "/cases",
@@ -69,12 +74,12 @@ class TestHttpExport(BaseTestHttp):
 
         assert response.status_code == 200
         response_json = response.json()
-        assert response_json["created_at"] == 1234.5
-        assert response_json["updated_at"] == 1234.5
+        assert response_json["created_at"] == 1700000000.5
+        assert response_json["updated_at"] == 1700000000.5
 
         case = ExportCase.get(ExportCase.id == response_json["id"])
-        assert case.created_at.timestamp() == 1234.5
-        assert case.updated_at.timestamp() == 1234.5
+        assert case.created_at.timestamp() == 1700000000.5
+        assert case.updated_at.timestamp() == 1700000000.5
 
     def test_update_export_case_refreshes_updated_at(self):
         case = ExportCase.create(
@@ -85,7 +90,7 @@ class TestHttpExport(BaseTestHttp):
             updated_at=10,
         )
 
-        with patch("frigate.api.export.time.time", return_value=2222.0):
+        with patch("frigate.api.export.time.time", return_value=1700000600.0):
             with AuthTestClient(self.app) as client:
                 response = client.patch(
                     f"/cases/{case.id}",
@@ -97,7 +102,7 @@ class TestHttpExport(BaseTestHttp):
         refreshed = ExportCase.get(ExportCase.id == case.id)
         assert refreshed.name == "New name"
         assert refreshed.description == "Updated"
-        assert refreshed.updated_at.timestamp() == 2222.0
+        assert refreshed.updated_at.timestamp() == 1700000600.0
 
     def test_delete_export_case_delete_exports_cancels_queued_jobs(self):
         case = ExportCase.create(
@@ -1099,7 +1104,9 @@ class TestHttpExport(BaseTestHttp):
         )
 
         assert response.status_code == 202
-        assert start_export_job.call_args.args[1].image_path == image_path
+        assert start_export_job.call_args.args[1].image_path == os.path.normpath(
+            image_path
+        )
 
     def test_existing_image_auth_uses_url_separators_on_windows(self):
         from frigate.api import export as export_api
@@ -1141,7 +1148,9 @@ class TestHttpExport(BaseTestHttp):
             response, start_export_job = self._batch_export_with_image(image_path, role)
 
             assert response.status_code == 202, role
-            assert start_export_job.call_args.args[1].image_path == image_path
+            assert start_export_job.call_args.args[1].image_path == os.path.normpath(
+                image_path
+            )
 
     def test_batch_export_non_admin_can_queue(self):
         self._insert_recording("rec-front", "front_door", 100, 400)
@@ -1327,8 +1336,8 @@ class TestHttpExport(BaseTestHttp):
             camera="front_door",
             name="export_1",
             date=100,
-            video_path="/tmp/exp1.mp4",
-            thumb_path="/tmp/exp1.jpg",
+            video_path=_tmp_path("exp1.mp4"),
+            thumb_path=_tmp_path("exp1.jpg"),
             in_progress=False,
         )
         Export.create(
@@ -1336,8 +1345,8 @@ class TestHttpExport(BaseTestHttp):
             camera="front_door",
             name="export_2",
             date=200,
-            video_path="/tmp/exp2.mp4",
-            thumb_path="/tmp/exp2.jpg",
+            video_path=_tmp_path("exp2.mp4"),
+            thumb_path=_tmp_path("exp2.jpg"),
             in_progress=False,
         )
 
@@ -1358,8 +1367,8 @@ class TestHttpExport(BaseTestHttp):
             camera="front_door",
             name="export_1",
             date=100,
-            video_path="/tmp/exp1.mp4",
-            thumb_path="/tmp/exp1.jpg",
+            video_path=_tmp_path("exp1.mp4"),
+            thumb_path=_tmp_path("exp1.jpg"),
             in_progress=False,
         )
 
@@ -1379,8 +1388,8 @@ class TestHttpExport(BaseTestHttp):
             camera="front_door",
             name="export_1",
             date=100,
-            video_path="/tmp/exp1.mp4",
-            thumb_path="/tmp/exp1.jpg",
+            video_path=_tmp_path("exp1.mp4"),
+            thumb_path=_tmp_path("exp1.jpg"),
             in_progress=False,
         )
 
@@ -1412,7 +1421,7 @@ class TestHttpExport(BaseTestHttp):
             name="export_1",
             date=100,
             video_path=f"{os.environ.get('EXPORT_DIR', '/media/frigate/exports')}/exp1.mp4",
-            thumb_path="/tmp/exp1.jpg",
+            thumb_path=_tmp_path("exp1.jpg"),
             in_progress=True,
         )
 
@@ -1436,8 +1445,8 @@ class TestHttpExport(BaseTestHttp):
             camera="front_door",
             name="export_1",
             date=100,
-            video_path="/tmp/exp1.mp4",
-            thumb_path="/tmp/exp1.jpg",
+            video_path=_tmp_path("exp1.mp4"),
+            thumb_path=_tmp_path("exp1.jpg"),
             in_progress=False,
         )
 
@@ -1467,8 +1476,8 @@ class TestHttpExport(BaseTestHttp):
             camera="front_door",
             name="export_1",
             date=100,
-            video_path="/tmp/exp1.mp4",
-            thumb_path="/tmp/exp1.jpg",
+            video_path=_tmp_path("exp1.mp4"),
+            thumb_path=_tmp_path("exp1.jpg"),
             in_progress=False,
         )
         Export.create(
@@ -1476,8 +1485,8 @@ class TestHttpExport(BaseTestHttp):
             camera="front_door",
             name="export_2",
             date=200,
-            video_path="/tmp/exp2.mp4",
-            thumb_path="/tmp/exp2.jpg",
+            video_path=_tmp_path("exp2.mp4"),
+            thumb_path=_tmp_path("exp2.jpg"),
             in_progress=False,
         )
 
@@ -1507,8 +1516,8 @@ class TestHttpExport(BaseTestHttp):
             camera="front_door",
             name="export_1",
             date=100,
-            video_path="/tmp/exp1.mp4",
-            thumb_path="/tmp/exp1.jpg",
+            video_path=_tmp_path("exp1.mp4"),
+            thumb_path=_tmp_path("exp1.jpg"),
             in_progress=False,
             export_case="case1",
         )
@@ -1537,8 +1546,8 @@ class TestHttpExport(BaseTestHttp):
             camera="front_door",
             name="export_1",
             date=100,
-            video_path="/tmp/exp1.mp4",
-            thumb_path="/tmp/exp1.jpg",
+            video_path=_tmp_path("exp1.mp4"),
+            thumb_path=_tmp_path("exp1.jpg"),
             in_progress=False,
         )
 
@@ -1566,8 +1575,8 @@ class TestHttpExport(BaseTestHttp):
             camera="front_door",
             name="export_1",
             date=100,
-            video_path="/tmp/exp1.mp4",
-            thumb_path="/tmp/exp1.jpg",
+            video_path=_tmp_path("exp1.mp4"),
+            thumb_path=_tmp_path("exp1.jpg"),
             in_progress=False,
         )
 
@@ -1592,8 +1601,8 @@ class TestHttpExport(BaseTestHttp):
             camera="front_door",
             name="export_1",
             date=100,
-            video_path="/tmp/exp1.mp4",
-            thumb_path="/tmp/exp1.jpg",
+            video_path=_tmp_path("exp1.mp4"),
+            thumb_path=_tmp_path("exp1.jpg"),
             in_progress=False,
         )
 
@@ -1614,8 +1623,8 @@ class TestHttpExport(BaseTestHttp):
             camera="front_door",
             name="export_1",
             date=100,
-            video_path="/tmp/exp1.mp4",
-            thumb_path="/tmp/exp1.jpg",
+            video_path=_tmp_path("exp1.mp4"),
+            thumb_path=_tmp_path("exp1.jpg"),
             in_progress=False,
         )
 

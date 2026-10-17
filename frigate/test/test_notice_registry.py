@@ -1,7 +1,7 @@
 """Tests for the notice registry and its kind definitions."""
 
 import logging
-import os
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -12,7 +12,7 @@ from playhouse.sqliteq import SqliteQueueDatabase
 from frigate.models import Notice, NoticeStats
 from frigate.notices.registry import NoticeRegistry
 from frigate.notices.types import NOTICE_KINDS, NoticeKind, NoticeSeverity, notice_id
-from frigate.test.const import TEST_DB, TEST_DB_CLEANUPS
+from frigate.test.const import cleanup_test_db, test_db_path
 
 # kinds that switch on the lifecycle knobs, so the tests do not depend on the
 # values the real catalog picks
@@ -49,26 +49,21 @@ class TestNoticeKinds(unittest.TestCase):
 
 class RegistryTestCase(unittest.TestCase):
     def setUp(self):
-        migrate_db = SqliteDatabase("test.db")
+        self._db_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(self._db_dir.cleanup)
+        migrate_db = SqliteDatabase(test_db_path(self._db_dir.name))
         del logging.getLogger("peewee_migrate").handlers[:]
         router = Router(migrate_db)
         router.run()
         migrate_db.close()
-        self.db = SqliteQueueDatabase(TEST_DB)
+        self.db = SqliteQueueDatabase(test_db_path(self._db_dir.name))
         self.db.bind([Notice, NoticeStats])
         self.registry = NoticeRegistry()
         self.listener = MagicMock()
         self.registry.subscribe(self.listener)
 
     def tearDown(self):
-        if not self.db.is_closed():
-            self.db.close()
-
-        try:
-            for file in TEST_DB_CLEANUPS:
-                os.remove(file)
-        except OSError:
-            pass
+        cleanup_test_db(self.db)
 
     def _raise_at(self, timestamp: float, kind: str, **kwargs) -> None:
         with patch("frigate.notices.registry.datetime") as mock_datetime:

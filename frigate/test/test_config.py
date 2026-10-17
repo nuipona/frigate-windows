@@ -113,7 +113,10 @@ class TestConfig(unittest.TestCase):
             with self.subTest(devices=devices):
                 config = {"models": [{"devices": devices}]}
                 frigate_config = FrigateConfig(**(deep_merge(config, self.minimal)))
-                self.assertEqual(frigate_config.primary_model.path, MODEL_CACHE_DIR + os.sep + "cpu_model.tflite")
+                self.assertEqual(
+                    frigate_config.primary_model.path,
+                    MODEL_CACHE_DIR + os.sep + "cpu_model.tflite",
+                )
 
     def test_reserved_camera_name_is_rejected_on_windows(self):
         """A device name is not a file name, so the path layer will not use it."""

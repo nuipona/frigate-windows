@@ -49,7 +49,7 @@ from frigate.const import (
 from frigate.models import Event, Previews, Recordings, Regions, ReviewSegment
 from frigate.output.preview import get_most_recent_preview_frame
 from frigate.track.object_processing import TrackedObjectProcessor
-from frigate.util.ffmpeg import terminate_ffmpeg_stream
+from frigate.util.ffmpeg import ffmpeg_popen_kwargs, terminate_ffmpeg_stream
 from frigate.util.file import (
     get_event_snapshot_bytes,
     get_event_snapshot_path,
@@ -497,7 +497,11 @@ def _run_clip_download(ffmpeg_cmd: list[str], file_path: str) -> Iterator[bytes]
 
     try:
         stderr_file = tempfile.TemporaryFile()
-        ffmpeg = sp.Popen(ffmpeg_cmd, stdout=sp.PIPE, stderr=stderr_file)
+        # group leader, so terminating the stream can address a break event
+        # to ffmpeg's own process group (see ffmpeg_popen_kwargs)
+        ffmpeg = sp.Popen(
+            ffmpeg_cmd, stdout=sp.PIPE, stderr=stderr_file, **ffmpeg_popen_kwargs()
+        )
 
         while True:
             data = ffmpeg.stdout.read(8192)

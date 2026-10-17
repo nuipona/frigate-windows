@@ -308,9 +308,10 @@ def download(url: str, dest: Path) -> None:
     partial = dest.with_name(f"{dest.name}.part")
 
     try:
-        with urllib.request.urlopen(url, timeout=60) as response, open(
-            partial, "wb"
-        ) as out:
+        with (
+            urllib.request.urlopen(url, timeout=60) as response,
+            open(partial, "wb") as out,
+        ):
             while True:
                 chunk = response.read(1024 * 1024)
 
@@ -364,9 +365,7 @@ def install_artifact(
     return installed
 
 
-def install_file(
-    artifact: PinnedFile, layout: BaseLayout, download_dir: Path
-) -> Path:
+def install_file(artifact: PinnedFile, layout: BaseLayout, download_dir: Path) -> Path:
     """Install one digest-pinned model or data file into the config tree."""
     dest_dir = layout.config_dir / artifact.dest_subdir
     target = dest_dir / artifact.filename
@@ -376,7 +375,9 @@ def install_file(
         return target
 
     if target.exists():
-        logger.warning("Replacing %s because its sha256 is not the pinned value", target)
+        logger.warning(
+            "Replacing %s because its sha256 is not the pinned value", target
+        )
 
     cached = download_dir / f"{artifact.name}-{artifact.version}-{artifact.filename}"
     digest_store = download_dir / "digests.json"

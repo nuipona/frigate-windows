@@ -236,8 +236,10 @@ class TestMediaUrlPaths(unittest.TestCase):
         # value is built with the same separators the platform uses
         cache_dir = str(Path(tempfile.gettempdir()) / "frigate-cache")
 
+        media_dir = str(Path(tempfile.gettempdir()) / "frigate-media")
+
         with (
-            patch("frigate.util.platform.get_media_dir", return_value="/media/frigate"),
+            patch("frigate.util.platform.get_media_dir", return_value=media_dir),
             patch("frigate.util.platform.get_cache_dir", return_value=cache_dir),
         ):
             self.assertEqual(
@@ -256,7 +258,10 @@ class TestMediaUrlPaths(unittest.TestCase):
 
         with (
             patch("frigate.util.platform.get_media_dir", return_value=media_dir),
-            patch("frigate.util.platform.get_cache_dir", return_value="/tmp/cache"),
+            patch(
+                "frigate.util.platform.get_cache_dir",
+                return_value=str(Path(tempfile.gettempdir()) / "frigate-cache"),
+            ),
         ):
             path = os.path.join(
                 media_dir, "recordings", "2024-01-01", "10", "front_door", "00.00.mp4"
@@ -268,13 +273,25 @@ class TestMediaUrlPaths(unittest.TestCase):
             self.assertEqual(resolve_media_url_path(to_media_url_path(path)), path)
 
     def test_a_camera_named_like_a_component_keeps_its_path(self):
+        media_dir = str(Path(tempfile.gettempdir()) / "frigate-media")
+
         with (
-            patch("frigate.util.platform.get_media_dir", return_value="/media/frigate"),
-            patch("frigate.util.platform.get_cache_dir", return_value="/tmp/cache"),
+            patch("frigate.util.platform.get_media_dir", return_value=media_dir),
+            patch(
+                "frigate.util.platform.get_cache_dir",
+                return_value=str(Path(tempfile.gettempdir()) / "frigate-cache"),
+            ),
         ):
             self.assertEqual(
                 to_media_url_path(
-                    "/media/frigate/recordings/2024-01-01/10/clips/00.00.mp4"
+                    os.path.join(
+                        media_dir,
+                        "recordings",
+                        "2024-01-01",
+                        "10",
+                        "clips",
+                        "00.00.mp4",
+                    )
                 ),
                 "/recordings/2024-01-01/10/clips/00.00.mp4",
             )
@@ -282,14 +299,22 @@ class TestMediaUrlPaths(unittest.TestCase):
 
 class TestFsType(unittest.TestCase):
     def test_a_mountpoint_prefix_is_not_a_match(self):
-        """``/media2`` is not on the filesystem mounted at ``/media``."""
+        """A sibling directory is not on the filesystem at the mountpoint."""
+        mountpoint = os.path.join(tempfile.gettempdir(), "media")
         partition = MagicMock()
-        partition.mountpoint = "/media"
-        partition.fstype = "ext4"
+        partition.mountpoint = mountpoint
+        partition.fstype = "NTFS"
 
         with patch("psutil.disk_partitions", return_value=[partition]):
-            self.assertEqual(get_fs_type("/media2/recordings"), "")
-            self.assertEqual(get_fs_type("/media/recordings"), "ext4")
+            self.assertEqual(
+                get_fs_type(
+                    os.path.join(tempfile.gettempdir(), "media2", "recordings")
+                ),
+                "",
+            )
+            self.assertEqual(
+                get_fs_type(os.path.join(mountpoint, "recordings")), "NTFS"
+            )
 
 
 class TestServiceStopWatcher(unittest.TestCase):

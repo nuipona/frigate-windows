@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SPECS_DIR = resolve(__dirname, "..", "specs");
 const META_PREFIX = resolve(SPECS_DIR, "_meta");
+const SETTINGS_PREFIX = resolve(SPECS_DIR, "settings");
 
 const BANNED_PATTERNS = [
   {
@@ -65,7 +66,9 @@ function walk(dir) {
 }
 
 function lintFile(file) {
-  if (file.includes("/specs/settings/")) return [];
+  // settings specs are exempt; compare resolved paths, not a "/"-joined
+  // substring, so the exemption also holds with Windows separators
+  if (file.startsWith(SETTINGS_PREFIX)) return [];
 
   const errors = [];
   const text = readFileSync(file, "utf8");

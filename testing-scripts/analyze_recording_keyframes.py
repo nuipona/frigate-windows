@@ -173,9 +173,7 @@ def analyze(ffprobe: str, segment: Path, highlight: bool = False) -> None:
 
     filename_ts = filename_to_timestamp(segment)
     filename_iso = (
-        datetime.datetime.fromtimestamp(
-            filename_ts, tz=datetime.UTC
-        ).isoformat()
+        datetime.datetime.fromtimestamp(filename_ts, tz=datetime.UTC).isoformat()
         if filename_ts is not None
         else "?"
     )
@@ -280,9 +278,7 @@ def main() -> None:
     parser.add_argument(
         "--ffprobe",
         default=None,
-        help=(
-            "Full path to ffprobe.exe (defaults to Frigate's bundled executable)."
-        ),
+        help=("Full path to ffprobe.exe (defaults to Frigate's bundled executable)."),
     )
     parser.add_argument(
         "--timestamp",

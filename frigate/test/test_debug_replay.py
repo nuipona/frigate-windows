@@ -5,9 +5,16 @@ Startup orchestration lives in ``frigate.jobs.debug_replay`` (covered by
 cleanup.
 """
 
+import os
+import tempfile
 import unittest
 import unittest.mock
 from unittest.mock import MagicMock, patch
+
+
+def _tmp_path(*parts: str) -> str:
+    """Native temp path so fixtures carry the separators the OS carries."""
+    return os.path.join(tempfile.gettempdir(), *parts)
 
 
 class TestDebugReplayManagerSession(unittest.TestCase):
@@ -48,9 +55,9 @@ class TestDebugReplayManagerSession(unittest.TestCase):
         manager = DebugReplayManager()
         manager.mark_starting("front", "_replay_front", 100.0, 200.0)
 
-        manager.mark_session_ready(clip_path="/tmp/replay/_replay_front.mp4")
+        manager.mark_session_ready(clip_path=_tmp_path("replay", "_replay_front.mp4"))
 
-        self.assertEqual(manager.clip_path, "/tmp/replay/_replay_front.mp4")
+        self.assertEqual(manager.clip_path, _tmp_path("replay", "_replay_front.mp4"))
         self.assertTrue(manager.active)
 
     def test_clear_session_resets_all_pointers(self) -> None:
@@ -58,7 +65,7 @@ class TestDebugReplayManagerSession(unittest.TestCase):
 
         manager = DebugReplayManager()
         manager.mark_starting("front", "_replay_front", 100.0, 200.0)
-        manager.mark_session_ready("/tmp/replay/clip.mp4")
+        manager.mark_session_ready(_tmp_path("replay", "clip.mp4"))
 
         manager.clear_session()
 
@@ -98,7 +105,7 @@ class TestDebugReplayManagerStop(unittest.TestCase):
 
         manager = DebugReplayManager()
         manager.mark_starting("front", "_replay_front", 100.0, 200.0)
-        manager.mark_session_ready("/tmp/replay/_replay_front.mp4")
+        manager.mark_session_ready(_tmp_path("replay", "_replay_front.mp4"))
 
         camera_config = MagicMock()
         frigate_config = MagicMock()
@@ -196,7 +203,7 @@ class TestDebugReplayManagerPublishCamera(unittest.TestCase):
             manager.publish_camera(
                 source_camera="front",
                 replay_name="_replay_front",
-                clip_path="/tmp/clip.mp4",
+                clip_path=_tmp_path("clip.mp4"),
                 frigate_config=frigate_config,
                 config_publisher=publisher,
             )
@@ -236,7 +243,7 @@ class TestDebugReplayManagerPublishCamera(unittest.TestCase):
                 manager.publish_camera(
                     source_camera="front",
                     replay_name="_replay_front",
-                    clip_path="/tmp/clip.mp4",
+                    clip_path=_tmp_path("clip.mp4"),
                     frigate_config=frigate_config,
                     config_publisher=publisher,
                 )

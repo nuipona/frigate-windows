@@ -7,6 +7,7 @@ DB-lookup path. These are pure functions/DB lookups — no HTTP stack involved.
 import datetime
 import logging
 import os
+import tempfile
 import unittest
 
 from peewee import SqliteDatabase
@@ -20,8 +21,9 @@ from frigate.api.media_auth import (
     resolve_media_uri,
 )
 from frigate.config import FrigateConfig
+from frigate.const import EXPORT_DIR
 from frigate.models import Event, Export, Recordings, ReviewSegment
-from frigate.test.const import TEST_DB, TEST_DB_CLEANUPS
+from frigate.test.const import cleanup_test_db, test_db_path
 
 _CONFIG = {
     "mqtt": {"host": "mqtt"},
@@ -208,22 +210,18 @@ class TestExportResolution(unittest.TestCase):
     """Export resolution requires a DB lookup."""
 
     def setUp(self):
-        migrate_db = SqliteDatabase("test.db")
+        self._db_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(self._db_dir.cleanup)
+        migrate_db = SqliteDatabase(test_db_path(self._db_dir.name))
         del logging.getLogger("peewee_migrate").handlers[:]
         Router(migrate_db).run()
         migrate_db.close()
-        self.db = SqliteQueueDatabase(TEST_DB)
+        self.db = SqliteQueueDatabase(test_db_path(self._db_dir.name))
         self.db.bind([Event, ReviewSegment, Recordings, Export])
         self.config = FrigateConfig(**_CONFIG)
 
     def tearDown(self):
-        if not self.db.is_closed():
-            self.db.close()
-        for f in TEST_DB_CLEANUPS:
-            try:
-                os.remove(f)
-            except OSError:
-                pass
+        cleanup_test_db(self.db)
 
     def _insert_export(self, export_id, camera, filename):
         Export.insert(
@@ -231,8 +229,8 @@ class TestExportResolution(unittest.TestCase):
             camera=camera,
             name=f"export-{export_id}",
             date=int(datetime.datetime.now().timestamp()),
-            video_path=f"/media/frigate/exports/{filename}",
-            thumb_path=f"/media/frigate/exports/{filename}.jpg",
+            video_path=os.path.join(EXPORT_DIR, filename),
+            thumb_path=os.path.join(EXPORT_DIR, f"{filename}.jpg"),
             in_progress=False,
         ).execute()
 

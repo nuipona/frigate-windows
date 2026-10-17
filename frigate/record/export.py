@@ -1094,7 +1094,7 @@ class RecordingExporter(threading.Thread):
         return meta_path
 
     def save_thumbnail(self, id: str) -> str:
-        thumb_path = os.path.join(CLIPS_DIR, f"export/{id}.webp")
+        thumb_path = os.path.join(CLIPS_DIR, "export", f"{id}.webp")
 
         if self.user_provided_image is not None and os.path.isfile(
             self.user_provided_image

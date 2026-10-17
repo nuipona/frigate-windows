@@ -117,7 +117,9 @@ def sanitize_contained_path(path: str | None, base: str) -> str | None:
     if not is_contained_in(sanitized, base):
         return None
 
-    return sanitized
+    # sanitize_filepath leaves URL-style "/" separators; callers use the
+    # result as a filesystem path, so hand back the native form.
+    return os.path.normpath(sanitized)
 
 
 def get_trigger_thumbnail_path(camera_name: str, data: str) -> str | None:

@@ -17,7 +17,26 @@ from peewee import OperationalError
 
 from frigate.db.sqlitevecq import SqliteVecQueueDatabase
 
-VEC_EXTENSION_PATH = "/usr/local/lib/vec0.so"
+
+def _vec_extension_path() -> str:
+    """Native loadable vec0 path, resolved the way production resolves it."""
+    try:
+        from sqlite_vec import loadable_path
+
+        base = loadable_path()
+    except Exception:
+        return ""
+
+    # load_extension appends the platform suffix itself, so the bare path
+    # sqlite_vec reports needs the suffix added back to test for existence
+    for candidate in (base, f"{base}.dll", f"{base}.so", f"{base}.dylib"):
+        if os.path.exists(candidate):
+            return candidate
+
+    return ""
+
+
+VEC_EXTENSION_PATH = _vec_extension_path()
 
 
 class TestDeleteEmbeddings(unittest.TestCase):

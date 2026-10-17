@@ -20,6 +20,11 @@ from frigate.record.maintainer import (
 )
 
 
+def _tmp_path(*parts: str) -> str:
+    """Native temp path so fixtures carry the separators the OS carries."""
+    return os.path.join(tempfile.gettempdir(), *parts)
+
+
 def _build_chaining_maintainer(
     t0: float, retention: str = "continuous"
 ) -> RecordingMaintainer:
@@ -87,7 +92,7 @@ async def _validate_segment(
             reviews=[],
             recording={
                 "start_time": start,
-                "cache_path": f"/tmp/cache/test_cam@chain{offset}.mp4",
+                "cache_path": _tmp_path("cache", f"test_cam@chain{offset}.mp4"),
                 "stream_type": "main",
             },
         )
@@ -141,7 +146,7 @@ class TestValidateAndMoveSubSegment(unittest.IsolatedAsyncioTestCase):
         camera_config.record.sub.enabled = False
 
         maintainer = self._build_maintainer(camera_config)
-        cache_path = "/tmp/cache/test_cam@sub@20260610143022+0000.mp4"
+        cache_path = _tmp_path("cache", "test_cam@sub@20260610143022+0000.mp4")
 
         result = await maintainer.validate_and_move_segment(
             "test_cam",
@@ -173,7 +178,7 @@ class TestValidateAndMoveSubSegment(unittest.IsolatedAsyncioTestCase):
         now = datetime.datetime.now(datetime.UTC)
         start_time = now - datetime.timedelta(seconds=20)
         end_time = now - datetime.timedelta(seconds=10)
-        cache_path = "/tmp/cache/test_cam@sub@20260610143022+0000.mp4"
+        cache_path = _tmp_path("cache", "test_cam@sub@20260610143022+0000.mp4")
 
         # pre-fill the end time cache so no ffprobe is attempted; the
         # audio and codec fields stay unknown without one
@@ -243,7 +248,7 @@ class TestSegmentAudioPresence(unittest.IsolatedAsyncioTestCase):
 
                 now = datetime.datetime.now(datetime.UTC)
                 start_time = now - datetime.timedelta(seconds=20)
-                cache_path = "/tmp/cache/test_cam@20260610143022+0000.mp4"
+                cache_path = _tmp_path("cache", "test_cam@20260610143022+0000.mp4")
                 # a processed frame past the segment end marks it ready
                 maintainer.object_recordings_info["test_cam"] = [
                     (now.timestamp(), [], [], [])
@@ -375,16 +380,21 @@ class TestSegmentPathTime(unittest.IsolatedAsyncioTestCase):
     def test_parses_main_and_sub_names(self):
         expected = datetime.datetime(2026, 6, 10, 14, 30, 22, tzinfo=datetime.UTC)
         self.assertEqual(
-            segment_path_time("/tmp/cache/test_cam@20260610143022+0000.mp4"), expected
+            segment_path_time(_tmp_path("cache", "test_cam@20260610143022+0000.mp4")),
+            expected,
         )
         self.assertEqual(
-            segment_path_time("/tmp/cache/test_cam@sub@20260610143022+0000.mp4"),
+            segment_path_time(
+                _tmp_path("cache", "test_cam@sub@20260610143022+0000.mp4")
+            ),
             expected,
         )
 
     def test_returns_none_for_unparsable_names(self):
-        self.assertIsNone(segment_path_time("/tmp/cache/garbage.mp4"))
-        self.assertIsNone(segment_path_time("/tmp/cache/test_cam@notadate.mp4"))
+        self.assertIsNone(segment_path_time(_tmp_path("cache", "garbage.mp4")))
+        self.assertIsNone(
+            segment_path_time(_tmp_path("cache", "test_cam@notadate.mp4"))
+        )
 
     async def test_sub_second_segments_get_distinct_paths(self):
         # two cache files a second apart whose resolved starts both land in
@@ -542,7 +552,7 @@ class TestSegmentStartChaining(unittest.IsolatedAsyncioTestCase):
                 "start_time": datetime.datetime.fromtimestamp(
                     self.T0 + offset, tz=datetime.UTC
                 ),
-                "cache_path": f"/tmp/cache/test_cam@chain{offset}.mp4",
+                "cache_path": _tmp_path("cache", f"test_cam@chain{offset}.mp4"),
                 "stream_type": "main",
             }
             for offset in (0, 10)
@@ -634,7 +644,7 @@ class TestSegmentStartChaining(unittest.IsolatedAsyncioTestCase):
         # B was discarded by motion retention, only A and C moved
         self.assertEqual(len(calls), 2)
         maintainer.drop_segment.assert_called_once_with(
-            "/tmp/cache/test_cam@chain10.mp4"
+            _tmp_path("cache", "test_cam@chain10.mp4")
         )
         # C snaps to B's end (T0 + 20.8), not A's end (T0 + 10.4)
         self.assertAlmostEqual(calls[1].args[2].timestamp(), self.T0 + 20.8, places=3)

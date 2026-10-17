@@ -1,5 +1,7 @@
 import datetime
+import os
 import sys
+import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -31,6 +33,11 @@ for name, orig in _originals.items():
         sys.modules.pop(name, None)
     else:
         sys.modules[name] = orig
+
+
+def _tmp_path(*parts: str) -> str:
+    """Native temp path so fixtures carry the separators the OS carries."""
+    return os.path.join(tempfile.gettempdir(), *parts)
 
 
 class TestMaintainer(unittest.IsolatedAsyncioTestCase):
@@ -105,7 +112,7 @@ class TestMaintainer(unittest.IsolatedAsyncioTestCase):
         now = datetime.datetime.now(datetime.UTC)
         start_time = now - datetime.timedelta(seconds=20)
         end_time = now - datetime.timedelta(seconds=10)
-        cache_path = "/tmp/cache/test_cam@20260417150000+0000.mp4"
+        cache_path = _tmp_path("cache", "test_cam@20260417150000+0000.mp4")
 
         maintainer.end_time_cache = {
             cache_path: (end_time, 10.0, None, None, None, None, None)
@@ -152,7 +159,7 @@ class TestMaintainer(unittest.IsolatedAsyncioTestCase):
         now = datetime.datetime.now(datetime.UTC)
         start_time = now - datetime.timedelta(seconds=20)
         end_time = now - datetime.timedelta(seconds=10)
-        cache_path = "/tmp/cache/test_cam@20260417150000+0000.mp4"
+        cache_path = _tmp_path("cache", "test_cam@20260417150000+0000.mp4")
 
         maintainer.end_time_cache = {
             cache_path: (end_time, 10.0, False, None, None, None, [])
@@ -220,7 +227,7 @@ class TestMaintainer(unittest.IsolatedAsyncioTestCase):
         maintainer = RecordingMaintainer(config, stop_event)
 
         now = datetime.datetime.now(datetime.UTC)
-        cache_path = "/tmp/cache/test_cam@20260417150000+0000.mp4"
+        cache_path = _tmp_path("cache", "test_cam@20260417150000+0000.mp4")
 
         maintainer.end_time_cache = {
             cache_path: (
@@ -325,10 +332,12 @@ class TestCacheFilesInUse(unittest.TestCase):
         )
 
     def test_a_posix_ffmpeg_is_recognised(self):
-        process = self._process("ffmpeg", ["/tmp/cache/e2e@20260101000000+0000.mp4"])
+        process = self._process(
+            "ffmpeg", [_tmp_path("cache", "e2e@20260101000000+0000.mp4")]
+        )
 
         self.assertEqual(
-            self._in_use("/tmp/cache", [process]), {"e2e@20260101000000+0000.mp4"}
+            self._in_use(_tmp_path("cache"), [process]), {"e2e@20260101000000+0000.mp4"}
         )
 
     def test_other_processes_and_other_files_are_ignored(self):
@@ -343,7 +352,7 @@ class TestCacheFilesInUse(unittest.TestCase):
         process = MagicMock()
         process.name.side_effect = psutil.AccessDenied()
 
-        self.assertEqual(self._in_use("/tmp/cache", [process]), set())
+        self.assertEqual(self._in_use(_tmp_path("cache"), [process]), set())
 
 
 if __name__ == "__main__":

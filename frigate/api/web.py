@@ -162,13 +162,10 @@ class InProcessAuth:
         incoming_headers = {
             key.lower(): value for key, value in scope.get("headers", [])
         }
-        supplied_secret = incoming_headers.get(b"x-proxy-secret", b"").decode(
-            "latin-1"
-        )
+        supplied_secret = incoming_headers.get(b"x-proxy-secret", b"").decode("latin-1")
 
-        mapped_identity_enabled = (
-            not self.api_app.frigate_config.auth.enabled
-            and bool(proxy.header_map.user or proxy.header_map.role)
+        mapped_identity_enabled = not self.api_app.frigate_config.auth.enabled and bool(
+            proxy.header_map.user or proxy.header_map.role
         )
         secret_matches = bool(configured_secret) and secrets.compare_digest(
             supplied_secret, configured_secret

@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from frigate.api.media import _run_clip_download
+from frigate.util.ffmpeg import ffmpeg_popen_kwargs
 
 # more than the 64 KB a pipe holds, so an undrained stderr blocks ffmpeg
 STDERR_FLOOD_BYTES = 256 * 1024
@@ -144,6 +145,30 @@ class TestRunClipDownload(unittest.TestCase):
 
         self.assertEqual(data, PAYLOAD)
         logger.error.assert_not_called()
+
+    def test_ffmpeg_starts_in_its_own_process_group(self):
+        """A clip ffmpeg must be a group leader to be stopped safely.
+
+        Without CREATE_NEW_PROCESS_GROUP the CTRL_BREAK_EVENT used to stop
+        it is addressed to a pid that is not a process group, and the event
+        can take down Frigate's own process group instead (this killed the
+        Windows unit suite mid-test).
+        """
+        spawns: list[dict] = []
+        real_popen = sp.Popen
+
+        def spy(*args, **kwargs):
+            spawns.append(kwargs)
+            return real_popen(*args, **kwargs)
+
+        with patch("subprocess.Popen", spy):
+            self.collect(fake_ffmpeg(f"sys.stdout.buffer.write({PAYLOAD!r})"))
+
+        self.assertEqual(len(spawns), 1)
+        self.assertEqual(
+            spawns[0].get("creationflags"),
+            ffmpeg_popen_kwargs().get("creationflags"),
+        )
 
     def test_client_disconnect_kills_ffmpeg_and_removes_playlist(self):
         processes: list[sp.Popen] = []

@@ -555,7 +555,9 @@ def main(argv: list[str] | None = None) -> int:
             logger.error("  %s", problem)
         return 1
 
-    OUTPUT_SPEC.write_text(rendered)
+    # explicit UTF-8: the spec contains non-ASCII punctuation and the
+    # Windows default text encoding is a legacy code page, not UTF-8
+    OUTPUT_SPEC.write_text(rendered, encoding="utf-8")
     _report(counts, flagged, unmatched, normalized)
     logger.info("\nWrote %s", OUTPUT_SPEC.relative_to(REPO_ROOT))
     return 0
@@ -569,7 +571,7 @@ def _check(rendered: str, problems: list[str]) -> int:
             logger.error("  %s", problem)
         return 1
 
-    current = OUTPUT_SPEC.read_text() if OUTPUT_SPEC.exists() else ""
+    current = OUTPUT_SPEC.read_text(encoding="utf-8") if OUTPUT_SPEC.exists() else ""
     if current == rendered:
         logger.info("%s is up to date", name)
         return 0
