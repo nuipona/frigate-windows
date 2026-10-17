@@ -702,7 +702,9 @@ def motion_activity(
     df = df[df["camera"] != ""]
 
     # change types for output
-    df.index = df.index.as_unit("s").astype(int)
+    # int64 explicitly: bare "int" means int32 on Windows, which pandas
+    # refuses to convert datetime64 into
+    df.index = df.index.as_unit("s").astype("int64")
     normalized = df.reset_index().to_dict("records")
     return JSONResponse(content=normalized)
 

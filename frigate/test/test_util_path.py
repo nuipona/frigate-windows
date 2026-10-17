@@ -65,7 +65,7 @@ class TestSafeJoin(unittest.TestCase):
     def test_joins_multiple_segments(self):
         self.assertEqual(
             safe_join(self.base, "model1", "dataset", "none"),
-            os.path.join(self.base, "model1", "dataset", "none"),
+            os.path.normpath(os.path.join(self.base, "model1", "dataset", "none")),
         )
 
     def test_rejects_empty_segment(self):
